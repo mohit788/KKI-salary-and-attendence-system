@@ -12,6 +12,7 @@ import {
   Building2,
   FileText
 } from 'lucide-react';
+import { formatHours } from '../utils/formatters';
 
 export default function WorkerDetail({ 
   staffNo, 
@@ -142,22 +143,22 @@ export default function WorkerDetail({
           <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-3 col-span-2 sm:col-span-1">
             <p className="text-[10px] font-semibold uppercase text-indigo-300">Total Overtime Hours</p>
             <p className="text-lg font-bold text-indigo-300 font-mono mt-0.5">
-              {(payroll?.totalCombinedOtHours || ((payroll?.totalOtHours || 0) + (payroll?.totalSundayOtHours || 0))).toFixed(1)} hrs 🔥
+              {formatHours(payroll?.totalCombinedOtHours || ((payroll?.totalOtHours || 0) + (payroll?.totalSundayOtHours || 0)))} 🔥
             </p>
             <p className="text-[10px] text-indigo-400 font-mono">
-              {payroll?.totalOtHours || 0}h Wkday + {payroll?.totalSundayOtHours || 0}h Sun
+              {formatHours(payroll?.totalOtHours || 0)} Wkday + {formatHours(payroll?.totalSundayOtHours || 0)} Sun
             </p>
           </div>
 
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
             <p className="text-[10px] font-semibold uppercase text-amber-400">Sunday OT ☀️</p>
-            <p className="text-lg font-bold text-amber-300 font-mono mt-0.5">{payroll?.totalSundayOtHours || 0} hrs</p>
+            <p className="text-lg font-bold text-amber-300 font-mono mt-0.5">{formatHours(payroll?.totalSundayOtHours || 0)}</p>
             <p className="text-[10px] text-amber-400 font-mono">₹{(payroll?.sundayOtPay || 0).toLocaleString('en-IN')} (2.0x)</p>
           </div>
 
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3">
             <p className="text-[10px] font-semibold uppercase text-slate-400">Total Worked Hours</p>
-            <p className="text-lg font-bold text-sky-300 font-mono mt-0.5">{payroll?.totalWorkedHours || 0} hrs</p>
+            <p className="text-lg font-bold text-sky-300 font-mono mt-0.5">{formatHours(payroll?.totalWorkedHours || 0)}</p>
             <p className="text-[10px] text-slate-500">{payroll?.sundayWorkedDays || 0} Sunday(s) worked</p>
           </div>
 
@@ -229,8 +230,8 @@ export default function WorkerDetail({
                 <th className="px-4 py-3">Raw Swipes</th>
                 <th className="px-4 py-3">Effective In</th>
                 <th className="px-4 py-3">Effective Out</th>
-                <th className="px-4 py-3 text-center">Reg Hrs</th>
-                <th className="px-4 py-3 text-center">OT Hrs</th>
+                <th className="px-4 py-3 text-center">Reg Hrs (8h Duty)</th>
+                <th className="px-4 py-3 text-center">OT Hrs (After 8h Work)</th>
                 <th className="px-4 py-3 text-center">Sun OT</th>
                 <th className="px-4 py-3 text-center">Total Hrs</th>
                 <th className="px-4 py-3 text-center">Status</th>
@@ -257,19 +258,19 @@ export default function WorkerDetail({
                   </td>
 
                   <td className="px-4 py-3 text-center font-mono text-slate-300">
-                    {r.regular_hours || 0} h
+                    {formatHours(r.regular_hours)}
                   </td>
 
                   <td className="px-4 py-3 text-center font-mono text-indigo-300 font-medium">
-                    {r.ot_hours || 0} h
+                    {r.ot_hours > 0 ? formatHours(r.ot_hours) : '0h'}
                   </td>
 
                   <td className="px-4 py-3 text-center font-mono text-amber-300 font-medium">
-                    {r.sunday_ot_hours > 0 ? `${r.sunday_ot_hours} h ☀️` : '—'}
+                    {r.sunday_ot_hours > 0 ? `${formatHours(r.sunday_ot_hours)} ☀️` : '—'}
                   </td>
 
                   <td className="px-4 py-3 text-center font-mono font-bold text-white">
-                    {r.total_hours || 0} h
+                    {formatHours(r.total_hours)}
                   </td>
 
                   <td className="px-4 py-3 text-center">

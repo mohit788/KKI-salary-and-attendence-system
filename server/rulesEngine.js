@@ -20,12 +20,49 @@ function minsToTime(mins) {
 }
 
 /**
+ * Formats decimal hours into real clock time representation (e.g. 8.5 -> "8h 30m" or "8:30 hrs").
+ * @param {number|string} decimalHours 
+ * @param {'hm'|'clock'|'verbose'} format 
+ */
+function formatHours(decimalHours, format = 'hm') {
+  if (decimalHours === null || decimalHours === undefined || decimalHours === '') {
+    return format === 'clock' ? '0:00 hrs' : '0h';
+  }
+
+  const num = Number(decimalHours);
+  if (isNaN(num) || num === 0) {
+    return format === 'clock' ? '0:00 hrs' : '0h';
+  }
+
+  const isNegative = num < 0;
+  const absNum = Math.abs(num);
+  const totalMins = Math.round(absNum * 60);
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  const prefix = isNegative ? '-' : '';
+
+  if (format === 'clock') {
+    return `${prefix}${hrs}:${String(mins).padStart(2, '0')} hrs`;
+  }
+
+  if (format === 'verbose') {
+    if (hrs === 0) return `${prefix}${mins} mins`;
+    if (mins === 0) return `${prefix}${hrs} hr${hrs > 1 ? 's' : ''}`;
+    return `${prefix}${hrs} hr${hrs > 1 ? 's' : ''} ${mins} min${mins > 1 ? 's' : ''}`;
+  }
+
+  if (mins === 0) return `${prefix}${hrs}h`;
+  if (hrs === 0) return `${prefix}${mins}m`;
+  return `${prefix}${hrs}h ${String(mins).padStart(2, '0')}m`;
+}
+
+/**
  * Calculates effective first IN time using late-arrival grace slab rule
  * @param {string} rawInTime - HH:MM
- * @param {string} shiftStart - HH:MM (default 08:30)
+ * @param {string} shiftStart - HH:MM (default 08:00)
  * @param {number} slabMinutes - default 30
  */
-function getEffectiveFirstIn(rawInTime, shiftStart = '08:30', slabMinutes = 30) {
+function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30) {
   const inMins = timeToMins(rawInTime);
   const shiftMins = timeToMins(shiftStart);
 
@@ -47,21 +84,21 @@ function getEffectiveFirstIn(rawInTime, shiftStart = '08:30', slabMinutes = 30) 
 }
 
 /**
- * Compute daily attendance, regular hours, OT hours, and status
- * @param {Array<string>} timestamps - array of HH:MM timestamps ["07:54", "12:33", "14:24", "18:36"]
+ * Compute daily attendance, regular hours (8h duty), OT hours (after completing 8h work + lunch), and status
+ * @param {Array<string>} timestamps - array of HH:MM timestamps ["07:54", "16:30"] or ["08:31", "18:30"]
  * @param {Object} settings - rule parameters
  * @param {string} weekday - "Mon", "Tue", "Sun" etc.
  * @param {Array<Object>} customRules - list of active custom rules
  */
 function computeDailyAttendance(timestamps, settings = {}, weekday = '', customRules = []) {
-  const shiftStart = settings.shift_start || '08:30';
+  const shiftStart = settings.shift_start || '08:00';
   const shiftEnd = settings.shift_end || '16:30';
   const slabMinutes = parseInt(settings.grace_slab_minutes || 30, 10);
   const otRounding = settings.ot_rounding || 'minutes';
   const shortThreshold = parseFloat(settings.short_hours_threshold || 4.0);
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
   const maxOtHours = parseFloat(settings.max_ot_hours || 0);
-  const lunchDeductionMins = parseInt(settings.lunch_deduction_mins || 0, 10);
+  const lunchDeductionMins = parseInt(settings.lunch_deduction_mins !== undefined ? settings.lunch_deduction_mins : 30, 10);
   const latePenaltyThresholdMins = parseInt(settings.late_penalty_threshold_mins || 120, 10);
 
   // No punches -> Absent
@@ -73,6 +110,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
       punchPairsFormatted: '',
       regularHours: 0,
       otHours: 0,
+      sundayOtHours: 0,
       totalHours: 0,
       lateMinutes: 0,
       status: isWeeklyOff ? 'Weekly Off (Paid)' : 'Absent',
@@ -87,14 +125,13 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
       punchPairsFormatted: timestamps.join(' ➔ '),
       regularHours: 0,
       otHours: 0,
+      sundayOtHours: 0,
       totalHours: 0,
       lateMinutes: 0,
       status: 'Incomplete',
     };
   }
 
-  const shiftStartMins = timeToMins(shiftStart);
-  const shiftEndMins = timeToMins(shiftEnd);
   const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
 
   // Span 1: apply grace slab to first IN punch
@@ -105,11 +142,10 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     slabMinutes
   );
 
-  let totalRegularMins = 0;
-  let totalOtMins = 0;
-  let totalSundayOtMins = 0;
-  const punchPairStrings = [];
+  let totalRawWorkedMins = 0;
+  let totalBreakMins = 0;
   let maxMidDayExitMins = 0;
+  const punchPairStrings = [];
 
   // Process all (IN, OUT) pairs
   for (let i = 0; i < timestamps.length; i += 2) {
@@ -118,14 +154,15 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 
     punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
 
-    // Check mid-day exit duration between previous OUT and current IN
+    // Check break duration between previous OUT and current IN
     if (i >= 2) {
       const prevOut = timestamps[i - 1];
       const prevOutMins = timeToMins(prevOut);
       const curInMins = timeToMins(rawIn);
       if (curInMins > prevOutMins) {
-        const exitMins = curInMins - prevOutMins;
-        if (exitMins > maxMidDayExitMins) maxMidDayExitMins = exitMins;
+        const breakSpan = curInMins - prevOutMins;
+        totalBreakMins += breakSpan;
+        if (breakSpan > maxMidDayExitMins) maxMidDayExitMins = breakSpan;
       }
     }
 
@@ -134,33 +171,58 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 
     if (outMins <= inMins) continue;
 
-    // SUNDAY / WEEKLY OFF: ALL worked time = Overtime (no regular hours)
-    if (isWeeklyOff) {
-      const totalSpan = outMins - inMins;
-      totalSundayOtMins += totalSpan;
-    } else {
-      // Regular window is from inMins to shiftEndMins (4:30 PM)
-      const regStart = Math.max(inMins, Math.min(inMins, shiftEndMins));
-      const regEnd = Math.min(outMins, shiftEndMins);
-      const regSpan = Math.max(0, regEnd - regStart);
+    const span = outMins - inMins;
+    totalRawWorkedMins += span;
+  }
 
-      // Overtime window is after shiftEndMins (4:30 PM)
-      const otStart = Math.max(inMins, shiftEndMins);
-      const otEnd = Math.max(outMins, shiftEndMins);
-      const otSpan = Math.max(0, otEnd - otStart);
-
-      totalRegularMins += regSpan;
-      totalOtMins += otSpan;
+  // SUNDAY / WEEKLY OFF: ALL worked time = Overtime (no regular hours)
+  if (isWeeklyOff) {
+    let totalSundayOtMins = totalRawWorkedMins;
+    if (otRounding === '30min_block' || slabMinutes > 0) {
+      const block = slabMinutes > 0 ? slabMinutes : 30;
+      totalSundayOtMins = Math.floor(totalSundayOtMins / block) * block;
     }
+
+    const sundayOtHours = +(totalSundayOtMins / 60).toFixed(2);
+    const totalHours = sundayOtHours;
+    const finalOutTime = timestamps[timestamps.length - 1];
+    const status = totalHours > 0 ? 'Weekly Off (Worked OT)' : 'Weekly Off (Paid)';
+
+    return {
+      effectiveIn: effectiveInTime,
+      effectiveOut: finalOutTime,
+      punchPairsFormatted: punchPairStrings.join(' | '),
+      regularHours: 0,
+      otHours: 0,
+      sundayOtHours,
+      totalHours,
+      lateMinutes: lateMins,
+      status,
+    };
   }
 
-  // For non-Sunday: Apply Lunch / Break Time Deduction if shift exceeds 5 hours (300 mins)
-  if (!isWeeklyOff && lunchDeductionMins > 0 && totalRegularMins > 300) {
-    totalRegularMins = Math.max(0, totalRegularMins - lunchDeductionMins);
+  // REGULAR WORKING DAY:
+  // 1. Handle Lunch Deduction (UNPAID 30 minutes):
+  // 30 minutes lunch is not counted as working hours and not paid.
+  // If the worker took punched break(s) >= lunchDeductionMins, the lunch break was already excluded.
+  // Otherwise, if shift worked exceeds 5 hours (300 mins), deduct the remaining lunch minutes.
+  let effectiveLunchDeduct = 0;
+  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 300) {
+    const remainingLunch = lunchDeductionMins - totalBreakMins;
+    effectiveLunchDeduct = Math.max(0, Math.min(remainingLunch, totalRawWorkedMins - 300));
   }
 
-  // Apply Active Custom Rules (only for non-Sunday/non-weekly-off days)
-  if (!isWeeklyOff && Array.isArray(customRules)) {
+  const netWorkedMins = Math.max(0, totalRawWorkedMins - effectiveLunchDeduct);
+
+  // 2. Standard duty is 8 hours (480 minutes) of actual work:
+  // Regular work is capped at 480 minutes (8.0 hours).
+  // Overtime starts only AFTER completing the 8 hours duty!
+  const standardDailyDutyMins = 480;
+  let totalRegularMins = Math.min(netWorkedMins, standardDailyDutyMins);
+  let totalOtMins = Math.max(0, netWorkedMins - standardDailyDutyMins);
+
+  // 3. Apply Active Custom Rules (mid-day exit & late penalty)
+  if (Array.isArray(customRules)) {
     customRules.forEach(rule => {
       if (!rule || !rule.is_active) return;
 
@@ -178,29 +240,25 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     });
   }
 
-  // Apply OT rounding if configured as 30min_block
-  if (otRounding === '30min_block') {
-    totalOtMins = Math.floor(totalOtMins / 30) * 30;
-    totalSundayOtMins = Math.floor(totalSundayOtMins / 30) * 30;
-  }
+  // 4. Apply 30-minute block rounding to both regular hours and overtime (no exact fraction minutes)
+  const roundingBlock = (otRounding === '30min_block' || slabMinutes > 0) ? (slabMinutes || 30) : 30;
+  totalRegularMins = Math.floor(totalRegularMins / roundingBlock) * roundingBlock;
+  totalOtMins = Math.floor(totalOtMins / roundingBlock) * roundingBlock;
 
-  // Apply Max OT Cap if configured (> 0) — only for regular OT, Sunday OT is uncapped
+  // 5. Apply Max OT Cap if configured (> 0)
   if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
     totalOtMins = maxOtHours * 60;
   }
 
-  // For Sunday: regularHours = 0, all time is Sunday OT
-  const regularHours = isWeeklyOff ? 0 : +(totalRegularMins / 60).toFixed(2);
-  const otHours = isWeeklyOff ? 0 : +(totalOtMins / 60).toFixed(2);
-  const sundayOtHours = isWeeklyOff ? +(totalSundayOtMins / 60).toFixed(2) : 0;
-  const totalHours = +(regularHours + otHours + sundayOtHours).toFixed(2);
+  const regularHours = +(totalRegularMins / 60).toFixed(2);
+  const otHours = +(totalOtMins / 60).toFixed(2);
+  const sundayOtHours = 0;
+  const totalHours = +(regularHours + otHours).toFixed(2);
 
   const finalOutTime = timestamps[timestamps.length - 1];
 
   let status = 'Present (Full)';
-  if (isWeeklyOff && totalHours > 0) {
-    status = 'Weekly Off (Worked OT)';
-  } else if (lateMins >= latePenaltyThresholdMins || totalHours < shortThreshold) {
+  if (lateMins >= latePenaltyThresholdMins || totalHours < shortThreshold) {
     status = 'Present (Short)';
   }
 
@@ -219,7 +277,6 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 
 /**
  * Apply Sunday / Weekly-Off Forfeiture Logic to a full month of records per worker
- * ENHANCED: Multiple forfeiture rules
  * @param {Array<Object>} dailyRecords - Array of daily attendance objects sorted by date
  * @param {Object} settings
  */
@@ -242,7 +299,7 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
 
     if (isWeeklyOff && rec.status.includes('Weekly Off')) {
       // Don't forfeit Sunday if worker worked OT that day
-      if (rec.status === 'Weekly Off (Worked OT)' || (rec.sundayOtHours && rec.sundayOtHours > 0)) {
+      if (rec.status === 'Weekly Off (Worked OT)' || (rec.sundayOtHours && rec.sundayOtHours > 0) || (rec.sunday_ot_hours && rec.sunday_ot_hours > 0)) {
         rec.status = 'Weekly Off (Worked OT)';
         continue;
       }
@@ -291,6 +348,7 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
 module.exports = {
   timeToMins,
   minsToTime,
+  formatHours,
   getEffectiveFirstIn,
   computeDailyAttendance,
   applyWeeklyOffForfeiture,

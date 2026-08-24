@@ -21,6 +21,7 @@ import {
   ChevronRight,
   Sparkles
 } from 'lucide-react';
+import { formatHours } from '../utils/formatters';
 
 export default function Dashboard({ 
   metrics, 
@@ -345,7 +346,7 @@ export default function Dashboard({
                     </span>
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Daily punch entries, swipe pairs, regular hours, overtime (after 4:30 PM), and status
+                    Daily punch entries, swipe pairs, regular hours (8h duty), overtime (after 8h work + 30m lunch), and status
                   </p>
                 </div>
               </div>
@@ -379,8 +380,8 @@ export default function Dashboard({
                     <th className="py-3 px-4">Punch Swipes (Pairs)</th>
                     <th className="py-3 px-4">Effective IN</th>
                     <th className="py-3 px-4">Effective OUT</th>
-                    <th className="py-3 px-4 text-center">Reg Hrs</th>
-                    <th className="py-3 px-4 text-center text-amber-400">OT Hrs (After 4:30)</th>
+                    <th className="py-3 px-4 text-center">Reg Hrs (8h Duty)</th>
+                    <th className="py-3 px-4 text-center text-amber-400">OT Hrs (After 8h Work)</th>
                     <th className="py-3 px-4 text-center">Late Mins</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4 text-right">Action</th>
@@ -456,10 +457,10 @@ export default function Dashboard({
                             {r.effective_out || '—'}
                           </td>
                           <td className="py-3 px-4 font-mono text-center text-slate-200 font-medium">
-                            {r.regular_hours || 0}h
+                            {formatHours(r.regular_hours)}
                           </td>
                           <td className="py-3 px-4 font-mono text-center font-bold text-amber-400">
-                            {r.ot_hours > 0 ? `${r.ot_hours}h` : '0h'}
+                            {r.ot_hours > 0 ? formatHours(r.ot_hours) : '0h'}
                           </td>
                           <td className="py-3 px-4 font-mono text-center text-rose-400 font-medium">
                             {r.late_minutes > 0 ? `${r.late_minutes}m` : '0m'}

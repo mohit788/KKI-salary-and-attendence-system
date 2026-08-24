@@ -172,9 +172,9 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE workers ADD COLUMN other_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}
 
-  // Insert default settings if empty
+  // Insert default settings if empty or update legacy defaults
   const defaultSettings = [
-    ['shift_start', '08:30', 'Standard shift start time (HH:MM)'],
+    ['shift_start', '08:00', 'Standard shift start time (HH:MM)'],
     ['shift_end', '16:30', 'Standard shift end time (HH:MM)'],
     ['grace_slab_minutes', '30', 'Late arrival grace slab size in minutes'],
     ['ot_multiplier', '1.5', 'Overtime pay multiplier'],
@@ -186,7 +186,7 @@ async function initDatabase() {
     ['monthly_absent_forfeiture_threshold', '4', 'Total monthly absents to forfeit ALL Sundays (except OT worked)'],
     ['standard_month_days', '26', 'Standard days in month for per-day rate calculation (26/30/calendar)'],
     ['max_ot_hours', '0', 'Maximum OT hours cap per day (0 = Unlimited)'],
-    ['lunch_deduction_mins', '0', 'Automatic lunch/break deduction in minutes'],
+    ['lunch_deduction_mins', '30', 'Automatic lunch/break deduction in minutes'],
     ['late_penalty_threshold_mins', '120', 'Late arrival cutoff in minutes for half-day penalty'],
     ['sunday_ot_multiplier', '2.0', 'Overtime multiplier for Sunday work']
   ];
@@ -198,13 +198,19 @@ async function initDatabase() {
     );
   }
 
+  // Update legacy settings if they are still at 08:30 or lunch_deduction_mins 0
+  try {
+    await execute(`UPDATE settings SET value = '08:00' WHERE key = 'shift_start' AND value = '08:30'`);
+    await execute(`UPDATE settings SET value = '30' WHERE key = 'lunch_deduction_mins' AND value = '0'`);
+  } catch (e) {}
+
   // Insert default Rule Profile if rule_profiles table is empty
   const profilesCountRes = await execute(`SELECT COUNT(*) as cnt FROM rule_profiles`);
   if (profilesCountRes.rows[0].cnt === 0) {
     await execute(
       `INSERT INTO rule_profiles (profile_name, is_default, shift_start, shift_end, grace_slab_minutes, ot_multiplier, ot_rounding, short_hours_threshold, weekly_off_day, forfeiture_absent_threshold, standard_month_days)
-       VALUES (?, 1, '08:30', '16:30', 30, 1.5, 'minutes', 4.0, 'Sun', 2, '26')`,
-      ['Standard KKI Factory Rules (08:30 - 16:30 | OT after 4:30 PM)']
+       VALUES (?, 1, '08:00', '16:30', 30, 1.5, 'minutes', 4.0, 'Sun', 2, '26')`,
+      ['Standard Factory Rules (08:00 - 16:30 | 8h Duty + 30m Lunch)']
     );
   }
 

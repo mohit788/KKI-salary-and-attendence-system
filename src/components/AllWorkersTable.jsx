@@ -12,6 +12,7 @@ import {
   UserCheck,
   Clock
 } from 'lucide-react';
+import { formatHours } from '../utils/formatters';
 
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -285,15 +286,15 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
                       </td>
 
                       <td className="px-4 py-3 text-center font-mono text-indigo-300 font-medium">
-                        {p.totalOtHours || 0} h
+                        {formatHours(p.totalOtHours)}
                       </td>
 
                       <td className="px-4 py-3 text-center font-mono text-amber-300 font-medium">
-                        {(p.totalSundayOtHours || 0) > 0 ? `${p.totalSundayOtHours} h ☀️` : '—'}
+                        {(p.totalSundayOtHours || 0) > 0 ? `${formatHours(p.totalSundayOtHours)} ☀️` : '—'}
                       </td>
 
                       <td className="px-4 py-3 text-center font-mono text-indigo-400 font-bold">
-                        {((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)) > 0 ? `${((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(1)} h` : '0 h'}
+                        {formatHours((p.totalOtHours || 0) + (p.totalSundayOtHours || 0))}
                       </td>
 
                       <td className="px-4 py-3 text-right font-mono text-slate-200">

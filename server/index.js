@@ -7,7 +7,7 @@ const fs = require('fs');
 const { execute, initDatabase } = require('./db');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
-const { computeDailyAttendance, applyWeeklyOffForfeiture } = require('./rulesEngine');
+const { computeDailyAttendance, applyWeeklyOffForfeiture, formatHours } = require('./rulesEngine');
 const { calculateWorkerPayroll } = require('./payrollEngine');
 const { parseNaturalLanguageRule } = require('./aiRuleEngine');
 const { processUniversalAssistantPrompt } = require('./aiAssistantEngine');
@@ -170,7 +170,7 @@ app.post('/api/rule-profiles', async (req, res) => {
   try {
     const {
       profile_name,
-      shift_start = '08:30',
+      shift_start = '08:00',
       shift_end = '16:30',
       grace_slab_minutes = 30,
       ot_multiplier = 1.5,
@@ -907,11 +907,11 @@ app.get('/api/export/excel', async (req, res) => {
     const workersRes = await execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`);
 
     const summaryRows = [
-      ['Staff No', 'Staff Name', 'Department', 'Monthly Salary (₹)', 'Housing Allowance (₹)', 'Food Allowance (₹)', 'Other Allowance (₹)', 'Per Day Rate (₹)', 'Present Days (Full)', 'Short Days', 'Paid Weekly Offs', 'Forfeited Weekly Offs', 'Absent Days', 'Incomplete Days', 'Payable Days', 'Regular Hours', 'OT Hours (After 4:30 PM)', 'Total Worked Hours', 'Base Pay (₹)', 'OT Pay (₹)', 'Total Allowances (₹)', 'Gross Salary (₹)', 'Advance Deductions (₹)', 'Net Payable Salary (₹)']
+      ['Staff No', 'Staff Name', 'Department', 'Monthly Salary (₹)', 'Housing Allowance (₹)', 'Food Allowance (₹)', 'Other Allowance (₹)', 'Per Day Rate (₹)', 'Present Days (Full)', 'Short Days', 'Paid Weekly Offs', 'Forfeited Weekly Offs', 'Absent Days', 'Incomplete Days', 'Payable Days', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Worked Hours', 'Total Worked Clock Time', 'Base Pay (₹)', 'OT Pay (₹)', 'Total Allowances (₹)', 'Gross Salary (₹)', 'Advance Deductions (₹)', 'Net Payable Salary (₹)']
     ];
 
     const dailyRows = [
-      ['Staff No', 'Staff Name', 'Date', 'Day', 'Raw Swipes', 'Punch Pairs (IN ➔ OUT)', 'Effective In', 'Effective Out', 'Regular Hours', 'OT Hours (After 4:30 PM)', 'Total Hours', 'Late Minutes', 'Attendance Status']
+      ['Staff No', 'Staff Name', 'Date', 'Day', 'Raw Swipes', 'Punch Pairs (IN ➔ OUT)', 'Effective In', 'Effective Out', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Hours', 'Total Clock Time', 'Late Minutes', 'Attendance Status']
     ];
 
     const advanceRows = [
@@ -938,6 +938,8 @@ app.get('/api/export/excel', async (req, res) => {
         settings,
       });
 
+      const regHours = +(p.totalWorkedHours - p.totalOtHours).toFixed(2);
+
       summaryRows.push([
         w.staff_no,
         w.staff_name,
@@ -954,9 +956,12 @@ app.get('/api/export/excel', async (req, res) => {
         p.absentDays,
         p.incompleteDays,
         p.payableDays,
-        +(p.totalWorkedHours - p.totalOtHours).toFixed(2),
+        regHours,
+        formatHours(regHours),
         p.totalOtHours,
+        formatHours(p.totalOtHours),
         p.totalWorkedHours,
+        formatHours(p.totalWorkedHours),
         p.basePay,
         p.otPay,
         p.totalAllowances,
@@ -979,8 +984,11 @@ app.get('/api/export/excel', async (req, res) => {
           r.effective_in || '',
           r.effective_out || '',
           r.regular_hours || 0,
+          formatHours(r.regular_hours || 0),
           r.ot_hours || 0,
+          formatHours(r.ot_hours || 0),
           r.total_hours || 0,
+          formatHours(r.total_hours || 0),
           r.late_minutes || 0,
           r.status || 'Absent',
         ]);
@@ -1045,7 +1053,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
     `);
 
     const dailyRows = [
-      ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Biometric Swipes', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Hours', 'OT Hours (After 4:30 PM)', 'Total Worked Hours', 'Late Minutes', 'Attendance Status']
+      ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Biometric Swipes', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Worked Hours', 'Total Clock Time', 'Late Minutes', 'Attendance Status']
     ];
 
     result.rows.forEach(r => {
@@ -1063,8 +1071,11 @@ app.get('/api/export/excel/timings', async (req, res) => {
         r.effective_in || '',
         r.effective_out || '',
         r.regular_hours || 0,
+        formatHours(r.regular_hours || 0),
         r.ot_hours || 0,
+        formatHours(r.ot_hours || 0),
         r.total_hours || 0,
+        formatHours(r.total_hours || 0),
         r.late_minutes || 0,
         r.status || 'Absent',
       ]);
@@ -1113,12 +1124,12 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
     });
 
     const summaryRows = [
-      ['Staff No', 'Staff Name', 'Department', 'Monthly Salary (₹)', 'Per Day Rate (₹)', 'Present Days', 'Short Days', 'Paid Weekly Offs', 'Absent Days', 'Regular Hours', 'OT Hours (After 4:30 PM)', 'Gross Salary (₹)', 'Advance Deductions (₹)', 'Net Salary Payable (₹)'],
-      [w.staff_no, w.staff_name, w.department || 'WORKER', w.monthly_salary, p.perDayRate, p.fullPresentDays, p.shortDays, p.paidWeeklyOffs, p.absentDays, +(p.totalWorkedHours - p.totalOtHours).toFixed(2), p.totalOtHours, p.grossSalary, p.totalAdvances, p.netPayable]
+      ['Staff No', 'Staff Name', 'Department', 'Monthly Salary (₹)', 'Per Day Rate (₹)', 'Present Days', 'Short Days', 'Paid Weekly Offs', 'Absent Days', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Gross Salary (₹)', 'Advance Deductions (₹)', 'Net Salary Payable (₹)'],
+      [w.staff_no, w.staff_name, w.department || 'WORKER', w.monthly_salary, p.perDayRate, p.fullPresentDays, p.shortDays, p.paidWeeklyOffs, p.absentDays, +(p.totalWorkedHours - p.totalOtHours).toFixed(2), formatHours(+(p.totalWorkedHours - p.totalOtHours).toFixed(2)), p.totalOtHours, formatHours(p.totalOtHours), p.grossSalary, p.totalAdvances, p.netPayable]
     ];
 
     const dailyRows = [
-      ['Date', 'Day', 'Raw Swipes', 'Effective In', 'Effective Out', 'Regular Hours', 'OT Hours (After 4:30 PM)', 'Total Hours', 'Late Mins', 'Status']
+      ['Date', 'Day', 'Raw Swipes', 'Effective In', 'Effective Out', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Hours', 'Total Clock Time', 'Late Mins', 'Status']
     ];
 
     attRes.rows.forEach(r => {
@@ -1129,8 +1140,11 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
         r.effective_in || '',
         r.effective_out || '',
         r.regular_hours || 0,
+        formatHours(r.regular_hours || 0),
         r.ot_hours || 0,
+        formatHours(r.ot_hours || 0),
         r.total_hours || 0,
+        formatHours(r.total_hours || 0),
         r.late_minutes || 0,
         r.status || 'Absent',
       ]);

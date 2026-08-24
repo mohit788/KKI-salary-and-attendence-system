@@ -52,7 +52,7 @@
     },
     {
       "key": "lunch_deduction_mins",
-      "value": "0",
+      "value": "30",
       "description": "Automatic lunch/break deduction in minutes"
     },
     {

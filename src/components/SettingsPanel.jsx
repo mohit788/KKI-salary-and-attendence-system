@@ -33,17 +33,17 @@ import {
 
 export default function SettingsPanel({ settingsList = [], onSaveSettings, loading }) {
   const [form, setForm] = useState({
-    shift_start: '08:30',
+    shift_start: '08:00',
     shift_end: '16:30',
     grace_slab_minutes: '30',
     ot_multiplier: '1.5',
-    ot_rounding: 'minutes',
+    ot_rounding: '30min_block',
     short_hours_threshold: '4.0',
     weekly_off_day: 'Sun',
     forfeiture_absent_threshold: '2',
     standard_month_days: '26',
     max_ot_hours: '0',
-    lunch_deduction_mins: '0',
+    lunch_deduction_mins: '30',
     late_penalty_threshold_mins: '120',
     sunday_ot_multiplier: '2.0',
     gemini_api_key: '',
@@ -1064,10 +1064,14 @@ export default function SettingsPanel({ settingsList = [], onSaveSettings, loadi
         <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-4">
           <h3 className="text-sm font-bold text-white font-display uppercase tracking-wider text-indigo-400 flex items-center gap-2">
             <Clock className="w-4 h-4" />
-            <span>1. Shift Timings & Overtime Threshold</span>
+            <span>1. Shift Timings (8h Work + 30m Lunch) & Overtime Threshold</span>
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <p className="text-xs text-slate-400">
+            Standard shift is 08:00 to 16:30. 30 minutes lunch is unpaid. Worker must complete 8 hours net duty from effective start time before overtime begins (e.g. 08:31 arrival ➔ 09:00 start ➔ OT starts after 17:30 / 5:30 PM). Total hours & OT rounded in 30-min blocks.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">Standard Shift Start Time</label>
               <input
@@ -1076,20 +1080,29 @@ export default function SettingsPanel({ settingsList = [], onSaveSettings, loadi
                 onChange={(e) => handleChange('shift_start', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
               />
-              <p className="text-[11px] text-slate-400 mt-1">Default 08:30 AM.</p>
+              <p className="text-[11px] text-slate-400 mt-1">Default 08:00 AM.</p>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Shift End & Overtime Start Time</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Standard Shift End Time</label>
               <input
                 type="time"
                 value={form.shift_end}
                 onChange={(e) => handleChange('shift_end', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
               />
-              <p className="text-[11px] text-amber-400 font-medium mt-1">
-                ⭐ Default 16:30 (04:30 PM). Work past 4:30 PM is OT.
-              </p>
+              <p className="text-[11px] text-slate-400 mt-1">Default 16:30 (4:30 PM).</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Unpaid Lunch Deduction (Mins)</label>
+              <input
+                type="number"
+                value={form.lunch_deduction_mins}
+                onChange={(e) => handleChange('lunch_deduction_mins', e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-[11px] text-amber-400 font-medium mt-1">Default 30 mins (unpaid).</p>
             </div>
 
             <div>
@@ -1100,7 +1113,7 @@ export default function SettingsPanel({ settingsList = [], onSaveSettings, loadi
                 onChange={(e) => handleChange('grace_slab_minutes', e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
               />
-              <p className="text-[11px] text-slate-400 mt-1">Default 30m slab.</p>
+              <p className="text-[11px] text-slate-400 mt-1">Default 30m slab rounding.</p>
             </div>
           </div>
         </div>
