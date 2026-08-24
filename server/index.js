@@ -260,7 +260,7 @@ app.delete('/api/rule-profiles/:id', async (req, res) => {
   }
 });
 
-// 3. POST Upload File (Preview Mode)
+// 3. POST Upload File (Auto-process and commit to DB)
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No file uploaded.' });
@@ -279,19 +279,92 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'Unsupported file format. Please upload .xlsx, .xls, .docx, or .doc' });
     }
 
-    // Compute preview stats
+    if (parsedWorkers.length === 0) {
+      return res.status(400).json({ success: false, error: 'No worker punch records found in the uploaded file.' });
+    }
+
+    // Auto-commit data into DB directly on upload
+    const batchId = `BATCH_${Date.now()}`;
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+
     let totalRecords = 0;
     let flaggedCount = 0;
     let datesSet = new Set();
 
-    parsedWorkers.forEach(w => {
-      w.records.forEach(r => {
+    for (const worker of parsedWorkers) {
+      // Upsert worker profile
+      await execute(
+        `INSERT INTO workers (staff_no, staff_name, department) VALUES (?, ?, ?)
+         ON CONFLICT(staff_no) DO UPDATE SET staff_name = excluded.staff_name, department = excluded.department`,
+        [worker.staff_no, worker.staff_name, worker.department || 'WORKER']
+      );
+
+      const sortedRecords = (worker.records || []).sort((a, b) => a.date.localeCompare(b.date));
+
+      let dailyComputed = sortedRecords.map(r => {
         totalRecords++;
         if (r.date) datesSet.add(r.date);
-        const { isOdd } = parseSwipeRecord(r.swipe_record);
+        const { timestamps, isOdd } = parseSwipeRecord(r.swipe_record);
         if (isOdd) flaggedCount++;
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+        return {
+          staff_no: worker.staff_no,
+          date: r.date,
+          weekday: r.weekday,
+          raw_swipes: r.swipe_record,
+          machine_work_time: r.machine_work_time,
+          ...attendance,
+        };
       });
-    });
+
+      dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings);
+
+      for (const d of dailyComputed) {
+        await execute(
+          `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record, machine_work_time, batch_id)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record, machine_work_time = excluded.machine_work_time`,
+          [
+            d.staff_no || '',
+            d.date || '',
+            d.weekday || '',
+            d.raw_swipes || '',
+            d.machine_work_time || '',
+            batchId
+          ]
+        );
+
+        await execute(
+          `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(staff_no, date) DO UPDATE SET
+             raw_swipes = excluded.raw_swipes,
+             effective_in = excluded.effective_in,
+             effective_out = excluded.effective_out,
+             regular_hours = excluded.regular_hours,
+             ot_hours = excluded.ot_hours,
+             sunday_ot_hours = excluded.sunday_ot_hours,
+             total_hours = excluded.total_hours,
+             late_minutes = excluded.late_minutes,
+             status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
+          [
+            d.staff_no || '',
+            d.date || '',
+            d.weekday || '',
+            d.raw_swipes || '',
+            d.effectiveIn || '',
+            d.effectiveOut || '',
+            d.regularHours || 0,
+            d.otHours || 0,
+            d.sundayOtHours || 0,
+            d.totalHours || 0,
+            d.lateMinutes || 0,
+            d.status || 'Absent'
+          ]
+        );
+      }
+    }
 
     const sortedDates = Array.from(datesSet).sort();
     const startDate = sortedDates[0] || '';
@@ -305,10 +378,10 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       flaggedCount,
       startDate,
       endDate,
-      parsedData: parsedWorkers, // Return full parsed data for confirmation
+      message: `Successfully processed and saved ${parsedWorkers.length} workers (${totalRecords} attendance records) to database!`,
     });
   } catch (err) {
-    console.error('File Upload Parsing Error:', err);
+    console.error('File Upload Parsing & Commit Error:', err);
     res.status(500).json({ success: false, error: err.message });
   } finally {
     if (fs.existsSync(filePath)) {

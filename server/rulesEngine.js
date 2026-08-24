@@ -175,13 +175,22 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     totalRawWorkedMins += span;
   }
 
+  // 1. Handle Lunch Deduction (UNPAID 30 minutes):
+  // 30 minutes lunch is not counted as working hours and not paid.
+  // Applies to shifts exceeding 5 hours (300 mins) when lunch was not punched out separately.
+  let effectiveLunchDeduct = 0;
+  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 300) {
+    const remainingLunch = lunchDeductionMins - totalBreakMins;
+    effectiveLunchDeduct = Math.max(0, Math.min(remainingLunch, totalRawWorkedMins - 300));
+  }
+
+  const netWorkedMins = Math.max(0, totalRawWorkedMins - effectiveLunchDeduct);
+  const roundingBlock = (otRounding === '30min_block' || slabMinutes > 0) ? (slabMinutes || 30) : 30;
+
   // SUNDAY / WEEKLY OFF: ALL worked time = Overtime (no regular hours)
   if (isWeeklyOff) {
-    let totalSundayOtMins = totalRawWorkedMins;
-    if (otRounding === '30min_block' || slabMinutes > 0) {
-      const block = slabMinutes > 0 ? slabMinutes : 30;
-      totalSundayOtMins = Math.floor(totalSundayOtMins / block) * block;
-    }
+    let totalSundayOtMins = netWorkedMins;
+    totalSundayOtMins = Math.floor(totalSundayOtMins / roundingBlock) * roundingBlock;
 
     const sundayOtHours = +(totalSundayOtMins / 60).toFixed(2);
     const totalHours = sundayOtHours;
@@ -202,18 +211,6 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   }
 
   // REGULAR WORKING DAY:
-  // 1. Handle Lunch Deduction (UNPAID 30 minutes):
-  // 30 minutes lunch is not counted as working hours and not paid.
-  // If the worker took punched break(s) >= lunchDeductionMins, the lunch break was already excluded.
-  // Otherwise, if shift worked exceeds 5 hours (300 mins), deduct the remaining lunch minutes.
-  let effectiveLunchDeduct = 0;
-  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 300) {
-    const remainingLunch = lunchDeductionMins - totalBreakMins;
-    effectiveLunchDeduct = Math.max(0, Math.min(remainingLunch, totalRawWorkedMins - 300));
-  }
-
-  const netWorkedMins = Math.max(0, totalRawWorkedMins - effectiveLunchDeduct);
-
   // 2. Standard duty is 8 hours (480 minutes) of actual work:
   // Regular work is capped at 480 minutes (8.0 hours).
   // Overtime starts only AFTER completing the 8 hours duty!
@@ -241,7 +238,6 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   }
 
   // 4. Apply 30-minute block rounding to both regular hours and overtime (no exact fraction minutes)
-  const roundingBlock = (otRounding === '30min_block' || slabMinutes > 0) ? (slabMinutes || 30) : 30;
   totalRegularMins = Math.floor(totalRegularMins / roundingBlock) * roundingBlock;
   totalOtMins = Math.floor(totalOtMins / roundingBlock) * roundingBlock;
 

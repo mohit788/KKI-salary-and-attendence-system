@@ -94,6 +94,8 @@ export default function App() {
       if (contentType.includes('application/json')) {
         const res = await response.json();
         if (res.success) {
+          await refreshData();
+          setActiveTab('workers');
           setPreviewData(res);
         } else {
           alert('Upload Error: ' + (res.error || 'Failed to parse file.'));
