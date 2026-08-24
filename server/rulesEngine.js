@@ -177,11 +177,11 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 
   // 1. Handle Lunch Deduction (UNPAID 30 minutes):
   // 30 minutes lunch is not counted as working hours and not paid.
-  // Applies to shifts exceeding 5 hours (300 mins) when lunch was not punched out separately.
+  // Applies whenever worker is on shift and lunch was not punched out separately.
   let effectiveLunchDeduct = 0;
-  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 300) {
+  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 0) {
     const remainingLunch = lunchDeductionMins - totalBreakMins;
-    effectiveLunchDeduct = Math.max(0, Math.min(remainingLunch, totalRawWorkedMins - 300));
+    effectiveLunchDeduct = Math.min(remainingLunch, totalRawWorkedMins);
   }
 
   const netWorkedMins = Math.max(0, totalRawWorkedMins - effectiveLunchDeduct);
@@ -211,39 +211,66 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   }
 
   // REGULAR WORKING DAY:
-  // 2. Standard duty is 8 hours (480 minutes) of actual work:
-  // Regular work is capped at 480 minutes (8.0 hours).
-  // Overtime starts only AFTER completing the 8 hours duty!
+  // Standard duty is 8 hours (480 minutes) of actual work.
+  // FACTORY RULE: Worker MUST complete full 8 hours (480 mins) of duty for the day to count as regular shift.
+  // If worker works LESS than 8 hours duty (e.g. 5.5h, 6h, etc.):
+  // - Day is marked 'Absent' (no regular daily shift credited)
+  // - All net worked hours (after lunch deduction & 30-min rounding) are credited to Overtime (OT Hours)
   const standardDailyDutyMins = 480;
-  let totalRegularMins = Math.min(netWorkedMins, standardDailyDutyMins);
-  let totalOtMins = Math.max(0, netWorkedMins - standardDailyDutyMins);
+  let totalRegularMins = 0;
+  let totalOtMins = 0;
+  let status = 'Present (Full)';
 
-  // 3. Apply Active Custom Rules (mid-day exit & late penalty)
-  if (Array.isArray(customRules)) {
-    customRules.forEach(rule => {
-      if (!rule || !rule.is_active) return;
+  if (netWorkedMins >= standardDailyDutyMins) {
+    // Completed full 8 hours duty:
+    totalRegularMins = standardDailyDutyMins;
+    totalOtMins = netWorkedMins - standardDailyDutyMins;
 
-      // Mid-day Exit Rule Evaluation
-      if (rule.rule_type === 'midday_exit' && maxMidDayExitMins > (rule.threshold_mins || 0)) {
-        const deduct = parseInt(rule.deduction_mins || 0, 10);
-        if (deduct > 0) totalRegularMins = Math.max(0, totalRegularMins - deduct);
-      }
+    // 3. Apply Active Custom Rules (mid-day exit & late penalty)
+    if (Array.isArray(customRules)) {
+      customRules.forEach(rule => {
+        if (!rule || !rule.is_active) return;
 
-      // Late Penalty Rule Evaluation
-      if (rule.rule_type === 'late_penalty' && lateMins > (rule.threshold_mins || 0)) {
-        const deduct = parseInt(rule.deduction_mins || 0, 10);
-        if (deduct > 0) totalRegularMins = Math.max(0, totalRegularMins - deduct);
-      }
-    });
-  }
+        // Mid-day Exit Rule Evaluation
+        if (rule.rule_type === 'midday_exit' && maxMidDayExitMins > (rule.threshold_mins || 0)) {
+          const deduct = parseInt(rule.deduction_mins || 0, 10);
+          if (deduct > 0) totalRegularMins = Math.max(0, totalRegularMins - deduct);
+        }
 
-  // 4. Apply 30-minute block rounding to both regular hours and overtime (no exact fraction minutes)
-  totalRegularMins = Math.floor(totalRegularMins / roundingBlock) * roundingBlock;
-  totalOtMins = Math.floor(totalOtMins / roundingBlock) * roundingBlock;
+        // Late Penalty Rule Evaluation
+        if (rule.rule_type === 'late_penalty' && lateMins > (rule.threshold_mins || 0)) {
+          const deduct = parseInt(rule.deduction_mins || 0, 10);
+          if (deduct > 0) totalRegularMins = Math.max(0, totalRegularMins - deduct);
+        }
+      });
+    }
 
-  // 5. Apply Max OT Cap if configured (> 0)
-  if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
-    totalOtMins = maxOtHours * 60;
+    // 4. Apply 30-minute block rounding to both regular hours and overtime
+    totalRegularMins = Math.floor(totalRegularMins / roundingBlock) * roundingBlock;
+    totalOtMins = Math.floor(totalOtMins / roundingBlock) * roundingBlock;
+
+    // 5. Apply Max OT Cap if configured (> 0)
+    if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
+      totalOtMins = maxOtHours * 60;
+    }
+
+    if (lateMins >= latePenaltyThresholdMins) {
+      status = 'Present (Short)';
+    }
+  } else if (netWorkedMins > 0) {
+    // Incomplete Shift (< 8 hours duty):
+    // Count day as Absent, credit all net worked time as Overtime!
+    totalRegularMins = 0;
+    totalOtMins = Math.floor(netWorkedMins / roundingBlock) * roundingBlock;
+    if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
+      totalOtMins = maxOtHours * 60;
+    }
+    status = 'Absent';
+  } else {
+    // 0 worked time
+    totalRegularMins = 0;
+    totalOtMins = 0;
+    status = 'Absent';
   }
 
   const regularHours = +(totalRegularMins / 60).toFixed(2);
@@ -252,11 +279,6 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const totalHours = +(regularHours + otHours).toFixed(2);
 
   const finalOutTime = timestamps[timestamps.length - 1];
-
-  let status = 'Present (Full)';
-  if (lateMins >= latePenaltyThresholdMins || totalHours < shortThreshold) {
-    status = 'Present (Short)';
-  }
 
   return {
     effectiveIn: effectiveInTime,
