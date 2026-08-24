@@ -535,14 +535,23 @@ async function recomputeAllAttendance() {
       [w.staff_no]
     );
 
-    let dailyComputed = punchesRes.rows.map(r => {
-      const { timestamps } = parseSwipeRecord(r.swipe_record);
+    let recordsToCompute = punchesRes.rows;
+    if (!recordsToCompute || recordsToCompute.length === 0) {
+      const dailyRes = await execute(
+        `SELECT staff_no, date, weekday, raw_swipes as swipe_record FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+        [w.staff_no]
+      );
+      recordsToCompute = dailyRes.rows;
+    }
+
+    let dailyComputed = recordsToCompute.map(r => {
+      const { timestamps } = parseSwipeRecord(r.swipe_record || r.raw_swipes);
       const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
       return {
         staff_no: w.staff_no,
         date: r.date,
         weekday: r.weekday,
-        raw_swipes: r.swipe_record,
+        raw_swipes: r.swipe_record || r.raw_swipes,
         ...attendance,
       };
     });
@@ -571,6 +580,16 @@ async function recomputeAllAttendance() {
     }
   }
 }
+
+// 4a. POST Recalculate All Attendance (Explicit trigger)
+app.post('/api/attendance/recalculate', async (req, res) => {
+  try {
+    await recomputeAllAttendance();
+    res.json({ success: true, message: 'All attendance records and overtime recomputed successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // 4b. GET All Daily Attendance Records (for Dashboard Master Sheet)
 app.get('/api/attendance/all', async (req, res) => {
@@ -741,9 +760,10 @@ app.post('/api/attendance/edit', async (req, res) => {
     const oldRec = oldRes.rows[0] || {};
 
     const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
     const { timestamps } = parseSwipeRecord(raw_swipes || oldRec.raw_swipes);
 
-    const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday);
+    const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday, customRules);
     const finalStatus = status || computed.status;
 
     // Log to Audit Table
@@ -761,10 +781,18 @@ app.post('/api/attendance/edit', async (req, res) => {
       ]
     );
 
+    // Also update raw_punches
+    await execute(
+      `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record`,
+      [staff_no, date, oldRec.weekday || '', raw_swipes]
+    );
+
     // Update Daily Attendance
     await execute(
       `UPDATE daily_attendance SET
-         raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, total_hours = ?,
+         raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
          late_minutes = ?, status = ?, is_manual_override = 1, override_reason = ?
        WHERE staff_no = ? AND date = ?`,
       [
@@ -773,6 +801,7 @@ app.post('/api/attendance/edit', async (req, res) => {
         computed.effectiveOut,
         computed.regularHours,
         computed.otHours,
+        computed.sundayOtHours,
         computed.totalHours,
         computed.lateMinutes,
         finalStatus,
@@ -1634,7 +1663,13 @@ app.use((err, req, res, next) => {
 
 // Start Unified Server
 const PORT = process.env.PORT || 5000;
-initDatabase().then(() => {
+initDatabase().then(async () => {
+  try {
+    await recomputeAllAttendance();
+    console.log('✅ Startup Attendance Integrity Check: All attendance and OT verified with factory rules.');
+  } catch (err) {
+    console.warn('⚠️ Startup recompute warning:', err.message);
+  }
   app.listen(PORT, () => {
     console.log(`🚀 Unified Factory HR (Frontend + Backend) running on Port ${PORT}: http://localhost:${PORT}`);
   });
