@@ -1534,6 +1534,11 @@ app.post('/api/ai-assistant/generate-report', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+// 404 handler for unmatched API routes
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ success: false, error: `API endpoint ${req.method} ${req.originalUrl} not found` });
+});
+
 const distDir = path.join(__dirname, '../dist');
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));

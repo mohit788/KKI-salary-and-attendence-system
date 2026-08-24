@@ -26,11 +26,20 @@ export default function AiAssistantBar({ onRefreshData }) {
     setResponse(null);
 
     try {
-      const res = await fetch('/api/ai-assistant/execute', {
+      const response = await fetch('/api/ai-assistant/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: prompt.trim() }),
-      }).then(r => r.json());
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+      let res;
+      if (contentType.includes('application/json')) {
+        res = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(text || `Server error (${response.status})`);
+      }
 
       if (res.success) {
         setResponse(res);
@@ -42,7 +51,7 @@ export default function AiAssistantBar({ onRefreshData }) {
         setError(res.error || 'Failed to execute command.');
       }
     } catch (err) {
-      setError('Network error: ' + err.message);
+      setError(err.message || 'Failed to communicate with AI Assistant.');
     } finally {
       setLoading(false);
     }
