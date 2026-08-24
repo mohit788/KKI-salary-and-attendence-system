@@ -112,36 +112,11 @@ export default function App() {
     }
   };
 
-  // Commit preview data
+  // Commit preview data (Data is already saved on upload)
   const handleCommitPreview = async () => {
-    if (!previewData) return;
-    setLoading(true);
-
-    try {
-      const response = await fetch('/api/upload/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parsedData: previewData.parsedData }),
-      });
-
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const res = await response.json();
-        if (res.success) {
-          setPreviewData(null);
-          await refreshData();
-          setActiveTab('workers');
-        } else {
-          alert('Commit error: ' + (res.error || 'Failed to save data.'));
-        }
-      } else {
-        alert('Commit Error: Server returned an invalid response.');
-      }
-    } catch (err) {
-      alert('Commit failed: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
+    setPreviewData(null);
+    await refreshData();
+    setActiveTab('workers');
   };
 
   // Save Attendance Edit

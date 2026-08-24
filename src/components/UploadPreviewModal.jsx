@@ -89,17 +89,10 @@ export default function UploadPreviewModal({ previewData, onConfirm, onCancel, l
           </button>
           <button
             onClick={onConfirm}
-            disabled={loading}
-            className="px-5 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-lg shadow-indigo-600/30 flex items-center space-x-2 transition-all disabled:opacity-50"
+            className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center space-x-2 transition-all"
           >
-            {loading ? (
-              <span>Processing Rules & Saving...</span>
-            ) : (
-              <>
-                <CheckCircle className="w-4 h-4" />
-                <span>Commit & Process Payroll</span>
-              </>
-            )}
+            <CheckCircle className="w-4 h-4" />
+            <span>View Processed Workers & Payroll</span>
           </button>
         </div>
 
