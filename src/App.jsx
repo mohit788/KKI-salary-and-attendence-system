@@ -387,6 +387,7 @@ export default function App() {
           <SettingsPanel
             settingsList={settingsList}
             onSaveSettings={handleSaveSettings}
+            onSettingsUpdated={refreshData}
             loading={loading}
           />
         )}

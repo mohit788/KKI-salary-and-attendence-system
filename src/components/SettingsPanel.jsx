@@ -33,7 +33,12 @@ import {
   Unlock
 } from 'lucide-react';
 
-export default function SettingsPanel({ settingsList = [], onSaveSettings, loading }) {
+export default function SettingsPanel({ 
+  settingsList = [], 
+  onSaveSettings, 
+  onSettingsUpdated,
+  loading 
+}) {
   const [form, setForm] = useState({
     shift_start: '08:00',
     shift_end: '16:30',
@@ -120,8 +125,10 @@ export default function SettingsPanel({ settingsList = [], onSaveSettings, loadi
       }).then(r => r.json());
 
       if (res.success) {
-        setToast(`Deleted ${res.deletedCount} attendance records successfully.`);
-        if (onSettingsUpdated) onSettingsUpdated();
+        setToast(`Deleted ${res.deletedCount} records successfully.`);
+        if (typeof onSettingsUpdated === 'function') {
+          onSettingsUpdated();
+        }
       } else {
         alert('Clear failed: ' + res.error);
       }
