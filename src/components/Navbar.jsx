@@ -2,111 +2,78 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   Users, 
-  Wallet,
-  Home,
+  Wallet, 
+  Home, 
   Settings as SettingsIcon, 
   History, 
-  Building2,
-  FileCheck2
+  Building2 
 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, metrics }) {
+  const tabs = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'workers', label: 'Workers Summary', icon: Users, badge: metrics?.totalWorkers },
+    { id: 'allowances', label: 'Allowances', icon: Home },
+    { id: 'advance', label: 'Advance Ledger', icon: Wallet },
+    { id: 'audit', label: 'Audit Logs', icon: History },
+    { id: 'settings', label: 'Rules & Settings', icon: SettingsIcon },
+  ];
+
   return (
-    <header className="sticky top-0 z-40 bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800">
+    <header className="sticky top-0 z-40 bg-[#0f172a] border-b-2 border-slate-700 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Logo & Brand */}
-          <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-              <Building2 className="w-6 h-6 text-white" />
+        <div className="flex items-center justify-between h-20">
+          
+          {/* Logo & High-Contrast Brand Header */}
+          <div 
+            className="flex items-center space-x-3.5 cursor-pointer py-2 group" 
+            onClick={() => setActiveTab('dashboard')}
+          >
+            <div className="w-12 h-12 rounded-xl bg-blue-700 border border-blue-500 flex items-center justify-center shadow-md">
+              <Building2 className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-bold font-display tracking-tight text-white flex items-center gap-2">
-                KKI Management <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">Pro v1.0</span>
-              </h1>
-              <p className="text-xs text-slate-400">Attendance & Salary Management System</p>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-xl font-bold tracking-tight text-white font-display">
+                  KKI Management
+                </h1>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-600 font-bold">
+                  Active
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 font-medium">Biometric Attendance & Payroll System</p>
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <nav className="flex items-center space-x-1 sm:space-x-2">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'dashboard'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span className="hidden sm:inline">Dashboard</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('workers')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'workers'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              <span>Workers</span>
-              {metrics?.totalWorkers > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-slate-700 text-slate-200">
-                  {metrics.totalWorkers}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('allowances')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'allowances'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Home className="w-4 h-4" />
-              <span>Allowances</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('advance')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'advance'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
-              <span>Advance Pay</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('audit')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'audit'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <History className="w-4 h-4" />
-              <span className="hidden sm:inline">Audit Logs</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'settings'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <SettingsIcon className="w-4 h-4" />
-              <span className="hidden sm:inline">Rules Engine</span>
-            </button>
+          {/* Navigation Tabs - Large & High Contrast */}
+          <nav className="flex items-center space-x-1.5 sm:space-x-2 overflow-x-auto py-2">
+            {tabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center space-x-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+                    isActive
+                      ? 'bg-blue-600 text-white border-blue-400 shadow-md ring-2 ring-blue-500/30'
+                      : 'text-slate-200 hover:text-white hover:bg-slate-800 border-transparent hover:border-slate-700'
+                  }`}
+                >
+                  <Icon className={`w-4.5 h-4.5 ${isActive ? 'text-white' : 'text-slate-300'}`} />
+                  <span className="whitespace-nowrap">{tab.label}</span>
+                  {tab.badge !== undefined && tab.badge > 0 && (
+                    <span className={`ml-1 px-2 py-0.5 text-xs font-bold rounded-full ${
+                      isActive ? 'bg-white text-blue-900' : 'bg-slate-800 text-slate-200 border border-slate-600'
+                    }`}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
+
         </div>
       </div>
     </header>
