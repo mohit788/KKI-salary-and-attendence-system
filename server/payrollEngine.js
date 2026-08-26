@@ -12,14 +12,38 @@ function calculateWorkerPayroll({
   settings = {},
   salaryRules = [],
 }) {
-  const standardDaysType = settings.standard_month_days || '26';
+  // Auto-detect exact calendar days of the month from record dates (e.g. July = 31, Feb = 28/29, April = 30)
+  let detectedMonthDays = 30;
+  if (Array.isArray(dailyRecords) && dailyRecords.length > 0) {
+    const validDateRec = dailyRecords.find(r => r && r.date && /^\d{4}-\d{2}-\d{2}$/.test(String(r.date)));
+    if (validDateRec) {
+      const parts = String(validDateRec.date).split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      if (y && m) {
+        // Date(y, m, 0) gives the total days in month m (e.g. July -> 31, Feb -> 28/29)
+        detectedMonthDays = new Date(y, m, 0).getDate();
+      }
+    } else if (dailyRecords.length >= 28 && dailyRecords.length <= 31) {
+      detectedMonthDays = dailyRecords.length;
+    }
+  }
+
+  const standardDaysType = settings.standard_month_days || 'calendar';
+  let standardDays = detectedMonthDays;
+  if (standardDaysType === '26') {
+    standardDays = 26;
+  } else if (standardDaysType === '30') {
+    standardDays = 30;
+  } else if (standardDaysType === 'calendar') {
+    standardDays = detectedMonthDays;
+  } else {
+    const parsed = parseInt(standardDaysType, 10);
+    standardDays = (!isNaN(parsed) && parsed > 0) ? parsed : detectedMonthDays;
+  }
+
   const otMultiplier = parseFloat(settings.ot_multiplier || 1.5);
   const sundayOtMultiplier = parseFloat(settings.sunday_ot_multiplier || 2.0);
-
-  let standardDays = 26;
-  if (standardDaysType === '30') standardDays = 30;
-  else if (standardDaysType === 'calendar') standardDays = dailyRecords.length || 30;
-  else standardDays = parseInt(standardDaysType, 10) || 26;
 
   const perDayRate = +(monthlySalary / standardDays).toFixed(2);
   const hourlyRate = +(perDayRate / 8).toFixed(2);

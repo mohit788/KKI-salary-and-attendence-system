@@ -184,7 +184,7 @@ async function initDatabase() {
     ['forfeiture_absent_threshold', '2', 'Number of absent days in Mon-Sat stretch to forfeit Sunday'],
     ['weekly_off_forfeiture_threshold', '3', 'Number of weekly offs in same week to forfeit Sunday'],
     ['monthly_absent_forfeiture_threshold', '4', 'Total monthly absents to forfeit ALL Sundays (except OT worked)'],
-    ['standard_month_days', '26', 'Standard days in month for per-day rate calculation (26/30/calendar)'],
+    ['standard_month_days', 'calendar', 'Standard days in month for per-day rate calculation (calendar/26/30)'],
     ['max_ot_hours', '0', 'Maximum OT hours cap per day (0 = Unlimited)'],
     ['lunch_deduction_mins', '30', 'Automatic lunch/break deduction in minutes'],
     ['late_penalty_threshold_mins', '120', 'Late arrival cutoff in minutes for half-day penalty'],

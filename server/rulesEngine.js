@@ -390,6 +390,21 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 }
 
 /**
+ * Checks whether a daily record is a pure unworked absent (0 worked hours / no punch).
+ * Days where the worker worked < 8 hours (partial duty converted to OT) do NOT count as pure absent for forfeiture.
+ */
+function isPureAbsentForForfeiture(rec) {
+  if (!rec) return false;
+  const isAbsent = (rec.status === 'Absent' || rec.status === 'absent');
+  if (!isAbsent) return false;
+  const ot = Number(rec.ot_hours || rec.otHours || 0);
+  const sundayOt = Number(rec.sunday_ot_hours || rec.sundayOtHours || 0);
+  const total = Number(rec.total_hours || rec.totalHours || 0);
+  // If worker worked > 0 hours (e.g. partial shift converted to OT), exempt from forfeiture
+  return (ot <= 0 && sundayOt <= 0 && total <= 0);
+}
+
+/**
  * Apply Sunday / Weekly-Off Forfeiture Logic to a full month of records per worker
  * @param {Array<Object>} dailyRecords - Array of daily attendance objects sorted by date
  * @param {Object} settings
@@ -400,10 +415,10 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
   const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 3, 10);
   const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 4, 10);
 
-  // Count total monthly absents
+  // Count total monthly absents (ONLY pure unworked absents)
   let totalMonthlyAbsents = 0;
   dailyRecords.forEach(r => {
-    if (r.status === 'Absent') totalMonthlyAbsents++;
+    if (isPureAbsentForForfeiture(r)) totalMonthlyAbsents++;
   });
 
   // Step 1: Evaluate Weekly Forfeiture rules for each Sunday
@@ -418,12 +433,12 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
         continue;
       }
 
-      // Check weekly absent count in preceding Mon-Sat stretch
+      // Check weekly absent count in preceding Mon-Sat stretch (ONLY pure unworked absents)
       let weeklyAbsentCount = 0;
       let weeklyOffsInWeek = 0;
       for (let j = Math.max(0, i - 6); j < i; j++) {
         const prevRec = dailyRecords[j];
-        if (prevRec.status === 'Absent') {
+        if (isPureAbsentForForfeiture(prevRec)) {
           weeklyAbsentCount++;
           weeklyOffsInWeek++;
         } else if (prevRec.status.includes('Weekly Off')) {
