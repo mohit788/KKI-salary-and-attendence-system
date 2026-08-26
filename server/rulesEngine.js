@@ -57,6 +57,101 @@ function formatHours(decimalHours, format = 'hm') {
 }
 
 /**
+ * Detects the factory shift start time for a specific date based on all workers' first IN punches on that date.
+ * Uses crowd-clustering / voting among standard factory shift anchors (e.g. 07:00, 08:00, 08:30, 09:00).
+ * 
+ * @param {Array<string>} firstInTimes - Array of HH:MM strings of first IN punches on that day
+ * @param {string} defaultShift - Default shift start (default '08:00')
+ * @returns {string} Detected shift start time (e.g. '07:00' or '08:00')
+ */
+function detectDailyFactoryShift(firstInTimes = [], defaultShift = '08:00') {
+  if (!Array.isArray(firstInTimes) || firstInTimes.length === 0) {
+    return defaultShift || '08:00';
+  }
+
+  // Filter valid HH:MM timestamps
+  const validTimes = firstInTimes.filter(t => t && /^\d{1,2}:\d{2}$/.test(String(t).trim()));
+  if (validTimes.length === 0) return defaultShift || '08:00';
+
+  const totalWorkers = validTimes.length;
+
+  // Counters for Shift Anchors:
+  // 07:00 Shift Slot: Punches between 06:00 and 07:25 (e.g., 6:50, 6:58, 7:10, 7:20)
+  // 08:00 Shift Slot: Punches between 07:26 and 08:20 (e.g., 7:45, 7:55, 8:00, 8:15)
+  // 08:30 Shift Slot: Punches between 08:21 and 08:45
+  // 09:00 Shift Slot: Punches between 08:46 and 09:45
+  let early7Count = 0;
+  let normal8Count = 0;
+  let mid830Count = 0;
+  let late9Count = 0;
+
+  validTimes.forEach(timeStr => {
+    const mins = timeToMins(timeStr);
+    if (mins >= timeToMins('06:00') && mins <= timeToMins('07:25')) {
+      early7Count++;
+    } else if (mins > timeToMins('07:25') && mins <= timeToMins('08:20')) {
+      normal8Count++;
+    } else if (mins > timeToMins('08:20') && mins <= timeToMins('08:45')) {
+      mid830Count++;
+    } else if (mins > timeToMins('08:45') && mins <= timeToMins('09:45')) {
+      late9Count++;
+    }
+  });
+
+  const early7Ratio = early7Count / totalWorkers;
+  // If at least 20% of workers (or >=2 in small groups) came early OR early count exceeds 8 AM count -> 07:00 Shift
+  if ((early7Count >= 2 && early7Ratio >= 0.20) || early7Ratio >= 0.30 || (early7Count > 0 && early7Count > normal8Count)) {
+    return '07:00';
+  }
+
+  const late9Ratio = late9Count / totalWorkers;
+  if ((late9Count >= 3 && late9Ratio >= 0.40) || (late9Count > normal8Count && late9Count > early7Count)) {
+    return '09:00';
+  }
+
+  if (mid830Count > normal8Count && mid830Count > early7Count) {
+    return '08:30';
+  }
+
+  return defaultShift || '08:00';
+}
+
+/**
+ * Builds a Map of Date -> Detected Factory Shift Start Time for an array of worker records
+ * @param {Array<Object>} allRecords - List of objects with { date, swipe_record / raw_swipes }
+ * @param {string} defaultShift - Default shift start (default '08:00')
+ * @returns {Map<string, string>} Map of 'YYYY-MM-DD' -> 'HH:MM'
+ */
+function buildDailyShiftMap(allRecords = [], defaultShift = '08:00') {
+  const datePunchMap = new Map();
+
+  allRecords.forEach(rec => {
+    const date = rec.date;
+    if (!date) return;
+    const raw = rec.swipe_record || rec.raw_swipes || '';
+    if (!raw) return;
+
+    // Extract first IN timestamp
+    const matches = String(raw).match(/\b\d{1,2}:\d{2}\b/g) || [];
+    const validPunches = matches.filter(t => t !== '00:00');
+    if (validPunches.length > 0) {
+      const firstIn = validPunches[0];
+      if (!datePunchMap.has(date)) {
+        datePunchMap.set(date, []);
+      }
+      datePunchMap.get(date).push(firstIn);
+    }
+  });
+
+  const shiftMap = new Map();
+  for (const [date, firstIns] of datePunchMap.entries()) {
+    shiftMap.set(date, detectDailyFactoryShift(firstIns, defaultShift));
+  }
+
+  return shiftMap;
+}
+
+/**
  * Calculates effective first IN time using late-arrival grace slab rule
  * @param {string} rawInTime - HH:MM
  * @param {string} shiftStart - HH:MM (default 08:00)
@@ -89,9 +184,10 @@ function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30) 
  * @param {Object} settings - rule parameters
  * @param {string} weekday - "Mon", "Tue", "Sun" etc.
  * @param {Array<Object>} customRules - list of active custom rules
+ * @param {string} dynamicShiftStart - Optional detected date-specific shift start (e.g. '07:00')
  */
-function computeDailyAttendance(timestamps, settings = {}, weekday = '', customRules = []) {
-  const shiftStart = settings.shift_start || '08:00';
+function computeDailyAttendance(timestamps, settings = {}, weekday = '', customRules = [], dynamicShiftStart = '') {
+  const shiftStart = dynamicShiftStart || settings.daily_shift_start || settings.shift_start || '08:00';
   const shiftEnd = settings.shift_end || '16:30';
   const slabMinutes = parseInt(settings.grace_slab_minutes || 30, 10);
   const otRounding = settings.ot_rounding || 'minutes';
@@ -367,7 +463,10 @@ module.exports = {
   timeToMins,
   minsToTime,
   formatHours,
+  detectDailyFactoryShift,
+  buildDailyShiftMap,
   getEffectiveFirstIn,
   computeDailyAttendance,
   applyWeeklyOffForfeiture,
 };
+
