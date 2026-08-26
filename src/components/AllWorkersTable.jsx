@@ -3,7 +3,6 @@ import {
   Search, 
   Download, 
   FileSpreadsheet, 
-  FileCheck, 
   Eye, 
   DollarSign, 
   Edit2, 
@@ -85,8 +84,6 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
       'Base Pay (₹)': w.payroll?.basePay || 0,
       'OT Pay (₹)': w.payroll?.otPay || 0,
       'Sunday OT Pay (₹)': w.payroll?.sundayOtPay || 0,
-      'Custom Bonuses (₹)': w.payroll?.customBonuses || 0,
-      'Custom Deductions (₹)': w.payroll?.customDeductions || 0,
       'Gross Salary (₹)': w.payroll?.grossSalary || 0,
       'Advances Deducted (₹)': w.payroll?.totalAdvances || 0,
       'Net Payable (₹)': w.payroll?.netPayable || 0,
@@ -142,30 +139,30 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
       
-      {/* Top Header & Actions Bar */}
-      <div className="glass-card rounded-2xl p-6 border-2 border-slate-700 bg-slate-900 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      {/* Top Header & Perfectly Aligned Action Bar */}
+      <div className="glass-card rounded-2xl p-5 sm:p-6 border-2 border-slate-700 bg-slate-900 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white font-display flex items-center gap-3">
+          <h2 className="text-xl sm:text-2xl font-bold text-white font-display flex items-center gap-3">
             <span>All Workers Payroll Summary</span>
-            <span className="text-xs px-3 py-1 rounded-full bg-blue-950 text-blue-300 font-mono font-bold border border-blue-600">
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-950 text-cyan-300 font-mono font-bold border border-blue-600">
               {filteredWorkers.length} Employees
             </span>
           </h2>
-          <p className="text-sm text-slate-300 mt-1 font-medium">
+          <p className="text-xs sm:text-sm text-slate-300 mt-0.5 font-medium">
             Complete list of workers, duty hours, payable days, overtime pay, and net salary
           </p>
         </div>
 
-        {/* Action Buttons & Search */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="relative">
-            <Search className="w-4.5 h-4.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        {/* Action Buttons & Search Input */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-grow sm:flex-grow-0">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Search Name / Staff No..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-slate-950 border-2 border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 w-56 sm:w-64 font-medium"
+              className="bg-slate-950 border-2 border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 w-full sm:w-56 font-medium"
             />
           </div>
 
@@ -173,58 +170,58 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
             href="/api/export/excel/timings"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3.5 py-2.5 bg-blue-700 hover:bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-blue-500 shadow-md transition-all"
+            className="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-blue-500 shadow-sm transition-all whitespace-nowrap"
           >
-            <Clock className="w-4 h-4 text-blue-200" />
-            <span>Timings Sheet (.xlsx)</span>
+            <Clock className="w-3.5 h-3.5 text-blue-200" />
+            <span>Timings (.xlsx)</span>
           </a>
 
           <a
             href="/api/export/excel"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-3.5 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-md transition-all"
+            className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap"
           >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Full Payroll (.xlsx)</span>
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            <span>Payroll (.xlsx)</span>
           </a>
 
           <button
             onClick={() => setShowSheetsModal(true)}
-            className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-200 border-2 border-slate-600 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all"
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border-2 border-slate-600 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-            <span>G-Sheets Sync</span>
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+            <span>G-Sheets</span>
           </button>
 
           <button
             onClick={exportToPDF}
-            className="px-3.5 py-2.5 bg-rose-800 hover:bg-rose-700 text-white border border-rose-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all"
+            className="px-3 py-2 bg-rose-800 hover:bg-rose-700 text-white border border-rose-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5" />
             <span>PDF</span>
           </button>
         </div>
       </div>
 
-      {/* Workers Table - Large Font & High Contrast */}
+      {/* Workers Table - Crisp Alignment, Single-Line Timings, Fully Visible Columns */}
       <div className="glass-card rounded-2xl border-2 border-slate-700 overflow-hidden shadow-lg bg-slate-900">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-slate-200">
             <thead className="bg-slate-950 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 text-xs">
               <tr>
-                <th className="px-4 py-4">Staff No.</th>
-                <th className="px-4 py-4">Worker Name</th>
-                <th className="px-4 py-4">Base Salary</th>
-                <th className="px-4 py-4 text-center">Payable Days</th>
-                <th className="px-4 py-4 text-center">Absent</th>
-                <th className="px-4 py-4 text-center">Wkday OT</th>
-                <th className="px-4 py-4 text-center text-amber-300">Sun OT ☀️</th>
-                <th className="px-4 py-4 text-center">Total OT</th>
-                <th className="px-4 py-4 text-right">Gross Pay</th>
-                <th className="px-4 py-4 text-right">Advances</th>
-                <th className="px-4 py-4 text-right text-emerald-300">Net Payable</th>
-                <th className="px-4 py-4 text-center">Actions</th>
+                <th className="px-3.5 py-3.5 whitespace-nowrap">Staff No.</th>
+                <th className="px-3.5 py-3.5 whitespace-nowrap">Worker Name</th>
+                <th className="px-3.5 py-3.5 whitespace-nowrap text-right">Base Salary</th>
+                <th className="px-3 py-3.5 text-center whitespace-nowrap">Payable Days</th>
+                <th className="px-3 py-3.5 text-center whitespace-nowrap">Absent</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-blue-300">Wkday OT</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-amber-300">Sun OT ☀️</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-cyan-300">Total OT 🔥</th>
+                <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Gross Pay</th>
+                <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Advances</th>
+                <th className="px-3.5 py-3.5 text-right whitespace-nowrap text-emerald-300">Net Payable</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -237,67 +234,74 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
               ) : (
                 filteredWorkers.map(w => {
                   const p = w.payroll || {};
+                  const totalOtSum = (p.totalOtHours || 0) + (p.totalSundayOtHours || 0);
+
                   return (
                     <tr 
                       key={w.staff_no} 
                       className="hover:bg-slate-800/80 transition-colors"
                     >
-                      <td className="px-4 py-3.5 font-mono font-bold text-cyan-300 whitespace-nowrap">
-                        <span className="bg-slate-950 px-2.5 py-1 rounded-md border border-slate-700">
+                      {/* Staff No */}
+                      <td className="px-3.5 py-3 font-mono font-bold text-cyan-300 whitespace-nowrap">
+                        <span className="bg-slate-950 px-2 py-0.5 rounded-md border border-slate-700 inline-block">
                           #{w.staff_no}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 font-bold text-white whitespace-nowrap">
+
+                      {/* Worker Name & Department */}
+                      <td className="px-3.5 py-3 font-bold text-white whitespace-nowrap">
                         <div className="flex items-center space-x-2">
-                          <span className="text-base">{w.staff_name}</span>
+                          <span className="text-sm sm:text-base">{w.staff_name}</span>
                           {p.incompleteDays > 0 && (
-                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400" title={`${p.incompleteDays} days need review`} />
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" title={`${p.incompleteDays} days need review`} />
                           )}
                         </div>
-                        <span className="text-xs text-slate-400 font-normal">
+                        <span className="text-[11px] text-slate-400 font-normal block">
                           {w.department || 'WORKER'}
                         </span>
                       </td>
 
                       {/* Base Salary inline edit */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-3.5 py-3 text-right whitespace-nowrap">
                         {editingStaffNo === w.staff_no ? (
-                          <div className="flex items-center space-x-1.5">
+                          <div className="flex items-center justify-end space-x-1">
                             <input
                               type="number"
                               value={editSalaryValue}
                               onChange={(e) => setEditSalaryValue(e.target.value)}
-                              className="w-24 bg-slate-950 border-2 border-blue-500 rounded-lg px-2 py-1 text-sm text-white font-mono"
+                              className="w-20 bg-slate-950 border-2 border-blue-500 rounded px-1.5 py-0.5 text-xs text-white font-mono"
                               autoFocus
                             />
                             <button onClick={() => handleSaveSalary(w.staff_no)} className="p-1 rounded bg-emerald-700 text-white">
-                              <Check className="w-4 h-4" />
+                              <Check className="w-3.5 h-3.5" />
                             </button>
                             <button onClick={() => setEditingStaffNo(null)} className="p-1 rounded bg-slate-800 text-slate-300">
-                              <X className="w-4 h-4" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ) : (
                           <div 
-                            className="flex items-center space-x-1.5 group cursor-pointer" 
+                            className="flex items-center justify-end space-x-1 group cursor-pointer" 
                             onClick={() => { setEditingStaffNo(w.staff_no); setEditSalaryValue(w.monthly_salary || 15000); }}
                           >
                             <span className="font-mono font-bold text-slate-200 text-sm">
                               ₹{(w.monthly_salary || 15000).toLocaleString('en-IN')}
                             </span>
-                            <Edit2 className="w-3.5 h-3.5 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <Edit2 className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                           </div>
                         )}
                       </td>
 
-                      <td className="px-4 py-3.5 text-center">
-                        <span className="px-3 py-1 rounded-lg bg-emerald-950 text-emerald-300 font-bold font-mono text-sm border border-emerald-600">
+                      {/* Payable Days */}
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-emerald-950 text-emerald-300 font-bold font-mono text-xs border border-emerald-600 inline-block">
                           {p.payableDays || 0} d
                         </span>
                       </td>
 
-                      <td className="px-4 py-3.5 text-center">
-                        <span className={`px-2.5 py-1 rounded-lg font-bold font-mono text-sm ${
+                      {/* Absent Days */}
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        <span className={`px-2 py-0.5 rounded-lg font-bold font-mono text-xs inline-block ${
                           (p.absentDays || 0) > 0 
                             ? 'bg-rose-950 text-rose-300 border border-rose-600' 
                             : 'text-slate-500'
@@ -306,39 +310,45 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
                         </span>
                       </td>
 
-                      <td className="px-4 py-3.5 text-center font-mono text-blue-300 font-bold">
-                        {formatHours(p.totalOtHours)}
+                      {/* Wkday OT - Single line clean text */}
+                      <td className="px-3.5 py-3 text-center font-mono text-blue-300 font-bold whitespace-nowrap">
+                        {p.totalOtHours > 0 ? formatHours(p.totalOtHours) : '0h'}
                       </td>
 
-                      <td className="px-4 py-3.5 text-center font-mono text-amber-300 font-bold">
+                      {/* Sunday OT - Single line clean text */}
+                      <td className="px-3.5 py-3 text-center font-mono text-amber-300 font-bold whitespace-nowrap">
                         {(p.totalSundayOtHours || 0) > 0 ? `${formatHours(p.totalSundayOtHours)}` : '—'}
                       </td>
 
-                      <td className="px-4 py-3.5 text-center font-mono text-cyan-300 font-extrabold text-sm">
-                        {formatHours((p.totalOtHours || 0) + (p.totalSundayOtHours || 0))}
+                      {/* Total OT - Single line clean text */}
+                      <td className="px-3.5 py-3 text-center font-mono text-cyan-300 font-extrabold text-sm whitespace-nowrap">
+                        {totalOtSum > 0 ? formatHours(totalOtSum) : '0h'}
                       </td>
 
-                      <td className="px-4 py-3.5 text-right font-mono text-slate-200 font-bold">
+                      {/* Gross Pay */}
+                      <td className="px-3.5 py-3 text-right font-mono text-slate-200 font-bold whitespace-nowrap">
                         ₹{(p.grossSalary || 0).toLocaleString('en-IN')}
                       </td>
 
-                      <td className="px-4 py-3.5 text-right font-mono text-amber-300 font-bold">
+                      {/* Advances */}
+                      <td className="px-3.5 py-3 text-right font-mono text-amber-300 font-bold whitespace-nowrap">
                         {(p.totalAdvances || 0) > 0 ? `− ₹${p.totalAdvances.toLocaleString('en-IN')}` : '₹0'}
                       </td>
 
-                      <td className="px-4 py-3.5 text-right font-mono font-extrabold text-emerald-300 text-base">
+                      {/* Net Payable */}
+                      <td className="px-3.5 py-3 text-right font-mono font-extrabold text-emerald-300 text-sm sm:text-base whitespace-nowrap">
                         ₹{(p.netPayable || 0).toLocaleString('en-IN')}
                       </td>
 
-                      {/* Actions */}
-                      <td className="px-4 py-3.5 text-center">
-                        <div className="flex items-center justify-center space-x-2">
+                      {/* Action buttons */}
+                      <td className="px-3.5 py-3 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center space-x-1.5">
                           <button
                             onClick={() => onSelectWorker(w.staff_no)}
-                            className="px-3 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs flex items-center space-x-1 border border-blue-500 shadow transition-all"
+                            className="px-2.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold text-xs flex items-center space-x-1 border border-blue-500 shadow transition-all"
                             title="View Worker Attendance & Report"
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-3.5 h-3.5" />
                             <span>View</span>
                           </button>
 
@@ -347,7 +357,7 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
                             className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all"
                             title="Log Advance Payment"
                           >
-                            <DollarSign className="w-4 h-4" />
+                            <DollarSign className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>

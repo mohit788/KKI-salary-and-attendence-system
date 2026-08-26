@@ -306,20 +306,20 @@ export default function Dashboard({
 
                   <div className="mt-4 pt-3 border-t border-slate-700 grid grid-cols-4 gap-2 text-center">
                     <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                      <p className="text-[11px] text-slate-400 font-bold uppercase">Payable</p>
-                      <p className="text-base font-extrabold text-emerald-300 font-mono mt-0.5">{p.payableDays || 0}d</p>
+                      <p className="text-[11px] text-slate-400 font-bold uppercase whitespace-nowrap">Payable</p>
+                      <p className="text-base font-extrabold text-emerald-300 font-mono mt-0.5 whitespace-nowrap">{p.payableDays || 0}d</p>
                     </div>
                     <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                      <p className="text-[11px] text-blue-300 font-bold uppercase">Wkday OT</p>
-                      <p className="text-base font-extrabold text-blue-300 font-mono mt-0.5">{p.totalOtHours || 0}h</p>
+                      <p className="text-[11px] text-blue-300 font-bold uppercase whitespace-nowrap">Wkday OT</p>
+                      <p className="text-base font-extrabold text-blue-300 font-mono mt-0.5 whitespace-nowrap">{p.totalOtHours || 0}h</p>
                     </div>
                     <div className="bg-amber-950/60 border border-amber-600/50 p-2 rounded-xl">
-                      <p className="text-[11px] text-amber-300 font-bold uppercase">Sun OT ☀️</p>
-                      <p className="text-base font-extrabold text-amber-300 font-mono mt-0.5">{p.totalSundayOtHours || 0}h</p>
+                      <p className="text-[11px] text-amber-300 font-bold uppercase whitespace-nowrap">Sun OT ☀️</p>
+                      <p className="text-base font-extrabold text-amber-300 font-mono mt-0.5 whitespace-nowrap">{p.totalSundayOtHours || 0}h</p>
                     </div>
                     <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                      <p className="text-[11px] text-slate-400 font-bold uppercase">Net Pay</p>
-                      <p className="text-sm font-extrabold text-white font-mono mt-0.5">₹{(p.netPayable || 0).toLocaleString('en-IN')}</p>
+                      <p className="text-[11px] text-slate-400 font-bold uppercase whitespace-nowrap">Net Pay</p>
+                      <p className="text-sm font-extrabold text-white font-mono mt-0.5 whitespace-nowrap">₹{(p.netPayable || 0).toLocaleString('en-IN')}</p>
                     </div>
                   </div>
 
@@ -464,22 +464,22 @@ export default function Dashboard({
                               <span className="text-slate-500 italic">No Swipes</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 font-mono text-center text-emerald-300 font-bold">
+                          <td className="py-3 px-4 font-mono text-center text-emerald-300 font-bold whitespace-nowrap">
                             {r.effective_in || '—'}
                           </td>
-                          <td className="py-3 px-4 font-mono text-center text-emerald-300 font-bold">
+                          <td className="py-3 px-4 font-mono text-center text-emerald-300 font-bold whitespace-nowrap">
                             {r.effective_out || '—'}
                           </td>
-                          <td className="py-3 px-4 font-mono text-center text-slate-100 font-bold">
+                          <td className="py-3 px-4 font-mono text-center text-slate-100 font-bold whitespace-nowrap">
                             {formatHours(r.regular_hours)}
                           </td>
-                          <td className="py-3 px-4 font-mono text-center font-extrabold text-amber-300">
+                          <td className="py-3 px-4 font-mono text-center font-extrabold text-amber-300 whitespace-nowrap">
                             {r.ot_hours > 0 ? formatHours(r.ot_hours) : '0h'}
                           </td>
-                          <td className="py-3 px-4 font-mono text-center text-rose-300 font-bold">
+                          <td className="py-3 px-4 font-mono text-center text-rose-300 font-bold whitespace-nowrap">
                             {r.late_minutes > 0 ? `${r.late_minutes}m` : '0m'}
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-4 whitespace-nowrap">
                             {statusBadge}
                           </td>
                           <td className="py-3 px-4 text-right">
