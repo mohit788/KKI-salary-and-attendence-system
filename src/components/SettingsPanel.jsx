@@ -28,7 +28,9 @@ import {
   Key,
   MessageSquare,
   ArrowRight,
-  X
+  X,
+  Lock,
+  Unlock
 } from 'lucide-react';
 
 export default function SettingsPanel({ settingsList = [], onSaveSettings, loading }) {
