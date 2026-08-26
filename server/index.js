@@ -508,25 +508,40 @@ app.post('/api/upload/commit', async (req, res) => {
   }
 });
 
-// 4.1 POST Clear Attendance Logs by Date Range or Month
+// 4.1 POST Clear Attendance Logs by Date Range, Month, or Total Factory Reset
 app.post('/api/attendance/clear-range', async (req, res) => {
   try {
     const { startDate, endDate, month, clearAll } = req.body;
 
+    if (clearAll) {
+      const countRes = await execute(`SELECT COUNT(*) as cnt FROM daily_attendance`);
+      const deletedCount = countRes.rows[0]?.cnt || 0;
+
+      // Wipe all related tables for complete 100% clean factory reset
+      await execute(`DELETE FROM daily_attendance`);
+      await execute(`DELETE FROM raw_punches`);
+      await execute(`DELETE FROM workers`);
+      await execute(`DELETE FROM advances`);
+      await execute(`DELETE FROM audit_logs`);
+
+      return res.json({
+        success: true,
+        message: `Completely reset all factory data! Deleted ${deletedCount} attendance records, worker profiles, and advances.`,
+        deletedCount
+      });
+    }
+
     let deleteWhere = '';
     let params = [];
 
-    if (clearAll) {
-      deleteWhere = '1=1';
-    } else if (startDate && endDate) {
+    if (startDate && endDate) {
       deleteWhere = 'date >= ? AND date <= ?';
       params = [startDate, endDate];
     } else if (month) {
-      // month formatted as 'YYYY-MM' (e.g. '2026-07')
       deleteWhere = 'date LIKE ?';
       params = [`${month}%`];
     } else {
-      return res.status(400).json({ success: false, error: 'Please provide startDate & endDate or month string (YYYY-MM).' });
+      return res.status(400).json({ success: false, error: 'Please provide startDate & endDate, month string (YYYY-MM), or set clearAll: true.' });
     }
 
     const countRes = await execute(`SELECT COUNT(*) as cnt FROM daily_attendance WHERE ${deleteWhere}`, params);
@@ -534,10 +549,14 @@ app.post('/api/attendance/clear-range', async (req, res) => {
 
     await execute(`DELETE FROM daily_attendance WHERE ${deleteWhere}`, params);
     await execute(`DELETE FROM raw_punches WHERE ${deleteWhere}`, params);
+    await execute(`DELETE FROM advances WHERE ${deleteWhere}`, params);
+
+    // Clean up orphaned worker profiles that have no attendance logs left
+    await execute(`DELETE FROM workers WHERE staff_no NOT IN (SELECT DISTINCT staff_no FROM daily_attendance)`);
 
     res.json({
       success: true,
-      message: `Cleared ${deletedCount} attendance records for the selected period.`,
+      message: `Cleared ${deletedCount} attendance records and cleaned up unused worker profiles.`,
       deletedCount
     });
   } catch (err) {

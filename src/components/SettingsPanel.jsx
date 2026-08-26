@@ -530,56 +530,81 @@ export default function SettingsPanel({ settingsList = [], onSaveSettings, loadi
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
           {/* Option A: By Month */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
-            <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-red-400" />
-              <span>Clear By Specific Month</span>
-            </p>
-            <input
-              type="month"
-              value={clearMonth}
-              onChange={(e) => setClearMonth(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-red-500 font-mono"
-            />
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+            <div>
+              <p className="text-xs font-bold text-slate-200 flex items-center gap-1.5 mb-2">
+                <Calendar className="w-4 h-4 text-amber-400" />
+                <span>Clear By Specific Month</span>
+              </p>
+              <input
+                type="month"
+                value={clearMonth}
+                onChange={(e) => setClearMonth(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+              />
+            </div>
             <button
               onClick={() => handleClearAttendanceLogs('month')}
               disabled={clearLoading || !clearMonth}
-              className="w-full py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-red-600/20"
+              className="w-full py-2.5 bg-amber-700/80 hover:bg-amber-600 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{clearLoading ? 'Deleting Logs...' : 'Delete Selected Month Logs'}</span>
+              <Trash2 className="w-4 h-4" />
+              <span>{clearLoading ? 'Deleting...' : 'Delete Month Logs'}</span>
             </button>
           </div>
 
           {/* Option B: By Date Range */}
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
-            <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-              <Calendar className="w-4 h-4 text-red-400" />
-              <span>Clear By Date Range</span>
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="date"
-                value={clearStartDate}
-                onChange={(e) => setClearStartDate(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-red-500 font-mono"
-              />
-              <input
-                type="date"
-                value={clearEndDate}
-                onChange={(e) => setClearEndDate(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-red-500 font-mono"
-              />
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+            <div>
+              <p className="text-xs font-bold text-slate-200 flex items-center gap-1.5 mb-2">
+                <Calendar className="w-4 h-4 text-amber-400" />
+                <span>Clear By Date Range</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="date"
+                  value={clearStartDate}
+                  onChange={(e) => setClearStartDate(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                />
+                <input
+                  type="date"
+                  value={clearEndDate}
+                  onChange={(e) => setClearEndDate(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                />
+              </div>
             </div>
             <button
               onClick={() => handleClearAttendanceLogs('range')}
               disabled={clearLoading || !clearStartDate || !clearEndDate}
-              className="w-full py-2 bg-red-600/80 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md shadow-red-600/20"
+              className="w-full py-2.5 bg-amber-700/80 hover:bg-amber-600 disabled:opacity-40 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>{clearLoading ? 'Deleting Logs...' : 'Delete Date Range Logs'}</span>
+              <Trash2 className="w-4 h-4" />
+              <span>{clearLoading ? 'Deleting...' : 'Delete Range Logs'}</span>
+            </button>
+          </div>
+
+          {/* Option C: Total Factory Reset / Wipe Everything */}
+          <div className="bg-rose-950/40 border-2 border-rose-600/60 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+            <div>
+              <p className="text-xs font-bold text-rose-300 flex items-center gap-1.5 mb-1">
+                <Trash2 className="w-4 h-4 text-rose-400" />
+                <span>Wipe All Data (Fresh Reset)</span>
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Deletes all attendance records, worker profiles, advances, and audit logs.
+              </p>
+            </div>
+            <button
+              onClick={() => handleClearAttendanceLogs('all')}
+              disabled={clearLoading}
+              className="w-full py-2.5 bg-rose-700 hover:bg-rose-600 disabled:opacity-40 text-white text-xs font-extrabold rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-md border border-rose-500"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>{clearLoading ? 'Resetting...' : 'Reset All Factory Data'}</span>
             </button>
           </div>
         </div>
