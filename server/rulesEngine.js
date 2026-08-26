@@ -152,6 +152,38 @@ function buildDailyShiftMap(allRecords = [], defaultShift = '08:00') {
 }
 
 /**
+ * Calculates effective OUT time using the 15-minute threshold round-off rule:
+ * - 00 to 15 mins -> rounds down to :00 of the hour (e.g. 18:00-18:15 -> 18:00)
+ * - 16 to 45 mins -> rounds to :30 of the hour (e.g. 18:16-18:45 -> 18:30)
+ * - 46 to 59 mins -> rounds UP to :00 of next hour (e.g. 18:46-19:15 -> 19:00, 19:16-19:45 -> 19:30)
+ * @param {string} rawOutTime - HH:MM
+ */
+function getEffectiveOut(rawOutTime) {
+  if (!rawOutTime || !/^\d{1,2}:\d{2}$/.test(String(rawOutTime).trim())) {
+    return { effectiveTime: rawOutTime || '', effectiveMins: 0 };
+  }
+  const [hStr, mStr] = String(rawOutTime).trim().split(':');
+  let h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+
+  let effectiveH = h;
+  let effectiveM = 0;
+
+  if (m <= 15) {
+    effectiveM = 0;
+  } else if (m <= 45) {
+    effectiveM = 30;
+  } else {
+    effectiveM = 0;
+    effectiveH = h + 1;
+  }
+
+  const effectiveMins = effectiveH * 60 + effectiveM;
+  const effectiveTime = `${String(effectiveH).padStart(2, '0')}:${String(effectiveM).padStart(2, '0')}`;
+  return { effectiveTime, effectiveMins };
+}
+
+/**
  * Calculates effective first IN time using late-arrival grace slab rule
  * @param {string} rawInTime - HH:MM
  * @param {string} shiftStart - HH:MM (default 08:00)
@@ -274,16 +306,25 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     slabMinutes
   );
 
+  // Calculate final OUT with 15-minute threshold round-off rule:
+  // - 00-15 mins -> H:00
+  // - 16-45 mins -> H:30
+  // - 46-59 mins -> (H+1):00
+  const rawFinalOut = cleanedPunches[cleanedPunches.length - 1];
+  const { effectiveTime: effectiveFinalOutTime, effectiveMins: effectiveFinalOutMins } = getEffectiveOut(rawFinalOut);
+
   let totalRawWorkedMins = 0;
   let totalBreakMins = 0;
   let maxMidDayExitMins = 0;
   const punchPairStrings = [];
+  const workSessions = [];
 
   if (cleanedPunches.length % 2 === 0) {
     // EVEN PUNCHES (2, 4, 6...): Process exact (IN, OUT) pairs
     for (let i = 0; i < cleanedPunches.length; i += 2) {
       const rawIn = cleanedPunches[i];
       const rawOut = cleanedPunches[i + 1];
+      const isFinalSession = (i + 1 === cleanedPunches.length - 1);
 
       punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
 
@@ -300,39 +341,46 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
       }
 
       const inMins = (i === 0) ? effectiveInMins : timeToMins(rawIn);
-      const outMins = timeToMins(rawOut);
+      // For final OUT punch, apply the 15-min threshold round-off rule
+      const outMins = isFinalSession ? effectiveFinalOutMins : timeToMins(rawOut);
 
       if (outMins <= inMins) continue;
 
       const span = outMins - inMins;
       totalRawWorkedMins += span;
+      workSessions.push({ inMins, outMins });
     }
   } else {
-    // ODD PUNCHES (3, 5... e.g. missed second lunch punch or mid-day punch)
-    // SMART RESOLUTION: Span from First IN (effective) to Final OUT
-    const finalOut = cleanedPunches[cleanedPunches.length - 1];
-    const finalOutMins = timeToMins(finalOut);
-    
-    // Format punch string
+    // ODD PUNCHES (3, 5... e.g. clean 3-punch lunch break or extra swipe)
+    // Span from First IN (effective) to Final OUT (effective)
     for (let i = 0; i < cleanedPunches.length; i++) {
       if (i === 0) punchPairStrings.push(`IN ${cleanedPunches[i]}`);
       else if (i === cleanedPunches.length - 1) punchPairStrings.push(`OUT ${cleanedPunches[i]}`);
       else punchPairStrings.push(`MID ${cleanedPunches[i]}`);
     }
 
-    if (finalOutMins > effectiveInMins) {
-      totalRawWorkedMins = finalOutMins - effectiveInMins;
+    if (effectiveFinalOutMins > effectiveInMins) {
+      totalRawWorkedMins = effectiveFinalOutMins - effectiveInMins;
+      workSessions.push({ inMins: effectiveInMins, outMins: effectiveFinalOutMins });
     }
   }
 
-  // 1. Handle Lunch Deduction (UNPAID 30 minutes):
-  // 30 minutes lunch is not counted as working hours and not paid.
-  // Applies whenever worker is on shift and lunch was not punched out separately.
-  let effectiveLunchDeduct = 0;
-  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 0) {
-    const remainingLunch = lunchDeductionMins - totalBreakMins;
-    effectiveLunchDeduct = Math.min(remainingLunch, totalRawWorkedMins);
+  // 1. SMART LUNCH OVERLAP DEDUCTION (Factory Lunch Window: 12:30 - 13:00 = 750m to 780m):
+  // 30 minutes lunch is unpaid.
+  // If worker was outside during 12:30 - 13:00 (e.g. out at 09:23, in at 13:00), lunch is ALREADY excluded from sessions,
+  // so NO double-deduction is made!
+  // If work session overlaps with 12:30 - 13:00, deduct ONLY the portion of lunch that fell inside working sessions.
+  const lunchStartMins = 750; // 12:30 PM
+  const lunchEndMins = 750 + lunchDeductionMins; // 13:00 PM (30m)
+  let lunchOverlapMins = 0;
+
+  if (lunchDeductionMins > 0) {
+    for (const session of workSessions) {
+      const overlap = Math.max(0, Math.min(session.outMins, lunchEndMins) - Math.max(session.inMins, lunchStartMins));
+      lunchOverlapMins += overlap;
+    }
   }
+  const effectiveLunchDeduct = Math.min(lunchOverlapMins, lunchDeductionMins);
 
   const netWorkedMins = Math.max(0, totalRawWorkedMins - effectiveLunchDeduct);
   const roundingBlock = (otRounding === '30min_block' || slabMinutes > 0) ? (slabMinutes || 30) : 30;
@@ -344,12 +392,11 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 
     const sundayOtHours = +(totalSundayOtMins / 60).toFixed(2);
     const totalHours = sundayOtHours;
-    const finalOutTime = timestamps[timestamps.length - 1];
     const status = totalHours > 0 ? 'Weekly Off (Worked OT)' : 'Weekly Off (Paid)';
 
     return {
       effectiveIn: effectiveInTime,
-      effectiveOut: finalOutTime,
+      effectiveOut: effectiveFinalOutTime,
       punchPairsFormatted: punchPairStrings.join(' | '),
       regularHours: 0,
       otHours: 0,
@@ -365,7 +412,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   // FACTORY RULE: Worker MUST complete full 8 hours (480 mins) of duty for the day to count as regular shift.
   // If worker works LESS than 8 hours duty (e.g. 5.5h, 6h, etc.):
   // - Day is marked 'Absent' (no regular daily shift credited)
-  // - All net worked hours (after lunch deduction & 30-min rounding) are credited to Overtime (OT Hours)
+  // - All net worked hours are credited to Overtime (OT Hours)
   const standardDailyDutyMins = 480;
   let totalRegularMins = 0;
   let totalOtMins = 0;
@@ -376,7 +423,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     totalRegularMins = standardDailyDutyMins;
     totalOtMins = netWorkedMins - standardDailyDutyMins;
 
-    // 3. Apply Active Custom Rules (mid-day exit & late penalty)
+    // Apply Active Custom Rules (mid-day exit & late penalty)
     if (Array.isArray(customRules)) {
       customRules.forEach(rule => {
         if (!rule || !rule.is_active) return;
@@ -395,11 +442,11 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
       });
     }
 
-    // 4. Apply 30-minute block rounding to both regular hours and overtime
+    // Apply 30-minute block rounding to both regular hours and overtime
     totalRegularMins = Math.floor(totalRegularMins / roundingBlock) * roundingBlock;
     totalOtMins = Math.floor(totalOtMins / roundingBlock) * roundingBlock;
 
-    // 5. Apply Max OT Cap if configured (> 0)
+    // Apply Max OT Cap if configured (> 0)
     if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
       totalOtMins = maxOtHours * 60;
     }
@@ -428,11 +475,9 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const sundayOtHours = 0;
   const totalHours = +(regularHours + otHours).toFixed(2);
 
-  const finalOutTime = timestamps[timestamps.length - 1];
-
   return {
     effectiveIn: effectiveInTime,
-    effectiveOut: finalOutTime,
+    effectiveOut: effectiveFinalOutTime,
     punchPairsFormatted: punchPairStrings.join(' | '),
     regularHours,
     otHours,
