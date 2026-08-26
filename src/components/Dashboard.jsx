@@ -29,7 +29,9 @@ export default function Dashboard({
   workers = [], 
   onUploadFile, 
   setActiveTab,
-  onEditRecord 
+  onEditRecord,
+  isPayrollUnlocked = false,
+  onOpenUnlockModal
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -67,7 +69,7 @@ export default function Dashboard({
     return workers.filter(w => 
       String(w.staff_no).toLowerCase().includes(term) ||
       String(w.staff_name).toLowerCase().includes(term) ||
-      String(w.department || '').toLowerCase().includes(term)
+      (w.department || '').toLowerCase().includes(term)
     );
   }, [workers, searchTerm]);
 
@@ -90,7 +92,7 @@ export default function Dashboard({
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-xs uppercase font-extrabold text-blue-400 tracking-wider">
-                  Active Attendance & Payroll Month
+                  Active Attendance Month
                 </span>
                 <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-600 font-mono">
                   {metrics.activeMonth.totalDays} Days Cycle
@@ -111,8 +113,8 @@ export default function Dashboard({
               <span className="font-bold text-cyan-300">{metrics.activeMonth.startDate} ➔ {metrics.activeMonth.endDate}</span>
             </div>
             <div className="bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-700">
-              <span className="text-slate-400 block text-[10px] uppercase font-bold">Dynamic Salary Divisor</span>
-              <span className="font-bold text-emerald-300">Base ÷ {metrics.activeMonth.totalDays} Days</span>
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">Calendar Divisor</span>
+              <span className="font-bold text-emerald-300">{metrics.activeMonth.totalDays} Days in Month</span>
             </div>
           </div>
         </div>
@@ -122,7 +124,7 @@ export default function Dashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Drag & Drop Upload Zone */}
-        <div className="lg:col-span-2 glass-card rounded-2xl p-6 border-2 border-slate-700 shadow-md">
+        <div className="lg:col-span-2 glass-card rounded-2xl p-6 border-2 border-slate-700 shadow-md bg-slate-900">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl font-bold text-white font-display">Biometric File Upload</h2>
@@ -148,7 +150,7 @@ export default function Dashboard({
             className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
               dragActive
                 ? 'border-blue-400 bg-blue-950/40 scale-[0.99]'
-                : 'border-slate-600 hover:border-blue-400 bg-slate-900/80 hover:bg-slate-900'
+                : 'border-slate-600 hover:border-blue-400 bg-slate-950/60 hover:bg-slate-950'
             }`}
             onClick={() => document.getElementById('biometric-file-input').click()}
           >
@@ -166,38 +168,66 @@ export default function Dashboard({
               Click to select or Drag & Drop punch report file here
             </p>
             <p className="text-sm text-slate-300">
-              Auto-calculates shifts, dynamic calendar month days, 30m grace slabs & overtime.
+              Auto-detects shifts, monthly calendar days, 30m grace slabs & overtime.
             </p>
           </div>
         </div>
 
-        {/* Quick Snapshot Card - High Contrast Highlights */}
+        {/* Quick Snapshot Card - Conditional for Payroll Lock */}
         <div className="glass-card rounded-2xl p-6 border-2 border-slate-700 shadow-md flex flex-col justify-between bg-slate-900">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Payroll Summary</span>
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-600 text-xs font-bold flex items-center gap-1">
-                <TrendingUp className="w-3.5 h-3.5" /> Total Net
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">Total Net Payable Amount</p>
-            <div className="mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800">
-              <p className="text-3xl font-extrabold text-emerald-300 font-mono tracking-tight">
-                ₹{(metrics?.grandNet || 0).toLocaleString('en-IN')}
-              </p>
-            </div>
-            
-            <div className="mt-3 space-y-2 text-sm">
-              <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
-                <span className="font-semibold">Gross Payroll:</span>
-                <span className="text-white font-mono font-bold">₹{(metrics?.grandGross || 0).toLocaleString('en-IN')}</span>
+          {isPayrollUnlocked ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Payroll Summary</span>
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-950 text-emerald-300 border border-emerald-600 text-xs font-bold flex items-center gap-1">
+                  <TrendingUp className="w-3.5 h-3.5" /> Total Net
+                </span>
               </div>
-              <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
-                <span className="font-semibold">Advances Deducted:</span>
-                <span className="text-amber-300 font-mono font-bold">− ₹{(metrics?.grandAdvances || 0).toLocaleString('en-IN')}</span>
+              <p className="text-xs text-slate-400">Total Net Payable Amount</p>
+              <div className="mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <p className="text-3xl font-extrabold text-emerald-300 font-mono tracking-tight">
+                  ₹{(metrics?.grandNet || 0).toLocaleString('en-IN')}
+                </p>
+              </div>
+              
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
+                  <span className="font-semibold">Gross Payroll:</span>
+                  <span className="text-white font-mono font-bold">₹{(metrics?.grandGross || 0).toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
+                  <span className="font-semibold">Advances Deducted:</span>
+                  <span className="text-amber-300 font-mono font-bold">− ₹{(metrics?.grandAdvances || 0).toLocaleString('en-IN')}</span>
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Biometric Overview</span>
+                <span className="px-2.5 py-1 rounded-lg bg-blue-950 text-cyan-300 border border-blue-600 text-xs font-bold flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" /> Duty & OT
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">Total Processed Staff</p>
+              <div className="mt-1 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <p className="text-3xl font-extrabold text-white font-mono tracking-tight">
+                  {metrics?.totalWorkers || 0} <span className="text-lg font-normal text-slate-400">Workers</span>
+                </p>
+              </div>
+              
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
+                  <span className="font-semibold">Total Punch Swipes:</span>
+                  <span className="text-cyan-300 font-mono font-bold">{metrics?.totalRecords || 0} Logs</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
+                  <span className="font-semibold">Review Needed:</span>
+                  <span className="text-amber-300 font-mono font-bold">{metrics?.incompleteCount || 0} Records</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-5 space-y-2.5">
             <a
@@ -207,18 +237,27 @@ export default function Dashboard({
               className="w-full py-3 px-4 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-blue-500 shadow-md transition-all"
             >
               <Clock className="w-4.5 h-4.5 text-blue-200" />
-              <span>Download Daily Biometric Timings (.xlsx)</span>
+              <span>Download Biometric Timings Sheet (.xlsx)</span>
             </a>
 
-            <a
-              href="/api/export/excel"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all"
-            >
-              <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-200" />
-              <span>Download Factory Payroll Report (.xlsx)</span>
-            </a>
+            {isPayrollUnlocked ? (
+              <a
+                href="/api/export/excel"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all"
+              >
+                <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-200" />
+                <span>Download Full Payroll Report (.xlsx)</span>
+              </a>
+            ) : (
+              <button
+                onClick={onOpenUnlockModal}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-600 transition-all"
+              >
+                <span>🔒 Enter PIN to Unlock Financial / Salary Export</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -263,27 +302,42 @@ export default function Dashboard({
           <p className="text-xs text-slate-400 mt-1 font-medium">Single punch / missed swipes</p>
         </div>
 
-        {/* Total Advances */}
-        <div className="glass-card rounded-2xl p-5 border-2 border-slate-700 bg-slate-900 shadow-md">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Advances Total</span>
-            <div className="w-10 h-10 rounded-xl bg-purple-950 text-purple-300 border border-purple-600 flex items-center justify-center">
-              <DollarSign className="w-5 h-5" />
+        {/* 4th Metric Card: Advances if Unlocked, or Status Breakdown */}
+        {isPayrollUnlocked ? (
+          <div className="glass-card rounded-2xl p-5 border-2 border-slate-700 bg-slate-900 shadow-md">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Advances Total</span>
+              <div className="w-10 h-10 rounded-xl bg-purple-950 text-purple-300 border border-purple-600 flex items-center justify-center">
+                <DollarSign className="w-5 h-5" />
+              </div>
             </div>
+            <p className="text-3xl font-extrabold text-amber-300 font-mono mt-2">
+              ₹{(metrics?.grandAdvances || 0).toLocaleString('en-IN')}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 font-medium">Total advance deductions</p>
           </div>
-          <p className="text-3xl font-extrabold text-amber-300 font-mono mt-2">
-            ₹{(metrics?.grandAdvances || 0).toLocaleString('en-IN')}
-          </p>
-          <p className="text-xs text-slate-400 mt-1 font-medium">Total advance deductions</p>
-        </div>
+        ) : (
+          <div className="glass-card rounded-2xl p-5 border-2 border-slate-700 bg-slate-900 shadow-md">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Present Days</span>
+              <div className="w-10 h-10 rounded-xl bg-emerald-950 text-emerald-300 border border-emerald-600 flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            </div>
+            <p className="text-3xl font-extrabold text-emerald-300 font-mono mt-2">
+              {metrics?.statusBreakdown?.['Present (Full)'] || 0}
+            </p>
+            <p className="text-xs text-slate-400 mt-1 font-medium">Full present worker days</p>
+          </div>
+        )}
 
       </div>
 
       {/* WORKER TIMINGS SUMMARY CARDS */}
-      <div className="glass-card rounded-2xl border-2 border-slate-700 overflow-hidden shadow-lg space-y-4">
+      <div className="glass-card rounded-2xl border-2 border-slate-700 overflow-hidden shadow-lg space-y-4 bg-slate-900">
         
         {/* Header & Search */}
-        <div className="p-6 border-b border-slate-700 bg-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="p-6 border-b border-slate-700 bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h3 className="text-xl font-bold text-white font-display flex items-center gap-2.5">
               <Users className="w-6 h-6 text-blue-400" />
@@ -292,7 +346,7 @@ export default function Dashboard({
                 {filteredWorkers.length} Workers
               </span>
             </h3>
-            <p className="text-sm text-slate-300 mt-1">
+            <p className="text-sm text-slate-300 mt-1 font-medium">
               Click on any employee to view their daily swipe times, regular 8h duty, and overtime breakdown
             </p>
           </div>
@@ -304,7 +358,7 @@ export default function Dashboard({
               placeholder="Search by name or Staff No..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-950 border-2 border-slate-700 rounded-xl pl-11 pr-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 font-medium"
+              className="w-full bg-slate-900 border-2 border-slate-700 rounded-xl pl-11 pr-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 font-medium"
             />
           </div>
         </div>
@@ -319,11 +373,13 @@ export default function Dashboard({
           ) : (
             filteredWorkers.map(w => {
               const p = w.payroll || {};
+              const totalOtSum = (p.totalOtHours || 0) + (p.totalSundayOtHours || 0);
+
               return (
                 <div
                   key={w.staff_no}
                   onClick={() => setSelectedWorkerModal(w)}
-                  className="p-5 rounded-2xl bg-slate-900 border-2 border-slate-700 hover:border-blue-400 hover:bg-slate-850 transition-all cursor-pointer group shadow-md"
+                  className="p-5 rounded-2xl bg-slate-950 border-2 border-slate-700 hover:border-blue-400 hover:bg-slate-900 transition-all cursor-pointer group shadow-md"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3.5">
@@ -343,11 +399,11 @@ export default function Dashboard({
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-slate-700 grid grid-cols-4 gap-2 text-center">
-                    <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
+                    <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
                       <p className="text-[11px] text-slate-400 font-bold uppercase whitespace-nowrap">Payable</p>
                       <p className="text-base font-extrabold text-emerald-300 font-mono mt-0.5 whitespace-nowrap">{p.payableDays || 0}d</p>
                     </div>
-                    <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
+                    <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
                       <p className="text-[11px] text-blue-300 font-bold uppercase whitespace-nowrap">Wkday OT</p>
                       <p className="text-base font-extrabold text-blue-300 font-mono mt-0.5 whitespace-nowrap">{p.totalOtHours || 0}h</p>
                     </div>
@@ -355,10 +411,17 @@ export default function Dashboard({
                       <p className="text-[11px] text-amber-300 font-bold uppercase whitespace-nowrap">Sun OT ☀️</p>
                       <p className="text-base font-extrabold text-amber-300 font-mono mt-0.5 whitespace-nowrap">{p.totalSundayOtHours || 0}h</p>
                     </div>
-                    <div className="bg-slate-950 p-2 rounded-xl border border-slate-800">
-                      <p className="text-[11px] text-slate-400 font-bold uppercase whitespace-nowrap">Net Pay</p>
-                      <p className="text-sm font-extrabold text-white font-mono mt-0.5 whitespace-nowrap">₹{(p.netPayable || 0).toLocaleString('en-IN')}</p>
-                    </div>
+                    {isPayrollUnlocked ? (
+                      <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
+                        <p className="text-[11px] text-slate-400 font-bold uppercase whitespace-nowrap">Net Pay</p>
+                        <p className="text-sm font-extrabold text-white font-mono mt-0.5 whitespace-nowrap">₹{(p.netPayable || 0).toLocaleString('en-IN')}</p>
+                      </div>
+                    ) : (
+                      <div className="bg-slate-900 p-2 rounded-xl border border-slate-800">
+                        <p className="text-[11px] text-cyan-300 font-bold uppercase whitespace-nowrap">Total OT</p>
+                        <p className="text-sm font-extrabold text-cyan-300 font-mono mt-0.5 whitespace-nowrap">{totalOtSum > 0 ? formatHours(totalOtSum) : '0h'}</p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 text-xs text-blue-400 font-bold flex items-center justify-end gap-1 group-hover:underline">

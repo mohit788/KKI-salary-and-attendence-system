@@ -188,7 +188,8 @@ async function initDatabase() {
     ['max_ot_hours', '0', 'Maximum OT hours cap per day (0 = Unlimited)'],
     ['lunch_deduction_mins', '30', 'Automatic lunch/break deduction in minutes'],
     ['late_penalty_threshold_mins', '120', 'Late arrival cutoff in minutes for half-day penalty'],
-    ['sunday_ot_multiplier', '2.0', 'Overtime multiplier for Sunday work']
+    ['sunday_ot_multiplier', '2.0', 'Overtime multiplier for Sunday work'],
+    ['payroll_password', 'kki123', 'Password to unlock salary and payroll figures']
   ];
 
   for (const [key, value, desc] of defaultSettings) {

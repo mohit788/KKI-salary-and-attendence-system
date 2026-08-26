@@ -19,7 +19,9 @@ export default function WorkerDetail({
   workerData, 
   onBack, 
   onEditRecord, 
-  onAddAdvance 
+  onAddAdvance,
+  isPayrollUnlocked = false,
+  onOpenUnlockModal
 }) {
   if (!workerData) {
     return (
@@ -29,11 +31,13 @@ export default function WorkerDetail({
     );
   }
 
-  const { worker, dailyRecords, advances, auditLogs, payroll } = workerData;
+  const { worker, dailyRecords = [], advances = [], auditLogs = [], payroll } = workerData;
 
   const handlePrint = () => {
     window.print();
   };
+
+  const totalRegularDutyHours = dailyRecords.reduce((acc, r) => acc + (parseFloat(r.regular_hours) || 0), 0);
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -70,13 +74,15 @@ export default function WorkerDetail({
         </button>
 
         <div className="flex items-center space-x-3">
-          <button
-            onClick={() => onAddAdvance(staffNo)}
-            className="flex items-center space-x-1.5 px-4 py-2.5 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all"
-          >
-            <DollarSign className="w-4 h-4" />
-            <span>Add Advance Payment</span>
-          </button>
+          {isPayrollUnlocked && (
+            <button
+              onClick={() => onAddAdvance(staffNo)}
+              className="flex items-center space-x-1.5 px-4 py-2.5 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all"
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>Add Advance Payment</span>
+            </button>
+          )}
 
           <button
             onClick={handlePrint}
@@ -101,34 +107,45 @@ export default function WorkerDetail({
                 <span>Dept: <strong className="text-white">{worker.department || 'WORKER'}</strong></span>
                 <span>•</span>
                 <span>Staff ID: <strong className="text-cyan-300 font-mono">#{worker.staff_no}</strong></span>
-                <span>•</span>
-                <span>Monthly Base: <strong className="text-emerald-300 font-mono">₹{(worker.monthly_salary || 15000).toLocaleString('en-IN')}</strong></span>
+                {isPayrollUnlocked && (
+                  <>
+                    <span>•</span>
+                    <span>Monthly Base: <strong className="text-emerald-300 font-mono">₹{(worker.monthly_salary || 15000).toLocaleString('en-IN')}</strong></span>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Rate Card - High Contrast */}
-          <div className="flex items-center space-x-4 bg-slate-950 border-2 border-slate-700 p-3.5 rounded-xl text-sm font-mono flex-wrap gap-y-2">
-            <div>
-              <p className="text-slate-400 text-xs uppercase font-bold">Per-Day Rate</p>
-              <p className="text-base font-extrabold text-white">₹{payroll?.perDayRate} / day</p>
+          {/* Rate Card (Only if unlocked) */}
+          {isPayrollUnlocked ? (
+            <div className="flex items-center space-x-4 bg-slate-950 border-2 border-slate-700 p-3.5 rounded-xl text-sm font-mono flex-wrap gap-y-2">
+              <div>
+                <p className="text-slate-400 text-xs uppercase font-bold">Per-Day Rate</p>
+                <p className="text-base font-extrabold text-white">₹{payroll?.perDayRate} / day</p>
+              </div>
+              <div className="border-l-2 border-slate-800 pl-4">
+                <p className="text-slate-400 text-xs uppercase font-bold">OT Rate (Wkday)</p>
+                <p className="text-base font-extrabold text-blue-300">₹{payroll?.hourlyOtRate} / hr</p>
+              </div>
+              <div className="border-l-2 border-slate-800 pl-4">
+                <p className="text-slate-400 text-xs uppercase font-bold">Sunday OT Rate ☀️</p>
+                <p className="text-base font-extrabold text-amber-300">₹{payroll?.hourlySundayOtRate} / hr</p>
+              </div>
             </div>
-            <div className="border-l-2 border-slate-800 pl-4">
-              <p className="text-slate-400 text-xs uppercase font-bold">OT Rate (Wkday)</p>
-              <p className="text-base font-extrabold text-blue-300">₹{payroll?.hourlyOtRate} / hr</p>
+          ) : (
+            <div className="flex items-center space-x-3 bg-slate-950 border-2 border-slate-700 px-4 py-3 rounded-xl text-xs font-mono">
+              <span className="text-slate-400">Duty Model:</span>
+              <span className="text-cyan-300 font-bold">8.0 Hours Shift + 30m Lunch</span>
             </div>
-            <div className="border-l-2 border-slate-800 pl-4">
-              <p className="text-slate-400 text-xs uppercase font-bold">Sunday OT Rate ☀️</p>
-              <p className="text-base font-extrabold text-amber-300">₹{payroll?.hourlySundayOtRate} / hr</p>
-            </div>
-          </div>
+          )}
         </div>
 
-        {/* Month Summary Cards Grid - Large & High Contrast */}
+        {/* Month Summary Cards Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mt-6">
           <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
             <p className="text-xs font-bold uppercase text-slate-300">Payable Days</p>
-            <p className="text-xl font-extrabold text-emerald-300 font-mono mt-1">{payroll?.payableDays} d</p>
+            <p className="text-xl font-extrabold text-emerald-300 font-mono mt-1">{payroll?.payableDays || 0} d</p>
             <p className="text-xs text-slate-400 mt-0.5">{payroll?.fullPresentDays || 0} Full + {payroll?.paidWeeklyOffs || 0} Offs</p>
           </div>
 
@@ -151,20 +168,40 @@ export default function WorkerDetail({
           <div className="bg-amber-950/60 border border-amber-600/60 rounded-xl p-3.5">
             <p className="text-xs font-bold uppercase text-amber-300">Sunday OT ☀️</p>
             <p className="text-xl font-extrabold text-amber-300 font-mono mt-1">{formatHours(payroll?.totalSundayOtHours || 0)}</p>
-            <p className="text-xs text-amber-300 font-mono">₹{(payroll?.sundayOtPay || 0).toLocaleString('en-IN')}</p>
+            <p className="text-xs text-amber-300 font-mono">
+              {isPayrollUnlocked ? `₹${(payroll?.sundayOtPay || 0).toLocaleString('en-IN')}` : 'Sunday Duty OT'}
+            </p>
           </div>
 
-          <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
-            <p className="text-xs font-bold uppercase text-slate-300">Advances Deducted</p>
-            <p className="text-xl font-extrabold text-amber-300 font-mono mt-1">− ₹{(payroll?.totalAdvances || 0).toLocaleString('en-IN')}</p>
-            <p className="text-xs text-slate-400 mt-0.5">Ledger records</p>
-          </div>
+          {isPayrollUnlocked ? (
+            <>
+              <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
+                <p className="text-xs font-bold uppercase text-slate-300">Advances Deducted</p>
+                <p className="text-xl font-extrabold text-amber-300 font-mono mt-1">− ₹{(payroll?.totalAdvances || 0).toLocaleString('en-IN')}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Ledger records</p>
+              </div>
 
-          <div className="bg-emerald-950/80 border-2 border-emerald-600 rounded-xl p-3.5 shadow-md">
-            <p className="text-xs font-bold uppercase text-emerald-300">Net Payable</p>
-            <p className="text-2xl font-extrabold text-emerald-300 font-mono mt-1">₹{(payroll?.netPayable || 0).toLocaleString('en-IN')}</p>
-            <p className="text-xs text-emerald-400 font-semibold mt-0.5">Final Payout</p>
-          </div>
+              <div className="bg-emerald-950/80 border-2 border-emerald-600 rounded-xl p-3.5 shadow-md">
+                <p className="text-xs font-bold uppercase text-emerald-300">Net Payable</p>
+                <p className="text-2xl font-extrabold text-emerald-300 font-mono mt-1">₹{(payroll?.netPayable || 0).toLocaleString('en-IN')}</p>
+                <p className="text-xs text-emerald-400 font-semibold mt-0.5">Final Payout</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
+                <p className="text-xs font-bold uppercase text-slate-300">Total Regular Duty</p>
+                <p className="text-xl font-extrabold text-slate-100 font-mono mt-1">{formatHours(totalRegularDutyHours)}</p>
+                <p className="text-xs text-slate-400 mt-0.5">8h Standard Hours</p>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
+                <p className="text-xs font-bold uppercase text-slate-300">Recorded Swipes</p>
+                <p className="text-xl font-extrabold text-emerald-300 font-mono mt-1">{dailyRecords.length} d</p>
+                <p className="text-xs text-slate-400 mt-0.5">Evaluated Month Logs</p>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

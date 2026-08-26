@@ -1270,6 +1270,28 @@ export default function SettingsPanel({ settingsList = [], onSaveSettings, loadi
           </div>
         </div>
 
+        {/* Section 5: Security & Payroll Password */}
+        <div className="glass-card rounded-2xl p-6 border border-amber-500/30 space-y-4">
+          <h3 className="text-sm font-bold text-white font-display uppercase tracking-wider text-amber-300 flex items-center gap-2">
+            <Lock className="w-4 h-4" />
+            <span>5. Security & Payroll Unlock Password</span>
+          </h3>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Payroll Mode Unlock PIN / Password</label>
+            <input
+              type="text"
+              placeholder="e.g. kki123"
+              value={form.payroll_password !== undefined ? form.payroll_password : 'kki123'}
+              onChange={(e) => handleChange('payroll_password', e.target.value)}
+              className="w-full bg-slate-900 border border-amber-500/30 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-500"
+            />
+            <p className="text-[11px] text-slate-400 mt-1">
+              This password protects all salary figures, ₹ financial amounts, allowances, and advance ledgers. (Default: <strong className="text-amber-400 font-mono">kki123</strong>)
+            </p>
+          </div>
+        </div>
+
         {/* Submit Button */}
         <div className="flex justify-end">
           <button

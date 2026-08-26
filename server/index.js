@@ -155,6 +155,23 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
+// 2.1 POST Verify Payroll Unlock Password
+app.post('/api/auth/verify-payroll-password', async (req, res) => {
+  try {
+    const { password } = req.body;
+    const settings = await getSettingsMap();
+    const configuredPassword = settings.payroll_password || 'kki123';
+
+    if (password && password.trim() === configuredPassword.trim()) {
+      return res.json({ success: true, message: 'Password verified. Payroll unlocked.' });
+    } else {
+      return res.status(401).json({ success: false, error: 'Incorrect password! Please try again.' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // GET Rule Profiles
 app.get('/api/rule-profiles', async (req, res) => {
   try {

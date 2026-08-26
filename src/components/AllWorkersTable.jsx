@@ -8,7 +8,9 @@ import {
   Edit2, 
   Check, 
   X, 
-  Clock 
+  Clock,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 
@@ -16,7 +18,14 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
-export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance, onUpdateSalary }) {
+export default function AllWorkersTable({ 
+  workers, 
+  onSelectWorker, 
+  onAddAdvance, 
+  onUpdateSalary,
+  isPayrollUnlocked = false,
+  onOpenUnlockModal
+}) {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingStaffNo, setEditingStaffNo] = useState(null);
   const [editSalaryValue, setEditSalaryValue] = useState('');
@@ -65,63 +74,85 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
     setEditingStaffNo(null);
   };
 
-  // Export to Excel
+  // Export to Excel (Full or Timings)
   const exportToExcel = () => {
-    const exportData = filteredWorkers.map(w => ({
-      'Staff No.': w.staff_no,
-      'Staff Name': w.staff_name,
-      'Department': w.department || 'WORKER',
-      'Monthly Base Salary': w.payroll?.monthlySalary || 15000,
-      'Payable Days': w.payroll?.payableDays || 0,
-      'Full Present Days': w.payroll?.fullPresentDays || 0,
-      'Short Days': w.payroll?.shortDays || 0,
-      'Paid Weekly Offs': w.payroll?.paidWeeklyOffs || 0,
-      'Forfeited Weekly Offs': w.payroll?.forfeitedWeeklyOffs || 0,
-      'Sunday Worked Days': w.payroll?.sundayWorkedDays || 0,
-      'Absent Days': w.payroll?.absentDays || 0,
-      'Weekday OT Hours': w.payroll?.totalOtHours || 0,
-      'Sunday OT Hours': w.payroll?.totalSundayOtHours || 0,
-      'Base Pay (₹)': w.payroll?.basePay || 0,
-      'OT Pay (₹)': w.payroll?.otPay || 0,
-      'Sunday OT Pay (₹)': w.payroll?.sundayOtPay || 0,
-      'Gross Salary (₹)': w.payroll?.grossSalary || 0,
-      'Advances Deducted (₹)': w.payroll?.totalAdvances || 0,
-      'Net Payable (₹)': w.payroll?.netPayable || 0,
-    }));
+    const exportData = filteredWorkers.map(w => {
+      const row = {
+        'Staff No.': w.staff_no,
+        'Staff Name': w.staff_name,
+        'Department': w.department || 'WORKER',
+        'Payable Days': w.payroll?.payableDays || 0,
+        'Full Present Days': w.payroll?.fullPresentDays || 0,
+        'Short Days': w.payroll?.shortDays || 0,
+        'Paid Weekly Offs': w.payroll?.paidWeeklyOffs || 0,
+        'Sunday Worked Days': w.payroll?.sundayWorkedDays || 0,
+        'Absent Days': w.payroll?.absentDays || 0,
+        'Weekday OT Hours': w.payroll?.totalOtHours || 0,
+        'Sunday OT Hours': w.payroll?.totalSundayOtHours || 0,
+      };
+
+      if (isPayrollUnlocked) {
+        row['Monthly Base Salary (₹)'] = w.payroll?.monthlySalary || 15000;
+        row['Base Pay (₹)'] = w.payroll?.basePay || 0;
+        row['OT Pay (₹)'] = w.payroll?.otPay || 0;
+        row['Sunday OT Pay (₹)'] = w.payroll?.sundayOtPay || 0;
+        row['Gross Salary (₹)'] = w.payroll?.grossSalary || 0;
+        row['Advances Deducted (₹)'] = w.payroll?.totalAdvances || 0;
+        row['Net Payable (₹)'] = w.payroll?.netPayable || 0;
+      }
+
+      return row;
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Payroll Summary');
-    XLSX.writeFile(workbook, `Monthly_Payroll_Summary_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, isPayrollUnlocked ? 'Payroll Summary' : 'Attendance Summary');
+    XLSX.writeFile(workbook, `Workers_Summary_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   // Export PDF
   const exportToPDF = () => {
     const doc = new jsPDF('landscape');
     doc.setFontSize(16);
-    doc.text('Factory Monthly Payroll Summary', 14, 15);
+    doc.text(isPayrollUnlocked ? 'Factory Monthly Payroll Summary' : 'Factory Biometric Attendance Summary', 14, 15);
     doc.setFontSize(10);
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
 
-    const tableColumn = [
-      'Staff No', 'Name', 'Base Sal', 'Pay Days', 'Absent', 'Wk OT', 'Sun OT', 'Gross', 'Advances', 'Net Pay'
-    ];
+    const tableColumn = isPayrollUnlocked
+      ? ['Staff No', 'Name', 'Base Sal', 'Pay Days', 'Absent', 'Wk OT', 'Sun OT', 'Gross', 'Advances', 'Net Pay']
+      : ['Staff No', 'Name', 'Department', 'Payable Days', 'Present Days', 'Absent Days', 'Wkday OT', 'Sunday OT', 'Total OT'];
+
     const tableRows = [];
 
     filteredWorkers.forEach(w => {
       const p = w.payroll || {};
-      tableRows.push([
-        w.staff_no,
-        w.staff_name,
-        `Rs. ${w.monthly_salary || 15000}`,
-        p.payableDays || 0,
-        p.absentDays || 0,
-        `${p.totalOtHours || 0}h`,
-        `${p.totalSundayOtHours || 0}h`,
-        `Rs. ${p.grossSalary || 0}`,
-        `Rs. ${p.totalAdvances || 0}`,
-        `Rs. ${p.netPayable || 0}`,
-      ]);
+      if (isPayrollUnlocked) {
+        tableRows.push([
+          w.staff_no,
+          w.staff_name,
+          `Rs. ${w.monthly_salary || 15000}`,
+          p.payableDays || 0,
+          p.absentDays || 0,
+          `${p.totalOtHours || 0}h`,
+          `${p.totalSundayOtHours || 0}h`,
+          `Rs. ${p.grossSalary || 0}`,
+          `Rs. ${p.totalAdvances || 0}`,
+          `Rs. ${p.netPayable || 0}`,
+        ]);
+      } else {
+        const totalOtSum = (p.totalOtHours || 0) + (p.totalSundayOtHours || 0);
+        tableRows.push([
+          w.staff_no,
+          w.staff_name,
+          w.department || 'WORKER',
+          `${p.payableDays || 0} d`,
+          `${p.fullPresentDays || 0} d`,
+          `${p.absentDays || 0} d`,
+          formatHours(p.totalOtHours || 0),
+          formatHours(p.totalSundayOtHours || 0),
+          formatHours(totalOtSum),
+        ]);
+      }
     });
 
     doc.autoTable({
@@ -133,7 +164,7 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
       styles: { fontSize: 8 },
     });
 
-    doc.save(`Monthly_Payroll_Summary_${new Date().toISOString().slice(0, 10)}.pdf`);
+    doc.save(`Workers_Attendance_${new Date().toISOString().slice(0, 10)}.pdf`);
   };
 
   return (
@@ -143,13 +174,15 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
       <div className="glass-card rounded-2xl p-5 sm:p-6 border-2 border-slate-700 bg-slate-900 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-white font-display flex items-center gap-3">
-            <span>All Workers Payroll Summary</span>
+            <span>{isPayrollUnlocked ? 'All Workers Payroll Summary' : 'All Workers Attendance Summary'}</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-950 text-cyan-300 font-mono font-bold border border-blue-600">
               {filteredWorkers.length} Employees
             </span>
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 mt-0.5 font-medium">
-            Complete list of workers, duty hours, payable days, overtime pay, and net salary
+            {isPayrollUnlocked 
+              ? 'Complete list of workers, duty hours, payable days, overtime pay, and net salary'
+              : 'Complete list of workers, duty hours, payable days, and overtime breakdown'}
           </p>
         </div>
 
@@ -176,23 +209,35 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
             <span>Timings (.xlsx)</span>
           </a>
 
-          <a
-            href="/api/export/excel"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            <span>Payroll (.xlsx)</span>
-          </a>
+          {isPayrollUnlocked ? (
+            <>
+              <a
+                href="/api/export/excel"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Payroll (.xlsx)</span>
+              </a>
 
-          <button
-            onClick={() => setShowSheetsModal(true)}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border-2 border-slate-600 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-            <span>G-Sheets</span>
-          </button>
+              <button
+                onClick={() => setShowSheetsModal(true)}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border-2 border-slate-600 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                <span>G-Sheets</span>
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onOpenUnlockModal}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border-2 border-amber-500/60 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Unlock Payroll (.xlsx)</span>
+            </button>
+          )}
 
           <button
             onClick={exportToPDF}
@@ -204,7 +249,7 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
         </div>
       </div>
 
-      {/* Workers Table - Crisp Alignment, Single-Line Timings, Fully Visible Columns */}
+      {/* Workers Table - Crisp Alignment, Single-Line Timings */}
       <div className="glass-card rounded-2xl border-2 border-slate-700 overflow-hidden shadow-lg bg-slate-900">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-slate-200">
@@ -212,22 +257,28 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
               <tr>
                 <th className="px-3.5 py-3.5 whitespace-nowrap">Staff No.</th>
                 <th className="px-3.5 py-3.5 whitespace-nowrap">Worker Name</th>
-                <th className="px-3.5 py-3.5 whitespace-nowrap text-right">Base Salary</th>
+                {isPayrollUnlocked && (
+                  <th className="px-3.5 py-3.5 whitespace-nowrap text-right">Base Salary</th>
+                )}
                 <th className="px-3 py-3.5 text-center whitespace-nowrap">Payable Days</th>
                 <th className="px-3 py-3.5 text-center whitespace-nowrap">Absent</th>
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-blue-300">Wkday OT</th>
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-amber-300">Sun OT ☀️</th>
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-cyan-300">Total OT 🔥</th>
-                <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Gross Pay</th>
-                <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Advances</th>
-                <th className="px-3.5 py-3.5 text-right whitespace-nowrap text-emerald-300">Net Payable</th>
+                {isPayrollUnlocked && (
+                  <>
+                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Gross Pay</th>
+                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Advances</th>
+                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap text-emerald-300">Net Payable</th>
+                  </>
+                )}
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {filteredWorkers.length === 0 ? (
                 <tr>
-                  <td colSpan="12" className="text-center py-12 text-slate-400 text-base">
+                  <td colSpan={isPayrollUnlocked ? 12 : 8} className="text-center py-12 text-slate-400 text-base">
                     No worker records found. Upload a punch file to get started.
                   </td>
                 </tr>
@@ -261,36 +312,38 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
                         </span>
                       </td>
 
-                      {/* Base Salary inline edit */}
-                      <td className="px-3.5 py-3 text-right whitespace-nowrap">
-                        {editingStaffNo === w.staff_no ? (
-                          <div className="flex items-center justify-end space-x-1">
-                            <input
-                              type="number"
-                              value={editSalaryValue}
-                              onChange={(e) => setEditSalaryValue(e.target.value)}
-                              className="w-20 bg-slate-950 border-2 border-blue-500 rounded px-1.5 py-0.5 text-xs text-white font-mono"
-                              autoFocus
-                            />
-                            <button onClick={() => handleSaveSalary(w.staff_no)} className="p-1 rounded bg-emerald-700 text-white">
-                              <Check className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => setEditingStaffNo(null)} className="p-1 rounded bg-slate-800 text-slate-300">
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div 
-                            className="flex items-center justify-end space-x-1 group cursor-pointer" 
-                            onClick={() => { setEditingStaffNo(w.staff_no); setEditSalaryValue(w.monthly_salary || 15000); }}
-                          >
-                            <span className="font-mono font-bold text-slate-200 text-sm">
-                              ₹{(w.monthly_salary || 15000).toLocaleString('en-IN')}
-                            </span>
-                            <Edit2 className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        )}
-                      </td>
+                      {/* Base Salary (if unlocked) */}
+                      {isPayrollUnlocked && (
+                        <td className="px-3.5 py-3 text-right whitespace-nowrap">
+                          {editingStaffNo === w.staff_no ? (
+                            <div className="flex items-center justify-end space-x-1">
+                              <input
+                                type="number"
+                                value={editSalaryValue}
+                                onChange={(e) => setEditSalaryValue(e.target.value)}
+                                className="w-20 bg-slate-950 border-2 border-blue-500 rounded px-1.5 py-0.5 text-xs text-white font-mono"
+                                autoFocus
+                              />
+                              <button onClick={() => handleSaveSalary(w.staff_no)} className="p-1 rounded bg-emerald-700 text-white">
+                                <Check className="w-3.5 h-3.5" />
+                              </button>
+                              <button onClick={() => setEditingStaffNo(null)} className="p-1 rounded bg-slate-800 text-slate-300">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div 
+                              className="flex items-center justify-end space-x-1 group cursor-pointer" 
+                              onClick={() => { setEditingStaffNo(w.staff_no); setEditSalaryValue(w.monthly_salary || 15000); }}
+                            >
+                              <span className="font-mono font-bold text-slate-200 text-sm">
+                                ₹{(w.monthly_salary || 15000).toLocaleString('en-IN')}
+                              </span>
+                              <Edit2 className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          )}
+                        </td>
+                      )}
 
                       {/* Payable Days */}
                       <td className="px-3 py-3 text-center whitespace-nowrap">
@@ -310,35 +363,35 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
                         </span>
                       </td>
 
-                      {/* Wkday OT - Single line clean text */}
+                      {/* Wkday OT */}
                       <td className="px-3.5 py-3 text-center font-mono text-blue-300 font-bold whitespace-nowrap">
                         {p.totalOtHours > 0 ? formatHours(p.totalOtHours) : '0h'}
                       </td>
 
-                      {/* Sunday OT - Single line clean text */}
+                      {/* Sunday OT */}
                       <td className="px-3.5 py-3 text-center font-mono text-amber-300 font-bold whitespace-nowrap">
                         {(p.totalSundayOtHours || 0) > 0 ? `${formatHours(p.totalSundayOtHours)}` : '—'}
                       </td>
 
-                      {/* Total OT - Single line clean text */}
+                      {/* Total OT */}
                       <td className="px-3.5 py-3 text-center font-mono text-cyan-300 font-extrabold text-sm whitespace-nowrap">
                         {totalOtSum > 0 ? formatHours(totalOtSum) : '0h'}
                       </td>
 
-                      {/* Gross Pay */}
-                      <td className="px-3.5 py-3 text-right font-mono text-slate-200 font-bold whitespace-nowrap">
-                        ₹{(p.grossSalary || 0).toLocaleString('en-IN')}
-                      </td>
-
-                      {/* Advances */}
-                      <td className="px-3.5 py-3 text-right font-mono text-amber-300 font-bold whitespace-nowrap">
-                        {(p.totalAdvances || 0) > 0 ? `− ₹${p.totalAdvances.toLocaleString('en-IN')}` : '₹0'}
-                      </td>
-
-                      {/* Net Payable */}
-                      <td className="px-3.5 py-3 text-right font-mono font-extrabold text-emerald-300 text-sm sm:text-base whitespace-nowrap">
-                        ₹{(p.netPayable || 0).toLocaleString('en-IN')}
-                      </td>
+                      {/* Financial columns if unlocked */}
+                      {isPayrollUnlocked && (
+                        <>
+                          <td className="px-3.5 py-3 text-right font-mono text-slate-200 font-bold whitespace-nowrap">
+                            ₹{(p.grossSalary || 0).toLocaleString('en-IN')}
+                          </td>
+                          <td className="px-3.5 py-3 text-right font-mono text-amber-300 font-bold whitespace-nowrap">
+                            {(p.totalAdvances || 0) > 0 ? `− ₹${p.totalAdvances.toLocaleString('en-IN')}` : '₹0'}
+                          </td>
+                          <td className="px-3.5 py-3 text-right font-mono font-extrabold text-emerald-300 text-sm sm:text-base whitespace-nowrap">
+                            ₹{(p.netPayable || 0).toLocaleString('en-IN')}
+                          </td>
+                        </>
+                      )}
 
                       {/* Action buttons */}
                       <td className="px-3.5 py-3 text-center whitespace-nowrap">
@@ -352,13 +405,15 @@ export default function AllWorkersTable({ workers, onSelectWorker, onAddAdvance,
                             <span>View</span>
                           </button>
 
-                          <button
-                            onClick={() => onAddAdvance(w.staff_no)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all"
-                            title="Log Advance Payment"
-                          >
-                            <DollarSign className="w-3.5 h-3.5" />
-                          </button>
+                          {isPayrollUnlocked && (
+                            <button
+                              onClick={() => onAddAdvance(w.staff_no)}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all"
+                              title="Log Advance Payment"
+                            >
+                              <DollarSign className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

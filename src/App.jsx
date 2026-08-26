@@ -11,6 +11,7 @@ import AllowancesSection from './components/AllowancesSection';
 import SettingsPanel from './components/SettingsPanel';
 import AuditLogsModal from './components/AuditLogsModal';
 import AiAssistantBar from './components/AiAssistantBar';
+import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -20,6 +21,16 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [allAttendance, setAllAttendance] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Payroll Security Mode State (Default Locked)
+  const [isPayrollUnlocked, setIsPayrollUnlocked] = useState(
+    () => sessionStorage.getItem('kki_payroll_unlocked') === 'true'
+  );
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [showPasswordText, setShowPasswordText] = useState(false);
+  const [unlockError, setUnlockError] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState(false);
 
   // Selected worker details state
   const [selectedStaffNo, setSelectedStaffNo] = useState(null);
@@ -58,6 +69,48 @@ export default function App() {
   useEffect(() => {
     refreshData();
   }, []);
+
+  // Verify Password & Unlock Payroll
+  const handleVerifyPassword = async (e) => {
+    e.preventDefault();
+    if (!unlockPassword.trim()) {
+      setUnlockError('Please enter password.');
+      return;
+    }
+
+    setUnlockError('');
+    setUnlockLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/verify-payroll-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: unlockPassword.trim() }),
+      }).then(r => r.json());
+
+      if (res.success) {
+        setIsPayrollUnlocked(true);
+        sessionStorage.setItem('kki_payroll_unlocked', 'true');
+        setShowUnlockModal(false);
+        setUnlockPassword('');
+      } else {
+        setUnlockError(res.error || 'Incorrect password! Please try again.');
+      }
+    } catch (err) {
+      setUnlockError('Failed to verify: ' + err.message);
+    } finally {
+      setUnlockLoading(false);
+    }
+  };
+
+  // Lock Payroll
+  const handleLockPayroll = () => {
+    setIsPayrollUnlocked(false);
+    sessionStorage.removeItem('kki_payroll_unlocked');
+    if (activeTab === 'allowances' || activeTab === 'advance') {
+      setActiveTab('dashboard');
+    }
+  };
 
   // Fetch detail for single worker
   const fetchWorkerDetail = async (staffNo) => {
@@ -98,12 +151,11 @@ export default function App() {
           setActiveTab('workers');
           setPreviewData(res);
         } else {
-          alert('Upload Error: ' + (res.error || 'Failed to parse file.'));
+          alert('Upload error: ' + res.error);
         }
       } else {
         const text = await response.text();
-        console.error('Non-JSON upload response:', text);
-        alert('Upload Error: Server returned an invalid response. Please check your document format.');
+        alert('Server response error: ' + text.slice(0, 150));
       }
     } catch (err) {
       alert('Upload failed: ' + err.message);
@@ -112,14 +164,31 @@ export default function App() {
     }
   };
 
-  // Commit preview data (Data is already saved on upload)
-  const handleCommitPreview = async () => {
-    setPreviewData(null);
-    await refreshData();
-    setActiveTab('workers');
+  // Commit preview data
+  const handleCommitPreview = async (parsedData) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/upload/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parsedData }),
+      }).then(r => r.json());
+
+      if (res.success) {
+        setPreviewData(null);
+        await refreshData();
+        setActiveTab('workers');
+      } else {
+        alert('Commit error: ' + res.error);
+      }
+    } catch (err) {
+      alert('Commit failed: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Save Attendance Edit
+  // Save manual attendance edit
   const handleSaveEdit = async (editPayload) => {
     setLoading(true);
     try {
@@ -142,13 +211,14 @@ export default function App() {
     }
   };
 
-  // Add Advance Payment
-  const handleAddAdvance = async (advancePayload) => {
+  // Add advance payment
+  const handleAddAdvance = async (staffNo, amount, note, date) => {
+    setLoading(true);
     try {
       const res = await fetch('/api/advances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(advancePayload),
+        body: JSON.stringify({ staff_no: staffNo, amount, note, date }),
       }).then(r => r.json());
 
       if (res.success) {
@@ -158,11 +228,14 @@ export default function App() {
       }
     } catch (err) {
       alert('Advance failed: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Delete Advance
+  // Delete advance payment
   const handleDeleteAdvance = async (advanceId) => {
+    setLoading(true);
     try {
       const res = await fetch(`/api/advances/${advanceId}`, {
         method: 'DELETE',
@@ -170,30 +243,39 @@ export default function App() {
 
       if (res.success) {
         await refreshData();
+      } else {
+        alert('Delete error: ' + res.error);
       }
     } catch (err) {
-      console.error('Delete advance error:', err);
+      alert('Delete failed: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Update Worker Compensation (Base Salary & Allowances)
-  const handleUpdateCompensation = async (staffNo, compPayload) => {
+  // Update worker allowances
+  const handleUpdateCompensation = async (staffNo, compData) => {
+    setLoading(true);
     try {
       const res = await fetch(`/api/workers/${staffNo}/compensation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(compPayload),
+        body: JSON.stringify(compData),
       }).then(r => r.json());
 
       if (res.success) {
         await refreshData();
+      } else {
+        alert('Allowance error: ' + res.error);
       }
     } catch (err) {
-      console.error('Update compensation error:', err);
+      alert('Allowance update failed: ' + err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Update Worker Base Salary
+  // Update worker base salary
   const handleUpdateSalary = async (staffNo, newSalary) => {
     try {
       const res = await fetch(`/api/workers/${staffNo}/salary`, {
@@ -234,7 +316,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f19]">
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} metrics={metrics} />
+      <Navbar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        metrics={metrics}
+        isPayrollUnlocked={isPayrollUnlocked}
+        onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
+        onLockPayroll={handleLockPayroll}
+      />
 
       <AiAssistantBar onRefreshData={refreshData} />
 
@@ -247,6 +336,8 @@ export default function App() {
             onUploadFile={handleUploadFile}
             setActiveTab={setActiveTab}
             onEditRecord={(rec) => setEditingRecord(rec)}
+            isPayrollUnlocked={isPayrollUnlocked}
+            onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
           />
         )}
 
@@ -256,10 +347,12 @@ export default function App() {
             onSelectWorker={handleSelectWorker}
             onAddAdvance={(staffNo) => setAdvanceStaffNo(staffNo)}
             onUpdateSalary={handleUpdateSalary}
+            isPayrollUnlocked={isPayrollUnlocked}
+            onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
           />
         )}
 
-        {activeTab === 'allowances' && (
+        {activeTab === 'allowances' && isPayrollUnlocked && (
           <AllowancesSection
             workers={workers}
             onUpdateCompensation={handleUpdateCompensation}
@@ -273,10 +366,12 @@ export default function App() {
             onBack={() => setActiveTab('workers')}
             onEditRecord={(rec) => setEditingRecord(rec)}
             onAddAdvance={(staffNo) => setAdvanceStaffNo(staffNo)}
+            isPayrollUnlocked={isPayrollUnlocked}
+            onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
           />
         )}
 
-        {activeTab === 'advance' && (
+        {activeTab === 'advance' && isPayrollUnlocked && (
           <AdvanceSection
             workers={workers}
             onAddAdvance={handleAddAdvance}
@@ -296,6 +391,86 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* MODAL: UNLOCK PAYROLL & SALARY MODE */}
+      {showUnlockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in">
+          <div className="glass-modal w-full max-w-md rounded-2xl p-6 shadow-2xl border-2 border-amber-500/60 bg-slate-900 space-y-4">
+            
+            <div className="flex items-center justify-between border-b-2 border-slate-700 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-950 text-amber-300 border border-amber-600 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white font-display">Unlock Salary Mode</h3>
+                  <p className="text-xs text-slate-300">Enter Admin Password to view Payroll</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowUnlockModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleVerifyPassword} className="space-y-4 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-1.5">
+                  Admin PIN / Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPasswordText ? 'text' : 'password'}
+                    placeholder="Enter password..."
+                    value={unlockPassword}
+                    onChange={(e) => { setUnlockPassword(e.target.value); setUnlockError(''); }}
+                    className="w-full bg-slate-950 border-2 border-slate-700 rounded-xl pl-4 pr-11 py-2.5 text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    autoFocus
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordText(!showPasswordText)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                  >
+                    {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Default Password: <strong className="text-amber-400 font-mono">kki123</strong> (Changeable in Rules & Settings)
+                </p>
+              </div>
+
+              {unlockError && (
+                <div className="p-3 rounded-xl text-xs font-bold bg-rose-950 text-rose-300 border border-rose-600 animate-in shake">
+                  {unlockError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end space-x-3 border-t-2 border-slate-700 pt-4 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUnlockModal(false)}
+                  className="px-4 py-2.5 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-600 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={unlockLoading || !unlockPassword}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-xl shadow-md border border-amber-400 transition-all disabled:opacity-50 flex items-center space-x-1.5"
+                >
+                  <Unlock className="w-4 h-4" />
+                  <span>{unlockLoading ? 'Verifying...' : 'Unlock Payroll & Salaries'}</span>
+                </button>
+              </div>
+            </form>
+
+          </div>
+        </div>
+      )}
 
       {/* Modals */}
       {previewData && (
