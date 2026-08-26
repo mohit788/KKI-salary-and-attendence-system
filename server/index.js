@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const { execute, initDatabase } = require('./db');
+const { execute, batch, initDatabase } = require('./db');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
 const { computeDailyAttendance, applyWeeklyOffForfeiture, formatHours, detectDailyFactoryShift, buildDailyShiftMap } = require('./rulesEngine');
@@ -260,7 +260,7 @@ app.delete('/api/rule-profiles/:id', async (req, res) => {
   }
 });
 
-// 3. POST Upload File (Auto-process and commit to DB)
+// 3. POST Upload File (Auto-process and high-speed batch commit to DB)
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No file uploaded.' });
@@ -283,7 +283,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ success: false, error: 'No worker punch records found in the uploaded file.' });
     }
 
-    // Auto-commit data into DB directly on upload
     const batchId = `BATCH_${Date.now()}`;
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
@@ -297,25 +296,28 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     let totalRecords = 0;
     let flaggedCount = 0;
-    let datesSet = new Set();
+    const datesSet = new Set();
+    const dbStatements = [];
 
     for (const worker of parsedWorkers) {
-      // Upsert worker profile
-      await execute(
-        `INSERT INTO workers (staff_no, staff_name, department) VALUES (?, ?, ?)
-         ON CONFLICT(staff_no) DO UPDATE SET staff_name = excluded.staff_name, department = excluded.department`,
-        [worker.staff_no, worker.staff_name, worker.department || 'WORKER']
-      );
+      // Worker profile upsert statement
+      dbStatements.push({
+        sql: `INSERT INTO workers (staff_no, staff_name, department) VALUES (?, ?, ?)
+              ON CONFLICT(staff_no) DO UPDATE SET staff_name = excluded.staff_name, department = excluded.department`,
+        args: [worker.staff_no, worker.staff_name, worker.department || 'WORKER']
+      });
 
-      const sortedRecords = (worker.records || []).sort((a, b) => a.date.localeCompare(b.date));
+      const sortedRecords = (worker.records || []).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
       let dailyComputed = sortedRecords.map(r => {
         totalRecords++;
         if (r.date) datesSet.add(r.date);
-        const { timestamps, isOdd } = parseSwipeRecord(r.swipe_record);
-        if (isOdd) flaggedCount++;
+        const { timestamps } = parseSwipeRecord(r.swipe_record);
         const dateShift = dailyShiftMap.get(r.date) || settings.shift_start || '08:00';
         const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, dateShift);
+        if (attendance.status === 'Incomplete') {
+          flaggedCount++;
+        }
         return {
           staff_no: worker.staff_no,
           date: r.date,
@@ -329,11 +331,11 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings);
 
       for (const d of dailyComputed) {
-        await execute(
-          `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record, machine_work_time, batch_id)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record, machine_work_time = excluded.machine_work_time`,
-          [
+        dbStatements.push({
+          sql: `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record, machine_work_time, batch_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record, machine_work_time = excluded.machine_work_time`,
+          args: [
             d.staff_no || '',
             d.date || '',
             d.weekday || '',
@@ -341,22 +343,22 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
             d.machine_work_time || '',
             batchId
           ]
-        );
+        });
 
-        await execute(
-          `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(staff_no, date) DO UPDATE SET
-             raw_swipes = excluded.raw_swipes,
-             effective_in = excluded.effective_in,
-             effective_out = excluded.effective_out,
-             regular_hours = excluded.regular_hours,
-             ot_hours = excluded.ot_hours,
-             sunday_ot_hours = excluded.sunday_ot_hours,
-             total_hours = excluded.total_hours,
-             late_minutes = excluded.late_minutes,
-             status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
-          [
+        dbStatements.push({
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(staff_no, date) DO UPDATE SET
+                  raw_swipes = excluded.raw_swipes,
+                  effective_in = excluded.effective_in,
+                  effective_out = excluded.effective_out,
+                  regular_hours = excluded.regular_hours,
+                  ot_hours = excluded.ot_hours,
+                  sunday_ot_hours = excluded.sunday_ot_hours,
+                  total_hours = excluded.total_hours,
+                  late_minutes = excluded.late_minutes,
+                  status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
+          args: [
             d.staff_no || '',
             d.date || '',
             d.weekday || '',
@@ -370,8 +372,14 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
             d.lateMinutes || 0,
             d.status || 'Absent'
           ]
-        );
+        });
       }
+    }
+
+    // High-speed chunked batch execution (chunks of 150 statements)
+    for (let i = 0; i < dbStatements.length; i += 150) {
+      const chunk = dbStatements.slice(i, i + 150);
+      await batch(chunk);
     }
 
     const sortedDates = Array.from(datesSet).sort();
@@ -387,7 +395,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       startDate,
       endDate,
       parsedData: parsedWorkers,
-      message: `Successfully processed and saved ${parsedWorkers.length} workers (${totalRecords} attendance records) to database!`,
+      message: `Successfully processed and saved ${parsedWorkers.length} workers (${totalRecords} records) in seconds!`,
     });
   } catch (err) {
     console.error('File Upload Parsing & Commit Error:', err);
@@ -399,7 +407,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// 4. POST Commit Upload Data to DB (Fallback support)
+// 4. POST Commit Upload Data to DB (Fallback support with batching)
 app.post('/api/upload/commit', async (req, res) => {
   try {
     const { parsedData } = req.body;
@@ -411,25 +419,22 @@ app.post('/api/upload/commit', async (req, res) => {
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
-    // Pre-calculate daily factory shift map across all parsed records
     const allRecordsFlat = [];
     parsedData.forEach(w => {
       (w.records || []).forEach(r => allRecordsFlat.push(r));
     });
     const dailyShiftMap = buildDailyShiftMap(allRecordsFlat, settings.shift_start || '08:00');
+    const dbStatements = [];
 
     for (const worker of parsedData) {
-      // Upsert worker profile
-      await execute(
-        `INSERT INTO workers (staff_no, staff_name, department) VALUES (?, ?, ?)
-         ON CONFLICT(staff_no) DO UPDATE SET staff_name = excluded.staff_name, department = excluded.department`,
-        [worker.staff_no, worker.staff_name, worker.department || 'WORKER']
-      );
+      dbStatements.push({
+        sql: `INSERT INTO workers (staff_no, staff_name, department) VALUES (?, ?, ?)
+              ON CONFLICT(staff_no) DO UPDATE SET staff_name = excluded.staff_name, department = excluded.department`,
+        args: [worker.staff_no, worker.staff_name, worker.department || 'WORKER']
+      });
 
-      // Sort worker daily records by date
-      const sortedRecords = (worker.records || []).sort((a, b) => a.date.localeCompare(b.date));
+      const sortedRecords = (worker.records || []).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-      // Calculate initial attendance for each day
       let dailyComputed = sortedRecords.map(r => {
         const { timestamps } = parseSwipeRecord(r.swipe_record);
         const dateShift = dailyShiftMap.get(r.date) || settings.shift_start || '08:00';
@@ -444,16 +449,14 @@ app.post('/api/upload/commit', async (req, res) => {
         };
       });
 
-      // Apply Sunday / Weekly Off Forfeiture logic
       dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings);
 
-      // Save to raw_punches & daily_attendance DB
       for (const d of dailyComputed) {
-        await execute(
-          `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record, machine_work_time, batch_id)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record, machine_work_time = excluded.machine_work_time`,
-          [
+        dbStatements.push({
+          sql: `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record, machine_work_time, batch_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record, machine_work_time = excluded.machine_work_time`,
+          args: [
             d.staff_no || '',
             d.date || '',
             d.weekday || '',
@@ -461,22 +464,22 @@ app.post('/api/upload/commit', async (req, res) => {
             d.machine_work_time || '',
             batchId
           ]
-        );
+        });
 
-        await execute(
-          `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(staff_no, date) DO UPDATE SET
-             raw_swipes = excluded.raw_swipes,
-             effective_in = excluded.effective_in,
-             effective_out = excluded.effective_out,
-             regular_hours = excluded.regular_hours,
-             ot_hours = excluded.ot_hours,
-             sunday_ot_hours = excluded.sunday_ot_hours,
-             total_hours = excluded.total_hours,
-             late_minutes = excluded.late_minutes,
-             status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
-          [
+        dbStatements.push({
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(staff_no, date) DO UPDATE SET
+                  raw_swipes = excluded.raw_swipes,
+                  effective_in = excluded.effective_in,
+                  effective_out = excluded.effective_out,
+                  regular_hours = excluded.regular_hours,
+                  ot_hours = excluded.ot_hours,
+                  sunday_ot_hours = excluded.sunday_ot_hours,
+                  total_hours = excluded.total_hours,
+                  late_minutes = excluded.late_minutes,
+                  status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
+          args: [
             d.staff_no || '',
             d.date || '',
             d.weekday || '',
@@ -490,8 +493,13 @@ app.post('/api/upload/commit', async (req, res) => {
             d.lateMinutes || 0,
             d.status || 'Absent'
           ]
-        );
+        });
       }
+    }
+
+    for (let i = 0; i < dbStatements.length; i += 150) {
+      const chunk = dbStatements.slice(i, i + 150);
+      await batch(chunk);
     }
 
     res.json({ success: true, message: `Successfully committed ${parsedData.length} workers to database.` });
@@ -788,7 +796,10 @@ app.post('/api/attendance/edit', async (req, res) => {
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
-    const { timestamps } = parseSwipeRecord(raw_swipes || oldRec.raw_swipes);
+    
+    // Parse timestamps from newly provided raw_swipes (or fallback)
+    const effectiveSwipes = raw_swipes !== undefined ? raw_swipes : (oldRec.raw_swipes || '');
+    const { timestamps } = parseSwipeRecord(effectiveSwipes);
 
     const datePunchesRes = await execute(`SELECT raw_swipes as swipe_record FROM daily_attendance WHERE date = ?`, [date]);
     const dateShift = detectDailyFactoryShift(
@@ -797,7 +808,23 @@ app.post('/api/attendance/edit', async (req, res) => {
     );
 
     const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday, customRules, dateShift);
-    const finalStatus = status || computed.status;
+    
+    let regularHours = computed.regularHours;
+    let otHours = computed.otHours;
+    let sundayOtHours = computed.sundayOtHours;
+    let totalHours = computed.totalHours;
+    let effectiveIn = computed.effectiveIn;
+    let effectiveOut = computed.effectiveOut;
+    let lateMinutes = computed.lateMinutes;
+    let finalStatus = status || computed.status;
+
+    // If admin explicitly marked "Present (Full)" but no timestamps were entered or gave 0h
+    if (finalStatus === 'Present (Full)' && regularHours === 0 && timestamps.length === 0) {
+      regularHours = 8.0;
+      totalHours = 8.0;
+      effectiveIn = dateShift || settings.shift_start || '08:00';
+      effectiveOut = settings.shift_end || '16:30';
+    }
 
     // Log to Audit Table
     await execute(
@@ -808,18 +835,18 @@ app.post('/api/attendance/edit', async (req, res) => {
         date,
         'Attendance Record',
         `Swipes: ${oldRec.raw_swipes || ''}, Status: ${oldRec.status || ''}`,
-        `Swipes: ${raw_swipes || ''}, Status: ${finalStatus}`,
+        `Swipes: ${effectiveSwipes}, Status: ${finalStatus}`,
         edited_by || 'Admin',
         reason || 'Manual correction',
       ]
     );
 
-    // Also update raw_punches
+    // Also update raw_punches so any future recomputations preserve new punches
     await execute(
       `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record)
        VALUES (?, ?, ?, ?)
        ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record`,
-      [staff_no, date, oldRec.weekday || '', raw_swipes]
+      [staff_no, date, oldRec.weekday || '', effectiveSwipes]
     );
 
     // Update Daily Attendance
@@ -829,14 +856,14 @@ app.post('/api/attendance/edit', async (req, res) => {
          late_minutes = ?, status = ?, is_manual_override = 1, override_reason = ?
        WHERE staff_no = ? AND date = ?`,
       [
-        raw_swipes,
-        computed.effectiveIn,
-        computed.effectiveOut,
-        computed.regularHours,
-        computed.otHours,
-        computed.sundayOtHours,
-        computed.totalHours,
-        computed.lateMinutes,
+        effectiveSwipes,
+        effectiveIn,
+        effectiveOut,
+        regularHours,
+        otHours,
+        sundayOtHours,
+        totalHours,
+        lateMinutes,
         finalStatus,
         reason || 'Manual correction',
         staff_no,
@@ -844,7 +871,22 @@ app.post('/api/attendance/edit', async (req, res) => {
       ]
     );
 
-    res.json({ success: true, message: 'Record updated and audit log saved.' });
+    // Re-evaluate Sunday forfeiture for this worker's month so Sunday paid status stays accurate
+    const workerAttRes = await execute(
+      `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+      [staff_no]
+    );
+    const recheckedRecords = applyWeeklyOffForfeiture(workerAttRes.rows, settings);
+    for (const r of recheckedRecords) {
+      if (r.status.includes('Weekly Off')) {
+        await execute(
+          `UPDATE daily_attendance SET status = ? WHERE staff_no = ? AND date = ? AND is_manual_override = 0`,
+          [r.status, staff_no, r.date]
+        );
+      }
+    }
+
+    res.json({ success: true, message: 'Record updated, hours and overtime recalculated, and audit log saved.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
