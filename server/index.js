@@ -1279,10 +1279,6 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 
 // -------------------------------------------------------------
 // CUSTOM SALARY RULES API

@@ -444,32 +444,31 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 }
 
 /**
- * Checks whether a daily record is a pure unworked absent (0 worked hours / no punch).
- * Days where the worker worked < 8 hours (partial duty converted to OT) do NOT count as pure absent for forfeiture.
+ * Helper to determine if an Absent record is a PURE unworked absence (0 hours)
+ * Partial duty (<8h) where hours were worked and credited to OT is EXEMPT from Sunday forfeiture.
  */
 function isPureAbsentForForfeiture(rec) {
   if (!rec) return false;
-  const isAbsent = (rec.status === 'Absent' || rec.status === 'absent');
+  const isAbsent = (rec.status === 'Absent');
   if (!isAbsent) return false;
-  const ot = Number(rec.ot_hours || rec.otHours || 0);
-  const sundayOt = Number(rec.sunday_ot_hours || rec.sundayOtHours || 0);
-  const total = Number(rec.total_hours || rec.totalHours || 0);
-  // If worker worked > 0 hours (e.g. partial shift converted to OT), exempt from forfeiture
-  return (ot <= 0 && sundayOt <= 0 && total <= 0);
+  const ot = parseFloat(rec.ot_hours || rec.otHours || 0);
+  const sunOt = parseFloat(rec.sunday_ot_hours || rec.sundayOtHours || 0);
+  const total = parseFloat(rec.total_hours || rec.totalHours || 0);
+  return (ot <= 0 && sunOt <= 0 && total <= 0);
 }
 
 /**
- * Apply Sunday / Weekly-Off Forfeiture Logic to a full month of records per worker
- * @param {Array<Object>} dailyRecords - Array of daily attendance objects sorted by date
- * @param {Object} settings
+ * Apply Weekly & Monthly Sunday Forfeiture rules
+ * @param {Array<Object>} dailyRecords - Array of daily attendance objects
+ * @param {Object} settings - Configuration map
  */
 function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
-  const absentThreshold = parseInt(settings.forfeiture_absent_threshold || 2, 10);
+  const absentThreshold = parseInt(settings.absent_forfeiture_threshold || 2, 10);
   const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 3, 10);
   const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 4, 10);
 
-  // Count total monthly absents (ONLY pure unworked absents)
+  // Count total monthly PURE absents (0h worked)
   let totalMonthlyAbsents = 0;
   dailyRecords.forEach(r => {
     if (isPureAbsentForForfeiture(r)) totalMonthlyAbsents++;
@@ -537,6 +536,7 @@ module.exports = {
   cleanAndDebouncePunches,
   getEffectiveFirstIn,
   computeDailyAttendance,
+  isPureAbsentForForfeiture,
   applyWeeklyOffForfeiture,
 };
 
