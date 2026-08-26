@@ -179,6 +179,38 @@ function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30) 
 }
 
 /**
+ * Cleans and debounces raw biometric punches.
+ * Removes duplicate punches occurring within debounceMins (e.g. <= 5 minutes).
+ * @param {Array<string>} timestamps - ['07:58', '08:01', '16:30']
+ * @param {number} debounceMins - default 5
+ */
+function cleanAndDebouncePunches(timestamps = [], debounceMins = 5) {
+  if (!Array.isArray(timestamps) || timestamps.length === 0) return [];
+  const valid = timestamps.filter(t => t && /^\d{1,2}:\d{2}$/.test(String(t).trim()));
+  if (valid.length === 0) return [];
+
+  // Chronological sort
+  const sorted = [...valid].sort((a, b) => timeToMins(a) - timeToMins(b));
+  const cleaned = [];
+
+  for (let i = 0; i < sorted.length; i++) {
+    const cur = sorted[i];
+    if (cleaned.length === 0) {
+      cleaned.push(cur);
+      continue;
+    }
+    const prev = cleaned[cleaned.length - 1];
+    const diff = timeToMins(cur) - timeToMins(prev);
+    // Ignore rapid duplicate punches within debounce window
+    if (diff > debounceMins) {
+      cleaned.push(cur);
+    }
+  }
+
+  return cleaned;
+}
+
+/**
  * Compute daily attendance, regular hours (8h duty), OT hours (after completing 8h work + lunch), and status
  * @param {Array<string>} timestamps - array of HH:MM timestamps ["07:54", "16:30"] or ["08:31", "18:30"]
  * @param {Object} settings - rule parameters
@@ -197,8 +229,10 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const lunchDeductionMins = parseInt(settings.lunch_deduction_mins !== undefined ? settings.lunch_deduction_mins : 30, 10);
   const latePenaltyThresholdMins = parseInt(settings.late_penalty_threshold_mins || 120, 10);
 
-  // No punches -> Absent
-  if (!timestamps || timestamps.length === 0) {
+  const cleanedPunches = cleanAndDebouncePunches(timestamps, 5);
+
+  // 1. No punches -> Absent / Weekly Off
+  if (!cleanedPunches || cleanedPunches.length === 0) {
     const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
     return {
       effectiveIn: '',
@@ -213,17 +247,19 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     };
   }
 
-  // Odd timestamp count -> Incomplete Needs Review
-  if (timestamps.length % 2 !== 0) {
+  // 2. Single punch -> Incomplete (Missed OUT)
+  if (cleanedPunches.length === 1) {
+    const firstIn = cleanedPunches[0];
+    const { effectiveTime: effectiveInTime, lateMins } = getEffectiveFirstIn(firstIn, shiftStart, slabMinutes);
     return {
-      effectiveIn: timestamps[0] || '',
-      effectiveOut: timestamps[timestamps.length - 1] || '',
-      punchPairsFormatted: timestamps.join(' ➔ '),
+      effectiveIn: effectiveInTime,
+      effectiveOut: '—',
+      punchPairsFormatted: `IN ${firstIn} (Missed OUT)`,
       regularHours: 0,
       otHours: 0,
       sundayOtHours: 0,
       totalHours: 0,
-      lateMinutes: 0,
+      lateMinutes: lateMins,
       status: 'Incomplete',
     };
   }
@@ -231,7 +267,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
 
   // Span 1: apply grace slab to first IN punch
-  const firstIn = timestamps[0];
+  const firstIn = cleanedPunches[0];
   const { effectiveTime: effectiveInTime, effectiveMins: effectiveInMins, lateMins } = getEffectiveFirstIn(
     firstIn,
     shiftStart,
@@ -243,32 +279,50 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   let maxMidDayExitMins = 0;
   const punchPairStrings = [];
 
-  // Process all (IN, OUT) pairs
-  for (let i = 0; i < timestamps.length; i += 2) {
-    const rawIn = timestamps[i];
-    const rawOut = timestamps[i + 1];
+  if (cleanedPunches.length % 2 === 0) {
+    // EVEN PUNCHES (2, 4, 6...): Process exact (IN, OUT) pairs
+    for (let i = 0; i < cleanedPunches.length; i += 2) {
+      const rawIn = cleanedPunches[i];
+      const rawOut = cleanedPunches[i + 1];
 
-    punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
+      punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
 
-    // Check break duration between previous OUT and current IN
-    if (i >= 2) {
-      const prevOut = timestamps[i - 1];
-      const prevOutMins = timeToMins(prevOut);
-      const curInMins = timeToMins(rawIn);
-      if (curInMins > prevOutMins) {
-        const breakSpan = curInMins - prevOutMins;
-        totalBreakMins += breakSpan;
-        if (breakSpan > maxMidDayExitMins) maxMidDayExitMins = breakSpan;
+      // Check break duration between previous OUT and current IN
+      if (i >= 2) {
+        const prevOut = cleanedPunches[i - 1];
+        const prevOutMins = timeToMins(prevOut);
+        const curInMins = timeToMins(rawIn);
+        if (curInMins > prevOutMins) {
+          const breakSpan = curInMins - prevOutMins;
+          totalBreakMins += breakSpan;
+          if (breakSpan > maxMidDayExitMins) maxMidDayExitMins = breakSpan;
+        }
       }
+
+      const inMins = (i === 0) ? effectiveInMins : timeToMins(rawIn);
+      const outMins = timeToMins(rawOut);
+
+      if (outMins <= inMins) continue;
+
+      const span = outMins - inMins;
+      totalRawWorkedMins += span;
+    }
+  } else {
+    // ODD PUNCHES (3, 5... e.g. missed second lunch punch or mid-day punch)
+    // SMART RESOLUTION: Span from First IN (effective) to Final OUT
+    const finalOut = cleanedPunches[cleanedPunches.length - 1];
+    const finalOutMins = timeToMins(finalOut);
+    
+    // Format punch string
+    for (let i = 0; i < cleanedPunches.length; i++) {
+      if (i === 0) punchPairStrings.push(`IN ${cleanedPunches[i]}`);
+      else if (i === cleanedPunches.length - 1) punchPairStrings.push(`OUT ${cleanedPunches[i]}`);
+      else punchPairStrings.push(`MID ${cleanedPunches[i]}`);
     }
 
-    const inMins = (i === 0) ? effectiveInMins : timeToMins(rawIn);
-    const outMins = timeToMins(rawOut);
-
-    if (outMins <= inMins) continue;
-
-    const span = outMins - inMins;
-    totalRawWorkedMins += span;
+    if (finalOutMins > effectiveInMins) {
+      totalRawWorkedMins = finalOutMins - effectiveInMins;
+    }
   }
 
   // 1. Handle Lunch Deduction (UNPAID 30 minutes):
@@ -480,6 +534,7 @@ module.exports = {
   formatHours,
   detectDailyFactoryShift,
   buildDailyShiftMap,
+  cleanAndDebouncePunches,
   getEffectiveFirstIn,
   computeDailyAttendance,
   applyWeeklyOffForfeiture,

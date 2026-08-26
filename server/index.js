@@ -1035,7 +1035,22 @@ app.post('/api/google-sheets/sync', async (req, res) => {
   }
 });
 
-// 12. GET Export Formatted Excel Report
+// Helper: Auto-fit Excel sheet columns
+function formatAndAutoFitWorksheet(worksheet, dataAoA) {
+  if (!worksheet || !Array.isArray(dataAoA) || dataAoA.length === 0) return;
+  const colWidths = [];
+  dataAoA.forEach(row => {
+    if (!Array.isArray(row)) return;
+    row.forEach((val, colIdx) => {
+      const strVal = String(val !== null && val !== undefined ? val : '');
+      const strLen = strVal.length;
+      colWidths[colIdx] = Math.max(colWidths[colIdx] || 10, strLen + 4);
+    });
+  });
+  worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(Math.max(w, 13), 45) }));
+}
+
+// 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted)
 app.get('/api/export/excel', async (req, res) => {
   try {
     const settings = await getSettingsMap();
@@ -1043,15 +1058,11 @@ app.get('/api/export/excel', async (req, res) => {
     const workersRes = await execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`);
 
     const summaryRows = [
-      ['Staff No', 'Staff Name', 'Department', 'Monthly Salary (₹)', 'Housing Allowance (₹)', 'Food Allowance (₹)', 'Other Allowance (₹)', 'Per Day Rate (₹)', 'Present Days (Full)', 'Short Days', 'Paid Weekly Offs', 'Forfeited Weekly Offs', 'Absent Days', 'Incomplete Days', 'Payable Days', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Worked Hours', 'Total Worked Clock Time', 'Base Pay (₹)', 'OT Pay (₹)', 'Total Allowances (₹)', 'Gross Salary (₹)', 'Advance Deductions (₹)', 'Net Payable Salary (₹)']
+      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours']
     ];
 
     const dailyRows = [
-      ['Staff No', 'Staff Name', 'Date', 'Day', 'Raw Swipes', 'Punch Pairs (IN ➔ OUT)', 'Effective In', 'Effective Out', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Hours', 'Total Clock Time', 'Late Minutes', 'Attendance Status']
-    ];
-
-    const advanceRows = [
-      ['ID', 'Staff No', 'Staff Name', 'Advance Date', 'Amount (₹)', 'Notes / Reason']
+      ['Staff No', 'Employee Name', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Mins', 'Attendance Status']
     ];
 
     for (const w of workersRes.rows) {
@@ -1066,49 +1077,32 @@ app.get('/api/export/excel', async (req, res) => {
 
       const p = calculateWorkerPayroll({
         monthlySalary: w.monthly_salary,
-        housingAllowance: w.housing_allowance,
-        foodAllowance: w.food_allowance,
-        otherAllowance: w.other_allowance,
         dailyRecords: attRes.rows,
         advances: advRes.rows,
         settings,
       });
 
-      const regHours = +(p.totalWorkedHours - p.totalOtHours).toFixed(2);
+      const regHours = +(p.totalWorkedHours - p.totalOtHours - p.totalSundayOtHours).toFixed(2);
 
       summaryRows.push([
         w.staff_no,
         w.staff_name,
         w.department || 'WORKER',
-        w.monthly_salary || 15000,
-        w.housing_allowance || 0,
-        w.food_allowance || 0,
-        w.other_allowance || 0,
-        p.perDayRate,
-        p.fullPresentDays,
-        p.shortDays,
-        p.paidWeeklyOffs,
-        p.forfeitedWeeklyOffs,
-        p.absentDays,
-        p.incompleteDays,
-        p.payableDays,
+        p.fullPresentDays || 0,
+        p.paidWeeklyOffs || 0,
+        p.absentDays || 0,
+        p.payableDays || 0,
         regHours,
-        formatHours(regHours),
-        p.totalOtHours,
-        formatHours(p.totalOtHours),
-        p.totalWorkedHours,
-        formatHours(p.totalWorkedHours),
-        p.basePay,
-        p.otPay,
-        p.totalAllowances,
-        p.grossSalary,
-        p.totalAdvances,
-        p.netPayable,
+        p.totalOtHours || 0,
+        p.totalSundayOtHours || 0,
+        +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2),
+        p.totalWorkedHours || 0,
       ]);
 
       attRes.rows.forEach(r => {
         const { timestamps } = parseSwipeRecord(r.raw_swipes);
         const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+        const totalOt = +((r.ot_hours || 0) + (r.sunday_ot_hours || 0)).toFixed(2);
 
         dailyRows.push([
           w.staff_no,
@@ -1117,55 +1111,34 @@ app.get('/api/export/excel', async (req, res) => {
           r.weekday || '',
           r.raw_swipes || '',
           computed.punchPairsFormatted || r.raw_swipes || '',
-          r.effective_in || '',
-          r.effective_out || '',
+          r.effective_in || '—',
+          r.effective_out || '—',
           r.regular_hours || 0,
-          formatHours(r.regular_hours || 0),
           r.ot_hours || 0,
-          formatHours(r.ot_hours || 0),
+          r.sunday_ot_hours || 0,
+          totalOt,
           r.total_hours || 0,
-          formatHours(r.total_hours || 0),
           r.late_minutes || 0,
           r.status || 'Absent',
         ]);
       });
-
-      advRes.rows.forEach(a => {
-        advanceRows.push([
-          a.id,
-          w.staff_no,
-          w.staff_name,
-          a.date,
-          a.amount,
-          a.note || '',
-        ]);
-      });
     }
-
-    const settingsRes = await execute(`SELECT * FROM settings`);
-    const rulesRows = [
-      ['Rule Key', 'Configured Value', 'Description']
-    ];
-    settingsRes.rows.forEach(s => {
-      rulesRows.push([s.key, s.value, s.description || '']);
-    });
 
     const wb = XLSX.utils.book_new();
 
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
-    const wsDaily = XLSX.utils.aoa_to_sheet(dailyRows);
-    const wsAdvance = XLSX.utils.aoa_to_sheet(advanceRows);
-    const wsRules = XLSX.utils.aoa_to_sheet(rulesRows);
+    formatAndAutoFitWorksheet(wsSummary, summaryRows);
 
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Payroll Summary');
-    XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Swipes & Attendance');
-    XLSX.utils.book_append_sheet(wb, wsAdvance, 'Advance Payments Ledger');
-    XLSX.utils.book_append_sheet(wb, wsRules, 'Active Rules Engine');
+    const wsDaily = XLSX.utils.aoa_to_sheet(dailyRows);
+    formatAndAutoFitWorksheet(wsDaily, dailyRows);
+
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Monthly Attendance & OT');
+    XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Punch Breakdown');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="Factory_Attendance_Payroll_Report.xlsx"');
+    res.setHeader('Content-Disposition', 'attachment; filename="Factory_Attendance_and_Overtime_Report.xlsx"');
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1189,12 +1162,13 @@ app.get('/api/export/excel/timings', async (req, res) => {
     `);
 
     const dailyRows = [
-      ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Biometric Swipes', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Worked Hours', 'Total Clock Time', 'Late Minutes', 'Attendance Status']
+      ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Minutes', 'Attendance Status']
     ];
 
     result.rows.forEach(r => {
       const { timestamps } = parseSwipeRecord(r.raw_swipes);
       const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+      const totalOt = +((r.ot_hours || 0) + (r.sunday_ot_hours || 0)).toFixed(2);
 
       dailyRows.push([
         r.staff_no,
@@ -1204,14 +1178,13 @@ app.get('/api/export/excel/timings', async (req, res) => {
         r.weekday || '',
         r.raw_swipes || '',
         computed.punchPairsFormatted || r.raw_swipes || '',
-        r.effective_in || '',
-        r.effective_out || '',
+        r.effective_in || '—',
+        r.effective_out || '—',
         r.regular_hours || 0,
-        formatHours(r.regular_hours || 0),
         r.ot_hours || 0,
-        formatHours(r.ot_hours || 0),
+        r.sunday_ot_hours || 0,
+        totalOt,
         r.total_hours || 0,
-        formatHours(r.total_hours || 0),
         r.late_minutes || 0,
         r.status || 'Absent',
       ]);
@@ -1219,6 +1192,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
 
     const wb = XLSX.utils.book_new();
     const wsDaily = XLSX.utils.aoa_to_sheet(dailyRows);
+    formatAndAutoFitWorksheet(wsDaily, dailyRows);
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Biometric Timings');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -1260,27 +1234,27 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
     });
 
     const summaryRows = [
-      ['Staff No', 'Staff Name', 'Department', 'Monthly Salary (₹)', 'Per Day Rate (₹)', 'Present Days', 'Short Days', 'Paid Weekly Offs', 'Absent Days', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Gross Salary (₹)', 'Advance Deductions (₹)', 'Net Salary Payable (₹)'],
-      [w.staff_no, w.staff_name, w.department || 'WORKER', w.monthly_salary, p.perDayRate, p.fullPresentDays, p.shortDays, p.paidWeeklyOffs, p.absentDays, +(p.totalWorkedHours - p.totalOtHours).toFixed(2), formatHours(+(p.totalWorkedHours - p.totalOtHours).toFixed(2)), p.totalOtHours, formatHours(p.totalOtHours), p.grossSalary, p.totalAdvances, p.netPayable]
+      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours'],
+      [w.staff_no, w.staff_name, w.department || 'WORKER', p.fullPresentDays || 0, p.paidWeeklyOffs || 0, p.absentDays || 0, p.payableDays || 0, +(p.totalWorkedHours - p.totalOtHours - p.totalSundayOtHours).toFixed(2), p.totalOtHours || 0, p.totalSundayOtHours || 0, +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2), p.totalWorkedHours || 0]
     ];
 
     const dailyRows = [
-      ['Date', 'Day', 'Raw Swipes', 'Effective In', 'Effective Out', 'Regular Hours', 'Regular Clock Time', 'OT Hours (After 8h Duty)', 'OT Clock Time', 'Total Hours', 'Total Clock Time', 'Late Mins', 'Status']
+      ['Date', 'Day', 'Raw Punches', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Mins', 'Attendance Status']
     ];
 
     attRes.rows.forEach(r => {
+      const totalOt = +((r.ot_hours || 0) + (r.sunday_ot_hours || 0)).toFixed(2);
       dailyRows.push([
         r.date,
         r.weekday || '',
         r.raw_swipes || '',
-        r.effective_in || '',
-        r.effective_out || '',
+        r.effective_in || '—',
+        r.effective_out || '—',
         r.regular_hours || 0,
-        formatHours(r.regular_hours || 0),
         r.ot_hours || 0,
-        formatHours(r.ot_hours || 0),
+        r.sunday_ot_hours || 0,
+        totalOt,
         r.total_hours || 0,
-        formatHours(r.total_hours || 0),
         r.late_minutes || 0,
         r.status || 'Absent',
       ]);
@@ -1288,7 +1262,10 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
 
     const wb = XLSX.utils.book_new();
     const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+    formatAndAutoFitWorksheet(wsSummary, summaryRows);
+
     const wsDaily = XLSX.utils.aoa_to_sheet(dailyRows);
+    formatAndAutoFitWorksheet(wsDaily, dailyRows);
 
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Worker Summary');
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Biometric Swipes');
@@ -1298,6 +1275,10 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Worker_${staff_no}_${w.staff_name.replace(/\s+/g, '_')}_Attendance.xlsx"`);
     res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1659,6 +1640,7 @@ app.post('/api/ai-assistant/generate-report', async (req, res) => {
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(reportRows);
+    formatAndAutoFitWorksheet(ws, reportRows);
     XLSX.utils.book_append_sheet(wb, ws, 'AI Report');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
