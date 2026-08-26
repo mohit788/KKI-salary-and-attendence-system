@@ -88,11 +88,11 @@ export default function UploadPreviewModal({ previewData, onConfirm, onCancel, l
             Cancel
           </button>
           <button
-            onClick={onConfirm}
-            className="px-5 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center space-x-2 transition-all"
+            onClick={() => onConfirm()}
+            className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center space-x-2 transition-all cursor-pointer"
           >
             <CheckCircle className="w-4 h-4" />
-            <span>View Processed Workers & Payroll</span>
+            <span>View Processed Workers & Attendance</span>
           </button>
         </div>
 

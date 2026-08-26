@@ -164,28 +164,11 @@ export default function App() {
     }
   };
 
-  // Commit preview data
-  const handleCommitPreview = async (parsedData) => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/upload/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parsedData }),
-      }).then(r => r.json());
-
-      if (res.success) {
-        setPreviewData(null);
-        await refreshData();
-        setActiveTab('workers');
-      } else {
-        alert('Commit error: ' + res.error);
-      }
-    } catch (err) {
-      alert('Commit failed: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
+  // Confirm and close preview modal
+  const handleCommitPreview = async () => {
+    setPreviewData(null);
+    await refreshData();
+    setActiveTab('workers');
   };
 
   // Save manual attendance edit
