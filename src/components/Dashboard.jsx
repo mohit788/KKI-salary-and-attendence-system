@@ -78,8 +78,46 @@ export default function Dashboard({
   }, [allAttendance, selectedWorkerModal]);
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300 text-slate-100">
+    <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
       
+      {/* DETECTED ACTIVE MONTH BANNER */}
+      {metrics?.activeMonth?.monthName ? (
+        <div className="glass-card rounded-2xl p-5 sm:p-6 border-2 border-blue-500/60 bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center space-x-4">
+            <div className="w-14 h-14 rounded-2xl bg-blue-600 border border-blue-400 text-white flex items-center justify-center shadow-lg flex-shrink-0">
+              <Calendar className="w-8 h-8" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="text-xs uppercase font-extrabold text-blue-400 tracking-wider">
+                  Active Attendance & Payroll Month
+                </span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-600 font-mono">
+                  {metrics.activeMonth.totalDays} Days Cycle
+                </span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-extrabold text-white font-display mt-0.5 tracking-tight flex items-center gap-2">
+                <span>{metrics.activeMonth.label}</span>
+                <span className="text-xs font-normal text-slate-300 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700">
+                  {metrics.totalWorkers || 0} Workers Enrolled
+                </span>
+              </h2>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs sm:text-sm font-mono">
+            <div className="bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-700">
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">Swipe Date Range</span>
+              <span className="font-bold text-cyan-300">{metrics.activeMonth.startDate} ➔ {metrics.activeMonth.endDate}</span>
+            </div>
+            <div className="bg-slate-950/90 px-3.5 py-2 rounded-xl border border-slate-700">
+              <span className="text-slate-400 block text-[10px] uppercase font-bold">Dynamic Salary Divisor</span>
+              <span className="font-bold text-emerald-300">Base ÷ {metrics.activeMonth.totalDays} Days</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Top Banner / Upload Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         

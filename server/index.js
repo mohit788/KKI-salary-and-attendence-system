@@ -385,6 +385,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const sortedDates = Array.from(datesSet).sort();
     const startDate = sortedDates[0] || '';
     const endDate = sortedDates[sortedDates.length - 1] || '';
+    const detectedMonth = detectActiveMonthDetails(startDate, endDate);
 
     res.json({
       success: true,
@@ -394,8 +395,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       flaggedCount,
       startDate,
       endDate,
+      detectedMonth,
       parsedData: parsedWorkers,
-      message: `Successfully processed and saved ${parsedWorkers.length} workers (${totalRecords} records) in seconds!`,
+      message: `Successfully processed ${detectedMonth.label} (${detectedMonth.totalDays} Days) with ${parsedWorkers.length} workers!`,
     });
   } catch (err) {
     console.error('File Upload Parsing & Commit Error:', err);
@@ -951,26 +953,68 @@ app.get('/api/audit-logs', async (req, res) => {
   }
 });
 
-// 10. GET Dashboard Metrics (OPTIMIZED - Parallel Batch Fetch)
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+function detectActiveMonthDetails(minDate, maxDate) {
+  if (!minDate && !maxDate) {
+    return {
+      monthKey: '',
+      monthName: '',
+      year: '',
+      label: 'No Active Month',
+      startDate: '',
+      endDate: '',
+      totalDays: 30,
+    };
+  }
+
+  const primaryDate = maxDate || minDate;
+  const parts = primaryDate.split('-');
+  const year = parts[0] || '';
+  const monthNum = parseInt(parts[1], 10);
+  const monthName = (monthNum >= 1 && monthNum <= 12) ? MONTH_NAMES[monthNum - 1] : '';
+  const totalDays = (year && monthNum) ? new Date(parseInt(year, 10), monthNum, 0).getDate() : 30;
+  const monthKey = `${year}-${String(monthNum).padStart(2, '0')}`;
+  const label = monthName && year ? `${monthName} ${year}` : (primaryDate || '');
+
+  return {
+    monthKey,
+    monthName,
+    year,
+    label,
+    startDate: minDate,
+    endDate: maxDate,
+    totalDays,
+  };
+}
+
+// 10. GET Dashboard Metrics (OPTIMIZED - Parallel Batch Fetch with Active Month Detection)
 app.get('/api/dashboard', async (req, res) => {
   try {
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
 
     // Execute all count queries in parallel
-    const [workersCountRes, recordsCountRes, incompleteRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
+    const [workersCountRes, recordsCountRes, incompleteRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
       execute(`SELECT COUNT(*) as cnt FROM workers`),
       execute(`SELECT COUNT(*) as cnt FROM daily_attendance`),
       execute(`SELECT COUNT(*) as cnt FROM daily_attendance WHERE status = 'Incomplete'`),
       execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance GROUP BY status`),
       execute(`SELECT * FROM workers`),
       execute(`SELECT * FROM daily_attendance ORDER BY staff_no`),
-      execute(`SELECT * FROM advances ORDER BY staff_no`)
+      execute(`SELECT * FROM advances ORDER BY staff_no`),
+      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance WHERE date IS NOT NULL AND date != ''`)
     ]);
 
     const totalWorkers = workersCountRes.rows[0].cnt;
     const totalRecords = recordsCountRes.rows[0].cnt;
     const incompleteCount = incompleteRes.rows[0].cnt;
+    const minDate = dateBoundsRes.rows[0]?.min_date || '';
+    const maxDate = dateBoundsRes.rows[0]?.max_date || '';
+    const activeMonth = detectActiveMonthDetails(minDate, maxDate);
 
     const statusBreakdown = {};
     statusCountsRes.rows.forEach(r => { statusBreakdown[r.status] = r.cnt; });
@@ -1024,6 +1068,7 @@ app.get('/api/dashboard', async (req, res) => {
         grandAdvances: +grandAdvances.toFixed(2),
         grandNet: +grandNet.toFixed(2),
         statusBreakdown,
+        activeMonth,
       },
     });
   } catch (err) {
