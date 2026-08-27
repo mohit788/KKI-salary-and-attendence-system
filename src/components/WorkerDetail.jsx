@@ -25,8 +25,15 @@ export default function WorkerDetail({
 }) {
   if (!workerData) {
     return (
-      <div className="text-center py-16 text-slate-300 text-lg font-medium">
-        Loading worker attendance profile...
+      <div className="flex flex-col items-center justify-center py-20 text-slate-300 space-y-4">
+        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-base font-semibold text-slate-200">Loading worker attendance profile...</p>
+        <button
+          onClick={onBack}
+          className="mt-2 text-xs font-bold text-slate-300 hover:text-white px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 transition-all cursor-pointer shadow-md"
+        >
+          ← Back to Workers Table
+        </button>
       </div>
     );
   }
