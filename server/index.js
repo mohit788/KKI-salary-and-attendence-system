@@ -933,7 +933,10 @@ app.post('/api/attendance/edit', async (req, res) => {
 // GET All Incomplete Attendance Records (For Fast-Fix Center)
 app.get('/api/attendance/incomplete', async (req, res) => {
   try {
-    const result = await execute(`
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+
+    const allRecords = await execute(`
       SELECT 
         d.*, 
         w.staff_name, 
@@ -943,7 +946,45 @@ app.get('/api/attendance/incomplete', async (req, res) => {
       WHERE d.status = 'Incomplete' OR d.status LIKE '%Incomplete%'
       ORDER BY d.date ASC, CAST(d.staff_no AS INTEGER) ASC
     `);
-    res.json({ success: true, incompleteRecords: result.rows });
+
+    const trueIncomplete = [];
+
+    for (const r of allRecords.rows) {
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
+      const isOdd = timestamps.length % 2 !== 0;
+
+      // If punch count is even (>= 2, like 07:55 17:34) and was stored as 'Incomplete', automatically recompute & update to Present!
+      if (!isOdd && timestamps.length >= 2 && r.is_manual_override === 0) {
+        const datePunchesRes = await execute(`SELECT raw_swipes as swipe_record FROM daily_attendance WHERE date = ?`, [r.date]);
+        const dateShift = detectDailyFactoryShift(
+          (datePunchesRes.rows || []).map(row => parseSwipeRecord(row.swipe_record).timestamps[0]).filter(Boolean),
+          settings.shift_start || '08:00'
+        );
+        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules, dateShift);
+        await execute(
+          `UPDATE daily_attendance SET
+             effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?
+           WHERE staff_no = ? AND date = ?`,
+          [
+            computed.effectiveIn || '',
+            computed.effectiveOut || '',
+            computed.regularHours || 0,
+            computed.otHours || 0,
+            computed.sundayOtHours || 0,
+            computed.totalHours || 0,
+            computed.lateMinutes || 0,
+            computed.status,
+            r.staff_no,
+            r.date
+          ]
+        );
+        continue;
+      }
+
+      trueIncomplete.push(r);
+    }
+
+    res.json({ success: true, incompleteRecords: trueIncomplete });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

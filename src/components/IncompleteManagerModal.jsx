@@ -393,9 +393,21 @@ export default function IncompleteManagerModal({
 
                       {/* Current Punch with Alert */}
                       <td className="py-3 px-3 font-mono">
-                        <span className="px-2 py-1 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
-                          {r.raw_swipes ? `${r.raw_swipes} (Missing OUT)` : 'No Swipes'}
-                        </span>
+                        {r.punchPairsFormatted ? (
+                          <span className="px-2 py-1 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
+                            {r.punchPairsFormatted}
+                          </span>
+                        ) : r.raw_swipes ? (
+                          <span className="px-2 py-1 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
+                            {r.raw_swipes.trim().split(/\s+/).length % 2 !== 0 
+                              ? `${r.raw_swipes} (Missing OUT)` 
+                              : r.raw_swipes}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 rounded bg-slate-800 text-slate-400 text-[11px] font-bold inline-block">
+                            No Swipes Recorded
+                          </span>
+                        )}
                       </td>
 
                       {/* Quick Add Buttons */}
