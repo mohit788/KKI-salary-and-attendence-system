@@ -48,6 +48,11 @@ export default function IncompleteManagerModal({
           };
         });
         setRowEdits(initialEdits);
+
+        // Keep parent dashboard metrics in sync
+        if (onRefreshData) {
+          onRefreshData();
+        }
       }
     } catch (err) {
       console.error('Error fetching incomplete records:', err);
