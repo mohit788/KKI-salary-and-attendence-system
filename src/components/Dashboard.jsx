@@ -232,33 +232,46 @@ export default function Dashboard({
           )}
 
           <div className="mt-5 space-y-2.5">
-            <a
-              href="/api/export/excel/timings"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-3 px-4 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-blue-500 shadow-md transition-all"
-            >
-              <Clock className="w-4.5 h-4.5 text-blue-200" />
-              <span>Download Biometric Timings Sheet (.xlsx)</span>
-            </a>
-
-            {isPayrollUnlocked ? (
-              <a
-                href="/api/export/excel"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all"
-              >
-                <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-200" />
-                <span>Download Full Payroll Report (.xlsx)</span>
-              </a>
-            ) : (
+            {(metrics?.incompleteCount || 0) > 0 ? (
               <button
-                onClick={onOpenUnlockModal}
-                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-600 transition-all"
+                onClick={onOpenIncompleteManager}
+                className="w-full py-3 px-4 bg-amber-950/80 hover:bg-amber-900 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border-2 border-amber-500/80 shadow-md transition-all cursor-pointer"
+                title="Excel Download Locked: Please resolve incomplete records in Fast-Fix Center first"
               >
-                <span>🔒 Enter PIN to Unlock Financial / Salary Export</span>
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>🔒 Excel Downloads Locked ({metrics.incompleteCount} Incomplete Records — Click to Fix)</span>
               </button>
+            ) : (
+              <>
+                <a
+                  href="/api/export/excel/timings"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 px-4 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-blue-500 shadow-md transition-all"
+                >
+                  <Clock className="w-4.5 h-4.5 text-blue-200" />
+                  <span>Download Biometric Timings Sheet (.xlsx)</span>
+                </a>
+
+                {isPayrollUnlocked ? (
+                  <a
+                    href="/api/export/excel"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all"
+                  >
+                    <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-200" />
+                    <span>Download Full Payroll Report (.xlsx)</span>
+                  </a>
+                ) : (
+                  <button
+                    onClick={onOpenUnlockModal}
+                    className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-600 transition-all"
+                  >
+                    <span>🔒 Enter PIN to Unlock Financial / Salary Export</span>
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

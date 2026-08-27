@@ -200,53 +200,66 @@ export default function AllWorkersTable({
             />
           </div>
 
-          <a
-            href="/api/export/excel/timings"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-blue-500 shadow-sm transition-all whitespace-nowrap"
-          >
-            <Clock className="w-3.5 h-3.5 text-blue-200" />
-            <span>Timings (.xlsx)</span>
-          </a>
-
-          {isPayrollUnlocked ? (
+          {workers.some(w => w.payroll?.hasIncompleteEntries || (w.payroll?.incompleteDays || 0) > 0) ? (
+            <button
+              onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
+              className="px-3 py-2 bg-amber-950 text-amber-300 border-2 border-amber-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all whitespace-nowrap cursor-pointer hover:bg-amber-900"
+              title="Excel & PDF downloads are locked until all incomplete attendance entries are resolved"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>🔒 Reports Locked (Resolve Incomplete)</span>
+            </button>
+          ) : (
             <>
               <a
-                href="/api/export/excel"
+                href="/api/export/excel/timings"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap"
+                className="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-blue-500 shadow-sm transition-all whitespace-nowrap"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Payroll (.xlsx)</span>
+                <Clock className="w-3.5 h-3.5 text-blue-200" />
+                <span>Timings (.xlsx)</span>
               </a>
 
+              {isPayrollUnlocked ? (
+                <>
+                  <a
+                    href="/api/export/excel"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Payroll (.xlsx)</span>
+                  </a>
+
+                  <button
+                    onClick={() => setShowSheetsModal(true)}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border-2 border-slate-600 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>G-Sheets</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={onOpenUnlockModal}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border-2 border-amber-500/60 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Unlock Payroll (.xlsx)</span>
+                </button>
+              )}
+
               <button
-                onClick={() => setShowSheetsModal(true)}
-                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border-2 border-slate-600 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
+                onClick={exportToPDF}
+                className="px-3 py-2 bg-rose-800 hover:bg-rose-700 text-white border border-rose-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                <span>G-Sheets</span>
+                <Download className="w-3.5 h-3.5" />
+                <span>PDF</span>
               </button>
             </>
-          ) : (
-            <button
-              onClick={onOpenUnlockModal}
-              className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border-2 border-amber-500/60 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
-            >
-              <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Unlock Payroll (.xlsx)</span>
-            </button>
           )}
-
-          <button
-            onClick={exportToPDF}
-            className="px-3 py-2 bg-rose-800 hover:bg-rose-700 text-white border border-rose-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>PDF</span>
-          </button>
         </div>
       </div>
 

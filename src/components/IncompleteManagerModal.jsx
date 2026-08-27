@@ -61,7 +61,7 @@ export default function IncompleteManagerModal({
   }, [isOpen]);
 
   const filteredRecords = records.filter(r => {
-    if (initialStaffNo && r.staff_no !== initialStaffNo) return false;
+    if (initialStaffNo && String(r.staff_no) !== String(initialStaffNo)) return false;
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
     return (

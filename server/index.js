@@ -930,6 +930,141 @@ app.post('/api/attendance/edit', async (req, res) => {
   }
 });
 
+// GET All Incomplete Attendance Records (For Fast-Fix Center)
+app.get('/api/attendance/incomplete', async (req, res) => {
+  try {
+    const result = await execute(`
+      SELECT 
+        d.*, 
+        w.staff_name, 
+        w.department 
+      FROM daily_attendance d
+      LEFT JOIN workers w ON d.staff_no = w.staff_no
+      WHERE d.status = 'Incomplete' OR d.status LIKE '%Incomplete%'
+      ORDER BY d.date ASC, CAST(d.staff_no AS INTEGER) ASC
+    `);
+    res.json({ success: true, incompleteRecords: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Bulk Edit Attendance Records (Fast-Fix Center Batch Save)
+app.post('/api/attendance/bulk-edit', async (req, res) => {
+  try {
+    const { updates, reason, edited_by } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ success: false, error: 'updates array is required.' });
+    }
+
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+    const modifiedStaffSet = new Set();
+
+    for (const item of updates) {
+      const { staff_no, date, raw_swipes, status } = item;
+      if (!staff_no || !date) continue;
+
+      const oldRes = await execute(
+        `SELECT * FROM daily_attendance WHERE staff_no = ? AND date = ?`,
+        [staff_no, date]
+      );
+      const oldRec = oldRes.rows[0] || {};
+      const effectiveSwipes = raw_swipes !== undefined ? raw_swipes : (oldRec.raw_swipes || '');
+      const { timestamps } = parseSwipeRecord(effectiveSwipes);
+
+      const datePunchesRes = await execute(`SELECT raw_swipes as swipe_record FROM daily_attendance WHERE date = ?`, [date]);
+      const dateShift = detectDailyFactoryShift(
+        (datePunchesRes.rows || []).map(r => parseSwipeRecord(r.swipe_record).timestamps[0]).filter(Boolean),
+        settings.shift_start || '08:00'
+      );
+
+      const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday, customRules, dateShift);
+
+      let regularHours = computed.regularHours;
+      let otHours = computed.otHours;
+      let sundayOtHours = computed.sundayOtHours;
+      let totalHours = computed.totalHours;
+      let effectiveIn = computed.effectiveIn;
+      let effectiveOut = computed.effectiveOut;
+      let lateMinutes = computed.lateMinutes;
+      let finalStatus = status || computed.status;
+
+      if (finalStatus === 'Present (Full)' && regularHours === 0 && timestamps.length === 0) {
+        regularHours = 8.0;
+        totalHours = 8.0;
+        effectiveIn = dateShift || settings.shift_start || '08:00';
+        effectiveOut = settings.shift_end || '16:30';
+      }
+
+      await execute(
+        `INSERT INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          staff_no,
+          date,
+          'Fast-Fix Bulk Edit',
+          `Swipes: ${oldRec.raw_swipes || ''}, Status: ${oldRec.status || ''}`,
+          `Swipes: ${effectiveSwipes}, Status: ${finalStatus}`,
+          edited_by || 'Admin Fast-Fix',
+          reason || 'Fast-Fix Bulk Edit Resolution',
+        ]
+      );
+
+      await execute(
+        `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record`,
+        [staff_no, date, oldRec.weekday || '', effectiveSwipes]
+      );
+
+      await execute(
+        `UPDATE daily_attendance SET
+           raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
+           late_minutes = ?, status = ?, is_manual_override = 1, override_reason = ?
+         WHERE staff_no = ? AND date = ?`,
+        [
+          effectiveSwipes,
+          effectiveIn,
+          effectiveOut,
+          regularHours,
+          otHours,
+          sundayOtHours,
+          totalHours,
+          lateMinutes,
+          finalStatus,
+          reason || 'Fast-Fix Resolution',
+          staff_no,
+          date,
+        ]
+      );
+
+      modifiedStaffSet.add(staff_no);
+    }
+
+    // Re-evaluate Sunday forfeiture for all touched workers
+    for (const staffNo of modifiedStaffSet) {
+      const workerAttRes = await execute(
+        `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+        [staffNo]
+      );
+      const recheckedRecords = applyWeeklyOffForfeiture(workerAttRes.rows, settings);
+      for (const r of recheckedRecords) {
+        if (r.status.includes('Weekly Off')) {
+          await execute(
+            `UPDATE daily_attendance SET status = ? WHERE staff_no = ? AND date = ? AND is_manual_override = 0`,
+            [r.status, staffNo, r.date]
+          );
+        }
+      }
+    }
+
+    res.json({ success: true, message: 'Bulk edit successfully processed.', updatedCount: updates.length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 8. POST Advance Entry
 app.post('/api/advances', async (req, res) => {
   try {
@@ -1176,6 +1311,12 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
 // 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted)
 app.get('/api/export/excel', async (req, res) => {
   try {
+    const incompleteCheck = await execute(`SELECT COUNT(*) as count FROM daily_attendance WHERE status LIKE '%Incomplete%' OR status = 'Incomplete'`);
+    const incompleteCount = incompleteCheck.rows[0]?.count || 0;
+    if (incompleteCount > 0) {
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+    }
+
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
     const workersRes = await execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`);
@@ -1271,6 +1412,12 @@ app.get('/api/export/excel', async (req, res) => {
 // 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet
 app.get('/api/export/excel/timings', async (req, res) => {
   try {
+    const incompleteCheck = await execute(`SELECT COUNT(*) as count FROM daily_attendance WHERE status LIKE '%Incomplete%' OR status = 'Incomplete'`);
+    const incompleteCount = incompleteCheck.rows[0]?.count || 0;
+    if (incompleteCount > 0) {
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+    }
+
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
@@ -1332,6 +1479,14 @@ app.get('/api/export/excel/timings', async (req, res) => {
 app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
   try {
     const { staff_no } = req.params;
+    const workerIncompleteCheck = await execute(
+      `SELECT COUNT(*) as count FROM daily_attendance WHERE staff_no = ? AND (status LIKE '%Incomplete%' OR status = 'Incomplete')`,
+      [staff_no]
+    );
+    if ((workerIncompleteCheck.rows[0]?.count || 0) > 0) {
+      return res.status(400).send(`Excel Download Locked: This worker has incomplete records. Please resolve missing punches first.`);
+    }
+
     const settings = await getSettingsMap();
 
     const workerRes = await execute(`SELECT * FROM workers WHERE staff_no = ?`, [staff_no]);
