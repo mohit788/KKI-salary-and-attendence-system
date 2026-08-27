@@ -591,7 +591,7 @@ async function recomputeAllAttendance() {
   const customRules = await getCustomRules();
 
   // Pre-calculate daily factory shift map across all raw punches
-  const allPunchesRes = await execute(`SELECT date, swipe_record, raw_swipes FROM raw_punches`);
+  const allPunchesRes = await execute(`SELECT date, swipe_record FROM raw_punches`);
   let recordsForShiftMap = allPunchesRes.rows;
   if (!recordsForShiftMap || recordsForShiftMap.length === 0) {
     const dailyPunchesRes = await execute(`SELECT date, raw_swipes as swipe_record FROM daily_attendance`);
