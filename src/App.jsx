@@ -302,6 +302,12 @@ export default function App() {
     }
   };
 
+  const handleOpenIncompleteManager = (staffNo) => {
+    const cleanStaffNo = (typeof staffNo === 'string' || typeof staffNo === 'number') ? String(staffNo) : null;
+    setIncompleteStaffFilter(cleanStaffNo);
+    setShowIncompleteModal(true);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f19]">
       <Navbar 
@@ -311,7 +317,7 @@ export default function App() {
         isPayrollUnlocked={isPayrollUnlocked}
         onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
         onLockPayroll={handleLockPayroll}
-        onOpenIncompleteManager={() => { setIncompleteStaffFilter(null); setShowIncompleteModal(true); }}
+        onOpenIncompleteManager={() => handleOpenIncompleteManager(null)}
       />
 
       <AiAssistantBar onRefreshData={refreshData} />
@@ -327,7 +333,7 @@ export default function App() {
             onEditRecord={(rec) => setEditingRecord(rec)}
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
-            onOpenIncompleteManager={(staffNo) => { setIncompleteStaffFilter(staffNo || null); setShowIncompleteModal(true); }}
+            onOpenIncompleteManager={handleOpenIncompleteManager}
           />
         )}
 
@@ -339,7 +345,7 @@ export default function App() {
             onUpdateSalary={handleUpdateSalary}
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
-            onOpenIncompleteManager={(staffNo) => { setIncompleteStaffFilter(staffNo || null); setShowIncompleteModal(true); }}
+            onOpenIncompleteManager={handleOpenIncompleteManager}
           />
         )}
 

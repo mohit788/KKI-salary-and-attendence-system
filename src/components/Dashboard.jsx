@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { 
-  UploadCloud, 
-  Users, 
-  AlertTriangle, 
-  DollarSign, 
-  CheckCircle2, 
-  Clock, 
-  FileSpreadsheet, 
+import {
+  UploadCloud,
+  Users,
+  AlertTriangle,
+  DollarSign,
+  CheckCircle2,
+  Clock,
+  FileSpreadsheet,
   FileText,
   ArrowRight,
   TrendingUp,
@@ -24,11 +24,11 @@ import {
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 
-export default function Dashboard({ 
-  metrics, 
-  allAttendance = [], 
-  workers = [], 
-  onUploadFile, 
+export default function Dashboard({
+  metrics,
+  allAttendance = [],
+  workers = [],
+  onUploadFile,
   setActiveTab,
   onEditRecord,
   isPayrollUnlocked = false,
@@ -68,7 +68,7 @@ export default function Dashboard({
   const filteredWorkers = useMemo(() => {
     if (!searchTerm.trim()) return workers;
     const term = searchTerm.toLowerCase();
-    return workers.filter(w => 
+    return workers.filter(w =>
       String(w.staff_no).toLowerCase().includes(term) ||
       String(w.staff_name).toLowerCase().includes(term) ||
       (w.department || '').toLowerCase().includes(term)
@@ -83,7 +83,7 @@ export default function Dashboard({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
-      
+
       {/* DETECTED ACTIVE MONTH BANNER */}
       {metrics?.activeMonth?.monthName ? (
         <div className="glass-card rounded-2xl p-5 sm:p-6 border-2 border-blue-500/60 bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -124,7 +124,7 @@ export default function Dashboard({
 
       {/* Top Banner / Upload Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Drag & Drop Upload Zone */}
         <div className="lg:col-span-2 glass-card rounded-2xl p-6 border-2 border-slate-700 shadow-md bg-slate-900">
           <div className="flex items-center justify-between mb-4">
@@ -149,11 +149,10 @@ export default function Dashboard({
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
-              dragActive
+            className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${dragActive
                 ? 'border-blue-400 bg-blue-950/40 scale-[0.99]'
                 : 'border-slate-600 hover:border-blue-400 bg-slate-950/60 hover:bg-slate-950'
-            }`}
+              }`}
             onClick={() => document.getElementById('biometric-file-input').click()}
           >
             <input
@@ -191,7 +190,7 @@ export default function Dashboard({
                   ₹{(metrics?.grandNet || 0).toLocaleString('en-IN')}
                 </p>
               </div>
-              
+
               <div className="mt-3 space-y-2 text-sm">
                 <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
                   <span className="font-semibold">Gross Payroll:</span>
@@ -217,7 +216,7 @@ export default function Dashboard({
                   {metrics?.totalWorkers || 0} <span className="text-lg font-normal text-slate-400">Workers</span>
                 </p>
               </div>
-              
+
               <div className="mt-3 space-y-2 text-sm">
                 <div className="flex justify-between items-center text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-lg">
                   <span className="font-semibold">Total Punch Swipes:</span>
@@ -234,7 +233,7 @@ export default function Dashboard({
           <div className="mt-5 space-y-2.5">
             {(metrics?.incompleteCount || 0) > 0 ? (
               <button
-                onClick={onOpenIncompleteManager}
+                onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
                 className="w-full py-3 px-4 bg-amber-950/80 hover:bg-amber-900 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border-2 border-amber-500/80 shadow-md transition-all cursor-pointer"
                 title="Excel Download Locked: Please resolve incomplete records in Fast-Fix Center first"
               >
@@ -280,8 +279,8 @@ export default function Dashboard({
 
       {/* FAST-FIX ACTION BANNER (When incomplete records exist) */}
       {metrics?.incompleteCount > 0 && (
-        <div 
-          onClick={onOpenIncompleteManager}
+        <div
+          onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
           className="cursor-pointer glass-card rounded-2xl p-4.5 border-2 border-amber-500/80 bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-amber-400 transition-all group"
         >
           <div className="flex items-center space-x-3.5">
@@ -300,7 +299,7 @@ export default function Dashboard({
               </p>
             </div>
           </div>
-          <button 
+          <button
             onClick={(e) => { e.stopPropagation(); onOpenIncompleteManager && onOpenIncompleteManager(); }}
             className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all shrink-0 cursor-pointer"
           >
@@ -313,7 +312,7 @@ export default function Dashboard({
 
       {/* Metrics Row - Large & High Contrast */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        
+
         {/* Workers Metric */}
         <div className="glass-card rounded-2xl p-5 border-2 border-slate-700 bg-slate-900 shadow-md">
           <div className="flex items-center justify-between">
@@ -339,13 +338,12 @@ export default function Dashboard({
         </div>
 
         {/* Flagged Incomplete Records (Clickable to open Fast-Fix Manager) */}
-        <div 
-          onClick={onOpenIncompleteManager}
-          className={`glass-card rounded-2xl p-5 border-2 bg-slate-900 shadow-md transition-all ${
-            (metrics?.incompleteCount || 0) > 0 
-              ? 'border-amber-500/80 hover:border-amber-400 cursor-pointer hover:scale-[1.02] ring-2 ring-amber-500/20' 
+        <div
+          onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
+          className={`glass-card rounded-2xl p-5 border-2 bg-slate-900 shadow-md transition-all ${(metrics?.incompleteCount || 0) > 0
+              ? 'border-amber-500/80 hover:border-amber-400 cursor-pointer hover:scale-[1.02] ring-2 ring-amber-500/20'
               : 'border-slate-700'
-          }`}
+            }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Review Needed</span>
@@ -397,7 +395,7 @@ export default function Dashboard({
 
       {/* WORKER TIMINGS SUMMARY CARDS */}
       <div className="glass-card rounded-2xl border-2 border-slate-700 overflow-hidden shadow-lg space-y-4 bg-slate-900">
-        
+
         {/* Header & Search */}
         <div className="p-6 border-b border-slate-700 bg-slate-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -501,7 +499,7 @@ export default function Dashboard({
       {selectedWorkerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in">
           <div className="glass-modal w-full max-w-5xl max-h-[90vh] rounded-2xl p-6 shadow-2xl border-2 border-slate-600 flex flex-col space-y-4 overflow-hidden bg-slate-900">
-            
+
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b-2 border-slate-700 pb-4">
               <div className="flex items-center space-x-3.5">
@@ -612,19 +610,18 @@ export default function Dashboard({
                       const isManual = r.is_manual_override === 1 || r.is_manual_override === true;
 
                       return (
-                        <tr 
-                          key={`${r.date}-${idx}`} 
-                          className={`transition-colors ${
-                            isManual 
-                              ? 'bg-violet-950/25 hover:bg-violet-900/35 border-l-4 border-l-violet-500' 
+                        <tr
+                          key={`${r.date}-${idx}`}
+                          className={`transition-colors ${isManual
+                              ? 'bg-violet-950/25 hover:bg-violet-900/35 border-l-4 border-l-violet-500'
                               : 'hover:bg-slate-800/80'
-                          }`}
+                            }`}
                         >
                           <td className="py-3 px-4 font-mono font-bold text-white whitespace-nowrap">
                             <div className="flex items-center space-x-2">
                               <span>{r.date} <span className="text-slate-400 font-normal">({r.weekday || ''})</span></span>
                               {isManual && (
-                                <span 
+                                <span
                                   className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-900/90 text-violet-200 border border-violet-500 flex items-center gap-1 shadow-sm"
                                   title={r.override_reason || 'Manual Admin Correction'}
                                 >
