@@ -393,7 +393,10 @@ export default function App() {
       {/* MODAL: INCOMPLETE RECORDS FAST-FIX MANAGER */}
       <IncompleteManagerModal
         isOpen={showIncompleteModal}
-        onClose={() => setShowIncompleteModal(false)}
+        onClose={() => {
+          setShowIncompleteModal(false);
+          refreshData();
+        }}
         onRefreshData={refreshData}
         initialStaffNo={incompleteStaffFilter}
       />
