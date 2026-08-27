@@ -1191,10 +1191,9 @@ app.get('/api/dashboard', async (req, res) => {
     const salaryRules = await getSalaryRules();
 
     // Execute all count queries in parallel
-    const [workersCountRes, recordsCountRes, incompleteRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
+    const [workersCountRes, recordsCountRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
       execute(`SELECT COUNT(*) as cnt FROM workers`),
       execute(`SELECT COUNT(*) as cnt FROM daily_attendance`),
-      execute(`SELECT COUNT(*) as cnt FROM daily_attendance WHERE status = 'Incomplete'`),
       execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance GROUP BY status`),
       execute(`SELECT * FROM workers`),
       execute(`SELECT * FROM daily_attendance ORDER BY staff_no`),
@@ -1204,10 +1203,20 @@ app.get('/api/dashboard', async (req, res) => {
 
     const totalWorkers = workersCountRes.rows[0].cnt;
     const totalRecords = recordsCountRes.rows[0].cnt;
-    const incompleteCount = incompleteRes.rows[0].cnt;
     const minDate = dateBoundsRes.rows[0]?.min_date || '';
     const maxDate = dateBoundsRes.rows[0]?.max_date || '';
     const activeMonth = detectActiveMonthDetails(minDate, maxDate);
+
+    // Calculate verified true incomplete count
+    let incompleteCount = 0;
+    allAttendanceRes.rows.forEach(r => {
+      if (r.status === 'Incomplete' || r.status.includes('Incomplete')) {
+        const { timestamps } = parseSwipeRecord(r.raw_swipes);
+        if (timestamps.length % 2 !== 0 || timestamps.length === 0) {
+          incompleteCount++;
+        }
+      }
+    });
 
     const statusBreakdown = {};
     statusCountsRes.rows.forEach(r => { statusBreakdown[r.status] = r.cnt; });

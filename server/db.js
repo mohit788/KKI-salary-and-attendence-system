@@ -215,32 +215,6 @@ async function initDatabase() {
     );
   }
 
-  // Auto-seed database from seed_data.json if workers table is empty
-  try {
-    const workersCountRes = await execute(`SELECT COUNT(*) as cnt FROM workers`);
-    if (workersCountRes.rows[0].cnt === 0) {
-      const seedPath = path.join(__dirname, '../data/seed_data.json');
-      if (fs.existsSync(seedPath)) {
-        console.log('🌱 Empty database detected. Auto-seeding initial factory data...');
-        const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-        for (const [table, rows] of Object.entries(seedData)) {
-          if (Array.isArray(rows) && rows.length > 0) {
-            const columns = Object.keys(rows[0]);
-            const placeholders = columns.map(() => '?').join(', ');
-            const sql = `INSERT OR REPLACE INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
-            for (const row of rows) {
-              const values = columns.map(c => row[c]);
-              await execute(sql, values);
-            }
-          }
-        }
-        console.log('✨ Database Auto-Seeding Completed Successfully!');
-      }
-    }
-  } catch (err) {
-    console.error('⚠️ Auto-seeding warning:', err.message);
-  }
-
   console.log('✅ Attendance & Payroll Database Initialized.');
 }
 
