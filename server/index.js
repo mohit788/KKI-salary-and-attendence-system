@@ -194,7 +194,7 @@ app.post('/api/rule-profiles', async (req, res) => {
       ot_rounding = 'minutes',
       short_hours_threshold = 4.0,
       weekly_off_day = 'Sun',
-      forfeiture_absent_threshold = 2,
+      forfeiture_absent_threshold = 3,
       standard_month_days = '26',
     } = req.body;
 
@@ -214,7 +214,7 @@ app.post('/api/rule-profiles', async (req, res) => {
         ot_rounding,
         parseFloat(short_hours_threshold) || 4.0,
         weekly_off_day,
-        parseInt(forfeiture_absent_threshold, 10) || 2,
+        parseInt(forfeiture_absent_threshold, 10) || 3,
         String(standard_month_days),
       ]
     );

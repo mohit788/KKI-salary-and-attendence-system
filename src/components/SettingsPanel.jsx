@@ -47,7 +47,7 @@ export default function SettingsPanel({
     ot_rounding: '30min_block',
     short_hours_threshold: '4.0',
     weekly_off_day: 'Sun',
-    forfeiture_absent_threshold: '2',
+    forfeiture_absent_threshold: '3',
     standard_month_days: '26',
     max_ot_hours: '0',
     lunch_deduction_mins: '30',

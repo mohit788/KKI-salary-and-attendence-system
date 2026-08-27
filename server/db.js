@@ -181,9 +181,9 @@ async function initDatabase() {
     ['ot_rounding', 'minutes', 'OT rounding mode: "minutes" or "30min_block"'],
     ['short_hours_threshold', '4.0', 'Threshold hours below which day is short hours'],
     ['weekly_off_day', 'Sun', 'Default paid weekly off day (Sun/Sat/etc)'],
-    ['forfeiture_absent_threshold', '2', 'Number of absent days in Mon-Sat stretch to forfeit Sunday'],
-    ['weekly_off_forfeiture_threshold', '3', 'Number of weekly offs in same week to forfeit Sunday'],
-    ['monthly_absent_forfeiture_threshold', '4', 'Total monthly absents to forfeit ALL Sundays (except OT worked)'],
+    ['forfeiture_absent_threshold', '3', 'Number of absent days in Mon-Sat stretch to forfeit Sunday (Default: 3)'],
+    ['weekly_off_forfeiture_threshold', '4', 'Number of weekly offs in same week to forfeit Sunday'],
+    ['monthly_absent_forfeiture_threshold', '5', 'Total monthly absents to forfeit ALL Sundays (except OT worked)'],
     ['standard_month_days', 'calendar', 'Standard days in month for per-day rate calculation (calendar/26/30)'],
     ['max_ot_hours', '0', 'Maximum OT hours cap per day (0 = Unlimited)'],
     ['lunch_deduction_mins', '30', 'Automatic lunch/break deduction in minutes'],
@@ -199,10 +199,11 @@ async function initDatabase() {
     );
   }
 
-  // Update legacy settings if they are still at 08:30 or lunch_deduction_mins 0
+  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, or forfeiture_absent_threshold 2
   try {
     await execute(`UPDATE settings SET value = '08:00' WHERE key = 'shift_start' AND value = '08:30'`);
     await execute(`UPDATE settings SET value = '30' WHERE key = 'lunch_deduction_mins' AND value = '0'`);
+    await execute(`UPDATE settings SET value = '3' WHERE key = 'forfeiture_absent_threshold' AND (value = '2' OR value IS NULL)`);
   } catch (e) {}
 
   // Insert default Rule Profile if rule_profiles table is empty
@@ -210,7 +211,7 @@ async function initDatabase() {
   if (profilesCountRes.rows[0].cnt === 0) {
     await execute(
       `INSERT INTO rule_profiles (profile_name, is_default, shift_start, shift_end, grace_slab_minutes, ot_multiplier, ot_rounding, short_hours_threshold, weekly_off_day, forfeiture_absent_threshold, standard_month_days)
-       VALUES (?, 1, '08:00', '16:30', 30, 1.5, 'minutes', 4.0, 'Sun', 2, '26')`,
+       VALUES (?, 1, '08:00', '16:30', 30, 1.5, 'minutes', 4.0, 'Sun', 3, '26')`,
       ['Standard Factory Rules (08:00 - 16:30 | 8h Duty + 30m Lunch)']
     );
   }

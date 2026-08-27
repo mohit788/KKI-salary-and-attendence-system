@@ -471,9 +471,9 @@ function isPureAbsentForForfeiture(rec) {
  */
 function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
-  const absentThreshold = parseInt(settings.absent_forfeiture_threshold || 2, 10);
-  const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 3, 10);
-  const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 4, 10);
+  const absentThreshold = parseInt(settings.forfeiture_absent_threshold || settings.absent_forfeiture_threshold || 3, 10);
+  const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 4, 10);
+  const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 5, 10);
 
   // Count total monthly PURE absents (0h worked)
   let totalMonthlyAbsents = 0;
