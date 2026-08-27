@@ -10,7 +10,8 @@ import {
   X, 
   Clock,
   Lock,
-  Unlock
+  Unlock,
+  AlertTriangle
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 
