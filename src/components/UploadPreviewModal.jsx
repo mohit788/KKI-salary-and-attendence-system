@@ -1,7 +1,7 @@
 import React from 'react';
-import { FileCheck, AlertTriangle, Users, Calendar, CheckCircle, X } from 'lucide-react';
+import { FileCheck, AlertTriangle, Users, Calendar, CheckCircle, X, Sparkles } from 'lucide-react';
 
-export default function UploadPreviewModal({ previewData, onConfirm, onCancel, loading }) {
+export default function UploadPreviewModal({ previewData, onConfirm, onCancel, loading, onOpenIncompleteManager }) {
   if (!previewData) return null;
 
   return (
@@ -65,7 +65,7 @@ export default function UploadPreviewModal({ previewData, onConfirm, onCancel, l
             <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3.5 text-xs text-amber-300 flex items-start space-x-2.5">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <span>
-                {previewData.flaggedCount} daily records have an odd count of punches (missed swipe). They will be automatically flagged as <strong>"Incomplete / Needs Review"</strong> for admin correction.
+                {previewData.flaggedCount} daily records have an odd count of punches (missed swipe). They are flagged as <strong>"Incomplete / Needs Review"</strong> and their salary calculations are on hold until resolved.
               </span>
             </div>
           )}
@@ -79,7 +79,7 @@ export default function UploadPreviewModal({ previewData, onConfirm, onCancel, l
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-end space-x-3 border-t border-slate-800 pt-4 mt-6">
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 pt-4 mt-6">
           <button
             onClick={onCancel}
             disabled={loading}
@@ -87,6 +87,20 @@ export default function UploadPreviewModal({ previewData, onConfirm, onCancel, l
           >
             Cancel
           </button>
+
+          {previewData.flaggedCount > 0 && onOpenIncompleteManager && (
+            <button
+              onClick={() => {
+                onConfirm();
+                onOpenIncompleteManager();
+              }}
+              className="px-5 py-2.5 text-sm font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-xl shadow-lg shadow-amber-400/20 flex items-center space-x-2 transition-all cursor-pointer border border-amber-300"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Quick-Fix {previewData.flaggedCount} Incomplete Records</span>
+            </button>
+          )}
+
           <button
             onClick={() => onConfirm()}
             className="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center space-x-2 transition-all cursor-pointer"

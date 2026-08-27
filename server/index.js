@@ -421,7 +421,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   } finally {
     if (fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch (e) {}
+      try { fs.unlinkSync(filePath); } catch (e) { }
     }
   }
 });
@@ -834,7 +834,7 @@ app.post('/api/attendance/edit', async (req, res) => {
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
-    
+
     // Parse timestamps from newly provided raw_swipes (or fallback)
     const effectiveSwipes = raw_swipes !== undefined ? raw_swipes : (oldRec.raw_swipes || '');
     const { timestamps } = parseSwipeRecord(effectiveSwipes);
@@ -846,7 +846,7 @@ app.post('/api/attendance/edit', async (req, res) => {
     );
 
     const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday, customRules, dateShift);
-    
+
     let regularHours = computed.regularHours;
     let otHours = computed.otHours;
     let sundayOtHours = computed.sundayOtHours;
@@ -1588,12 +1588,12 @@ app.post('/api/ai-assistant/execute', async (req, res) => {
         salaryRules,
       });
 
-      return {
+      statusbar\return {
         ...w,
         payroll,
         dailyRecords,
       };
-    });
+    });daily reco
 
     // Process prompt via Gemini
     const result = await processUniversalAssistantPrompt(prompt, apiKey, {
@@ -1609,7 +1609,7 @@ app.post('/api/ai-assistant/execute', async (req, res) => {
       const newSalary = parseFloat(payload.monthly_salary) || 15000;
       await execute(`UPDATE workers SET monthly_salary = ? WHERE staff_no = ?`, [newSalary, String(payload.staff_no)]);
       executionSummary = `Updated staff #${payload.staff_no} salary to ₹${newSalary}`;
-    } 
+    }
     else if (action === 'ADD_ADVANCE' && payload && payload.staff_no && payload.amount) {
       await execute(
         `INSERT INTO advances (staff_no, date, amount, note) VALUES (?, ?, ?, ?)`,

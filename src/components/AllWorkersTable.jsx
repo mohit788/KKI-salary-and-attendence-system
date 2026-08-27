@@ -24,7 +24,8 @@ export default function AllWorkersTable({
   onAddAdvance, 
   onUpdateSalary,
   isPayrollUnlocked = false,
-  onOpenUnlockModal
+  onOpenUnlockModal,
+  onOpenIncompleteManager
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingStaffNo, setEditingStaffNo] = useState(null);
@@ -303,8 +304,14 @@ export default function AllWorkersTable({
                       <td className="px-3.5 py-3 font-bold text-white whitespace-nowrap">
                         <div className="flex items-center space-x-2">
                           <span className="text-sm sm:text-base">{w.staff_name}</span>
-                          {p.incompleteDays > 0 && (
-                            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 flex-shrink-0" title={`${p.incompleteDays} days need review`} />
+                          {p.hasIncompleteEntries && (
+                            <button
+                              onClick={() => onOpenIncompleteManager && onOpenIncompleteManager(w.staff_no)}
+                              className="px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500 text-[10px] font-bold font-mono hover:bg-amber-900 transition-all flex items-center gap-1 shadow-sm"
+                              title={`${p.incompleteDays} incomplete day(s) - Click to resolve`}
+                            >
+                              <span>⚠️ {p.incompleteDays} Incomplete (Locked)</span>
+                            </button>
                           )}
                         </div>
                         <span className="text-[11px] text-slate-400 font-normal block">
@@ -347,9 +354,19 @@ export default function AllWorkersTable({
 
                       {/* Payable Days */}
                       <td className="px-3 py-3 text-center whitespace-nowrap">
-                        <span className="px-2.5 py-0.5 rounded-lg bg-emerald-950 text-emerald-300 font-bold font-mono text-xs border border-emerald-600 inline-block">
-                          {p.payableDays || 0} d
-                        </span>
+                        {p.hasIncompleteEntries ? (
+                          <span 
+                            onClick={() => onOpenIncompleteManager && onOpenIncompleteManager(w.staff_no)}
+                            className="px-2 py-0.5 rounded-lg bg-amber-950/80 text-amber-400 font-bold font-mono text-[11px] border border-amber-600 inline-block cursor-pointer hover:bg-amber-900"
+                            title="Locked: Resolve missing punches to calculate payable days"
+                          >
+                            ⚠️ Locked
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-lg bg-emerald-950 text-emerald-300 font-bold font-mono text-xs border border-emerald-600 inline-block">
+                            {p.payableDays || 0} d
+                          </span>
+                        )}
                       </td>
 
                       {/* Absent Days */}
@@ -365,30 +382,52 @@ export default function AllWorkersTable({
 
                       {/* Wkday OT */}
                       <td className="px-3.5 py-3 text-center font-mono text-blue-300 font-bold whitespace-nowrap">
-                        {p.totalOtHours > 0 ? formatHours(p.totalOtHours) : '0h'}
+                        {p.hasIncompleteEntries ? (
+                          <span className="text-amber-400/80 text-xs font-medium">⚠️ Hold</span>
+                        ) : (
+                          p.totalOtHours > 0 ? formatHours(p.totalOtHours) : '0h'
+                        )}
                       </td>
 
                       {/* Sunday OT */}
                       <td className="px-3.5 py-3 text-center font-mono text-amber-300 font-bold whitespace-nowrap">
-                        {(p.totalSundayOtHours || 0) > 0 ? `${formatHours(p.totalSundayOtHours)}` : '—'}
+                        {p.hasIncompleteEntries ? (
+                          <span className="text-amber-400/80 text-xs font-medium">⚠️ Hold</span>
+                        ) : (
+                          (p.totalSundayOtHours || 0) > 0 ? `${formatHours(p.totalSundayOtHours)}` : '—'
+                        )}
                       </td>
 
                       {/* Total OT */}
                       <td className="px-3.5 py-3 text-center font-mono text-cyan-300 font-extrabold text-sm whitespace-nowrap">
-                        {totalOtSum > 0 ? formatHours(totalOtSum) : '0h'}
+                        {p.hasIncompleteEntries ? (
+                          <span className="text-amber-400/80 text-xs font-medium">⚠️ Hold</span>
+                        ) : (
+                          totalOtSum > 0 ? formatHours(totalOtSum) : '0h'
+                        )}
                       </td>
 
                       {/* Financial columns if unlocked */}
                       {isPayrollUnlocked && (
                         <>
                           <td className="px-3.5 py-3 text-right font-mono text-slate-200 font-bold whitespace-nowrap">
-                            ₹{(p.grossSalary || 0).toLocaleString('en-IN')}
+                            {p.hasIncompleteEntries ? (
+                              <span className="text-amber-400 text-xs font-bold">⚠️ On Hold</span>
+                            ) : (
+                              `₹${(p.grossSalary || 0).toLocaleString('en-IN')}`
+                            )}
                           </td>
                           <td className="px-3.5 py-3 text-right font-mono text-amber-300 font-bold whitespace-nowrap">
                             {(p.totalAdvances || 0) > 0 ? `− ₹${p.totalAdvances.toLocaleString('en-IN')}` : '₹0'}
                           </td>
                           <td className="px-3.5 py-3 text-right font-mono font-extrabold text-emerald-300 text-sm sm:text-base whitespace-nowrap">
-                            ₹{(p.netPayable || 0).toLocaleString('en-IN')}
+                            {p.hasIncompleteEntries ? (
+                              <span className="text-amber-300 text-xs font-bold bg-amber-950/80 px-2 py-1 rounded border border-amber-600">
+                                ⚠️ Locked (Fix Punches)
+                              </span>
+                            ) : (
+                              `₹${(p.netPayable || 0).toLocaleString('en-IN')}`
+                            )}
                           </td>
                         </>
                       )}

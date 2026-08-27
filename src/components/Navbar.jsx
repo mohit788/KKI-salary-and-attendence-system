@@ -8,7 +8,8 @@ import {
   History, 
   Building2,
   Lock,
-  Unlock
+  Unlock,
+  AlertTriangle
 } from 'lucide-react';
 
 export default function Navbar({ 
@@ -17,7 +18,8 @@ export default function Navbar({
   metrics, 
   isPayrollUnlocked, 
   onOpenUnlockModal, 
-  onLockPayroll 
+  onLockPayroll,
+  onOpenIncompleteManager
 }) {
   const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresPayroll: false },
@@ -94,6 +96,18 @@ export default function Navbar({
                 );
               })}
             </nav>
+
+            {/* Incomplete Fast-Fix Trigger Button (Glowing when > 0) */}
+            {metrics?.incompleteCount > 0 && onOpenIncompleteManager && (
+              <button
+                onClick={() => onOpenIncompleteManager()}
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition-all whitespace-nowrap animate-pulse"
+                title={`${metrics.incompleteCount} incomplete records need resolution - Click to Fast-Fix`}
+              >
+                <AlertTriangle className="w-4 h-4" />
+                <span>Fix Incomplete ({metrics.incompleteCount})</span>
+              </button>
+            )}
 
             {/* Payroll Mode Lock / Unlock Toggle Button */}
             {isPayrollUnlocked ? (

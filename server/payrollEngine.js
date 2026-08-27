@@ -188,8 +188,13 @@ function calculateWorkerPayroll({
     });
   }
 
-  const grossSalary = +(basePay + otPay + sundayOtPay + totalAllowances + customBonuses - customDeductions).toFixed(2);
+  const hasIncompleteEntries = incompleteDays > 0;
+  const isCalculationLocked = hasIncompleteEntries;
+  const lockReason = hasIncompleteEntries 
+    ? `${incompleteDays} incomplete attendance record(s) need resolution before payroll can be calculated.`
+    : '';
 
+  const grossSalary = +(basePay + otPay + sundayOtPay + totalAllowances + customBonuses - customDeductions).toFixed(2);
   const totalAdvances = advances.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
   const netPayable = Math.max(0, +(grossSalary - totalAdvances).toFixed(2));
 
@@ -212,22 +217,31 @@ function calculateWorkerPayroll({
     sundayWorkedDays,
     absentDays,
     incompleteDays,
-    totalOtHours: +totalOtHours.toFixed(2),
-    totalSundayOtHours: +totalSundayOtHours.toFixed(2),
-    totalCombinedOtHours: +(totalOtHours + totalSundayOtHours).toFixed(2),
-    totalWorkedHours: +totalWorkedHours.toFixed(2),
-    payableDays,
-    basePay,
-    otPay,
-    sundayOtPay,
-    totalCombinedOtPay: +(otPay + sundayOtPay).toFixed(2),
+    hasIncompleteEntries,
+    isCalculationLocked,
+    lockReason,
+    totalOtHours: isCalculationLocked ? 0 : +totalOtHours.toFixed(2),
+    totalSundayOtHours: isCalculationLocked ? 0 : +totalSundayOtHours.toFixed(2),
+    totalCombinedOtHours: isCalculationLocked ? 0 : +(totalOtHours + totalSundayOtHours).toFixed(2),
+    totalWorkedHours: isCalculationLocked ? 0 : +totalWorkedHours.toFixed(2),
+    rawTotalOtHours: +totalOtHours.toFixed(2),
+    rawTotalSundayOtHours: +totalSundayOtHours.toFixed(2),
+    rawTotalWorkedHours: +totalWorkedHours.toFixed(2),
+    payableDays: isCalculationLocked ? 0 : payableDays,
+    rawPayableDays: payableDays,
+    basePay: isCalculationLocked ? 0 : basePay,
+    otPay: isCalculationLocked ? 0 : otPay,
+    sundayOtPay: isCalculationLocked ? 0 : sundayOtPay,
+    totalCombinedOtPay: isCalculationLocked ? 0 : +(otPay + sundayOtPay).toFixed(2),
     totalLeaves: absentDays + forfeitedWeeklyOffs,
-    customBonuses: +customBonuses.toFixed(2),
-    customDeductions: +customDeductions.toFixed(2),
-    appliedRules,
-    grossSalary,
+    customBonuses: isCalculationLocked ? 0 : +customBonuses.toFixed(2),
+    customDeductions: isCalculationLocked ? 0 : +customDeductions.toFixed(2),
+    appliedRules: isCalculationLocked ? [] : appliedRules,
+    grossSalary: isCalculationLocked ? 0 : grossSalary,
+    rawGrossSalary: grossSalary,
     totalAdvances: +totalAdvances.toFixed(2),
-    netPayable,
+    netPayable: isCalculationLocked ? 0 : netPayable,
+    rawNetPayable: netPayable,
   };
 }
 

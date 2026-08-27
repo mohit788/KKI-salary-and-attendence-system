@@ -11,6 +11,7 @@ import AllowancesSection from './components/AllowancesSection';
 import SettingsPanel from './components/SettingsPanel';
 import AuditLogsModal from './components/AuditLogsModal';
 import AiAssistantBar from './components/AiAssistantBar';
+import IncompleteManagerModal from './components/IncompleteManagerModal';
 import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
 
 export default function App() {
@@ -31,6 +32,10 @@ export default function App() {
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [unlockError, setUnlockError] = useState('');
   const [unlockLoading, setUnlockLoading] = useState(false);
+
+  // Incomplete Manager State
+  const [showIncompleteModal, setShowIncompleteModal] = useState(false);
+  const [incompleteStaffFilter, setIncompleteStaffFilter] = useState(null);
 
   // Selected worker details state
   const [selectedStaffNo, setSelectedStaffNo] = useState(null);
@@ -306,6 +311,7 @@ export default function App() {
         isPayrollUnlocked={isPayrollUnlocked}
         onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
         onLockPayroll={handleLockPayroll}
+        onOpenIncompleteManager={() => { setIncompleteStaffFilter(null); setShowIncompleteModal(true); }}
       />
 
       <AiAssistantBar onRefreshData={refreshData} />
@@ -321,6 +327,7 @@ export default function App() {
             onEditRecord={(rec) => setEditingRecord(rec)}
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
+            onOpenIncompleteManager={(staffNo) => { setIncompleteStaffFilter(staffNo || null); setShowIncompleteModal(true); }}
           />
         )}
 
@@ -332,6 +339,7 @@ export default function App() {
             onUpdateSalary={handleUpdateSalary}
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
+            onOpenIncompleteManager={(staffNo) => { setIncompleteStaffFilter(staffNo || null); setShowIncompleteModal(true); }}
           />
         )}
 
@@ -375,6 +383,14 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* MODAL: INCOMPLETE RECORDS FAST-FIX MANAGER */}
+      <IncompleteManagerModal
+        isOpen={showIncompleteModal}
+        onClose={() => setShowIncompleteModal(false)}
+        onRefreshData={refreshData}
+        initialStaffNo={incompleteStaffFilter}
+      />
 
       {/* MODAL: UNLOCK PAYROLL & SALARY MODE */}
       {showUnlockModal && (
@@ -463,6 +479,7 @@ export default function App() {
           onConfirm={handleCommitPreview}
           onCancel={() => setPreviewData(null)}
           loading={loading}
+          onOpenIncompleteManager={() => { setIncompleteStaffFilter(null); setShowIncompleteModal(true); }}
         />
       )}
 

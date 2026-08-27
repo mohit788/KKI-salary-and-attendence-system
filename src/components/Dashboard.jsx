@@ -14,6 +14,7 @@ import {
   Filter,
   Calendar,
   Edit2,
+  Edit3,
   CalendarDays,
   User,
   Download,
@@ -31,7 +32,8 @@ export default function Dashboard({
   setActiveTab,
   onEditRecord,
   isPayrollUnlocked = false,
-  onOpenUnlockModal
+  onOpenUnlockModal,
+  onOpenIncompleteManager
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -263,6 +265,39 @@ export default function Dashboard({
 
       </div>
 
+      {/* FAST-FIX ACTION BANNER (When incomplete records exist) */}
+      {metrics?.incompleteCount > 0 && (
+        <div 
+          onClick={onOpenIncompleteManager}
+          className="cursor-pointer glass-card rounded-2xl p-4.5 border-2 border-amber-500/80 bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/80 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-amber-400 transition-all group"
+        >
+          <div className="flex items-center space-x-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 font-black flex items-center justify-center shadow-lg shadow-amber-500/30 animate-pulse shrink-0">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-black text-white group-hover:text-amber-300 transition-colors flex items-center gap-2 flex-wrap">
+                <span>⚡ Action Required: {metrics.incompleteCount} Incomplete Records Found!</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold font-mono">
+                  Fast-Fix Ready
+                </span>
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Worker salary & duty calculations are on hold. Click here to open the Fast-Fix Center and resolve all missing swipes at once.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onOpenIncompleteManager && onOpenIncompleteManager(); }}
+            className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all shrink-0 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Open Fast-Fix Manager</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Metrics Row - Large & High Contrast */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         
@@ -290,15 +325,29 @@ export default function Dashboard({
           <p className="text-xs text-slate-400 mt-1 font-medium">Total evaluated logs</p>
         </div>
 
-        {/* Flagged Incomplete Records */}
-        <div className="glass-card rounded-2xl p-5 border-2 border-slate-700 bg-slate-900 shadow-md">
+        {/* Flagged Incomplete Records (Clickable to open Fast-Fix Manager) */}
+        <div 
+          onClick={onOpenIncompleteManager}
+          className={`glass-card rounded-2xl p-5 border-2 bg-slate-900 shadow-md transition-all ${
+            (metrics?.incompleteCount || 0) > 0 
+              ? 'border-amber-500/80 hover:border-amber-400 cursor-pointer hover:scale-[1.02] ring-2 ring-amber-500/20' 
+              : 'border-slate-700'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Review Needed</span>
             <div className="w-10 h-10 rounded-xl bg-amber-950 text-amber-300 border border-amber-600 flex items-center justify-center">
               <AlertTriangle className="w-5 h-5" />
             </div>
           </div>
-          <p className="text-3xl font-extrabold text-amber-300 font-mono mt-2">{metrics?.incompleteCount || 0}</p>
+          <div className="flex items-baseline justify-between mt-2">
+            <p className="text-3xl font-extrabold text-amber-300 font-mono">{metrics?.incompleteCount || 0}</p>
+            {(metrics?.incompleteCount || 0) > 0 && (
+              <span className="text-[11px] font-bold text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-600">
+                Click to Fix ➔
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 mt-1 font-medium">Single punch / missed swipes</p>
         </div>
 
@@ -547,10 +596,30 @@ export default function Dashboard({
                         );
                       }
 
+                      const isManual = r.is_manual_override === 1 || r.is_manual_override === true;
+
                       return (
-                        <tr key={`${r.date}-${idx}`} className="hover:bg-slate-800/80 transition-colors">
+                        <tr 
+                          key={`${r.date}-${idx}`} 
+                          className={`transition-colors ${
+                            isManual 
+                              ? 'bg-violet-950/25 hover:bg-violet-900/35 border-l-4 border-l-violet-500' 
+                              : 'hover:bg-slate-800/80'
+                          }`}
+                        >
                           <td className="py-3 px-4 font-mono font-bold text-white whitespace-nowrap">
-                            {r.date} <span className="text-slate-400 font-normal">({r.weekday || ''})</span>
+                            <div className="flex items-center space-x-2">
+                              <span>{r.date} <span className="text-slate-400 font-normal">({r.weekday || ''})</span></span>
+                              {isManual && (
+                                <span 
+                                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-900/90 text-violet-200 border border-violet-500 flex items-center gap-1 shadow-sm"
+                                  title={r.override_reason || 'Manual Admin Correction'}
+                                >
+                                  <Edit3 className="w-2.5 h-2.5 text-violet-300" />
+                                  <span>Manual Edit</span>
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 px-4 font-mono text-slate-200">
                             {r.punchPairsFormatted ? (

@@ -94,6 +94,26 @@ export default function WorkerDetail({
         </div>
       </div>
 
+      {/* CALCULATION LOCKED WARNING BANNER */}
+      {payroll?.hasIncompleteEntries && (
+        <div className="bg-amber-950/80 border-2 border-amber-500 rounded-2xl p-4.5 text-amber-200 shadow-xl flex items-center justify-between gap-4">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center shrink-0">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white flex items-center gap-2">
+                <span>⚠️ Salary & Totals Calculation On Hold ({payroll.incompleteDays} Incomplete Days)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-bold font-mono">Action Required</span>
+              </h4>
+              <p className="text-xs text-slate-300 mt-0.5">
+                This employee has {payroll.incompleteDays} attendance entry(ies) with missing punch swipes. Please complete all missing punches in the breakdown below to unlock salary generation.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Printable Report Header */}
       <div className="glass-card rounded-2xl p-6 border-2 border-slate-700 bg-slate-900 shadow-md">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b-2 border-slate-700">
@@ -145,7 +165,11 @@ export default function WorkerDetail({
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mt-6">
           <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
             <p className="text-xs font-bold uppercase text-slate-300">Payable Days</p>
-            <p className="text-xl font-extrabold text-emerald-300 font-mono mt-1">{payroll?.payableDays || 0} d</p>
+            {payroll?.hasIncompleteEntries ? (
+              <p className="text-sm font-extrabold text-amber-400 font-mono mt-1">⚠️ Locked ({payroll.incompleteDays} Incomplete)</p>
+            ) : (
+              <p className="text-xl font-extrabold text-emerald-300 font-mono mt-1">{payroll?.payableDays || 0} d</p>
+            )}
             <p className="text-xs text-slate-400 mt-0.5">{payroll?.fullPresentDays || 0} Full + {payroll?.paidWeeklyOffs || 0} Offs</p>
           </div>
 
@@ -157,9 +181,13 @@ export default function WorkerDetail({
 
           <div className="bg-blue-950/60 border border-blue-600/60 rounded-xl p-3.5">
             <p className="text-xs font-bold uppercase text-blue-300">Total OT Hours</p>
-            <p className="text-xl font-extrabold text-cyan-300 font-mono mt-1">
-              {formatHours(payroll?.totalCombinedOtHours || ((payroll?.totalOtHours || 0) + (payroll?.totalSundayOtHours || 0)))}
-            </p>
+            {payroll?.hasIncompleteEntries ? (
+              <p className="text-sm font-extrabold text-amber-400 font-mono mt-1">⚠️ On Hold</p>
+            ) : (
+              <p className="text-xl font-extrabold text-cyan-300 font-mono mt-1">
+                {formatHours(payroll?.totalCombinedOtHours || ((payroll?.totalOtHours || 0) + (payroll?.totalSundayOtHours || 0)))}
+              </p>
+            )}
             <p className="text-xs text-blue-300 font-mono">
               {formatHours(payroll?.totalOtHours || 0)} Wk + {formatHours(payroll?.totalSundayOtHours || 0)} Sun
             </p>
@@ -167,7 +195,11 @@ export default function WorkerDetail({
 
           <div className="bg-amber-950/60 border border-amber-600/60 rounded-xl p-3.5">
             <p className="text-xs font-bold uppercase text-amber-300">Sunday OT ☀️</p>
-            <p className="text-xl font-extrabold text-amber-300 font-mono mt-1">{formatHours(payroll?.totalSundayOtHours || 0)}</p>
+            {payroll?.hasIncompleteEntries ? (
+              <p className="text-sm font-extrabold text-amber-400 font-mono mt-1">⚠️ On Hold</p>
+            ) : (
+              <p className="text-xl font-extrabold text-amber-300 font-mono mt-1">{formatHours(payroll?.totalSundayOtHours || 0)}</p>
+            )}
             <p className="text-xs text-amber-300 font-mono">
               {isPayrollUnlocked ? `₹${(payroll?.sundayOtPay || 0).toLocaleString('en-IN')}` : 'Sunday Duty OT'}
             </p>
@@ -183,7 +215,11 @@ export default function WorkerDetail({
 
               <div className="bg-emerald-950/80 border-2 border-emerald-600 rounded-xl p-3.5 shadow-md">
                 <p className="text-xs font-bold uppercase text-emerald-300">Net Payable</p>
-                <p className="text-2xl font-extrabold text-emerald-300 font-mono mt-1">₹{(payroll?.netPayable || 0).toLocaleString('en-IN')}</p>
+                {payroll?.hasIncompleteEntries ? (
+                  <p className="text-sm font-extrabold text-amber-300 font-mono mt-1">⚠️ Locked (Fix Punches)</p>
+                ) : (
+                  <p className="text-2xl font-extrabold text-emerald-300 font-mono mt-1">₹{(payroll?.netPayable || 0).toLocaleString('en-IN')}</p>
+                )}
                 <p className="text-xs text-emerald-400 font-semibold mt-0.5">Final Payout</p>
               </div>
             </>
@@ -191,7 +227,11 @@ export default function WorkerDetail({
             <>
               <div className="bg-slate-950 border border-slate-700 rounded-xl p-3.5">
                 <p className="text-xs font-bold uppercase text-slate-300">Total Regular Duty</p>
-                <p className="text-xl font-extrabold text-slate-100 font-mono mt-1">{formatHours(totalRegularDutyHours)}</p>
+                {payroll?.hasIncompleteEntries ? (
+                  <p className="text-sm font-extrabold text-amber-400 font-mono mt-1">⚠️ On Hold</p>
+                ) : (
+                  <p className="text-xl font-extrabold text-slate-100 font-mono mt-1">{formatHours(totalRegularDutyHours)}</p>
+                )}
                 <p className="text-xs text-slate-400 mt-0.5">8h Standard Hours</p>
               </div>
 
@@ -229,63 +269,87 @@ export default function WorkerDetail({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {dailyRecords.map(r => (
-                <tr key={r.date} className={`hover:bg-slate-800/80 transition-colors ${r.status === 'Weekly Off (Worked OT)' ? 'bg-amber-950/20' : ''}`}>
-                  <td className="px-4 py-3.5 font-mono font-bold text-white whitespace-nowrap">
-                    {r.date} <span className="text-slate-400 font-normal">({r.weekday})</span>
-                  </td>
+              {dailyRecords.map(r => {
+                const isManual = r.is_manual_override === 1 || r.is_manual_override === true;
 
-                  <td className="px-4 py-3.5 font-mono text-slate-200">
-                    {r.raw_swipes ? (
-                      <span className="bg-slate-950 px-2.5 py-1 rounded border border-slate-700 text-xs font-bold text-cyan-300">
-                        {r.raw_swipes}
+                return (
+                  <tr 
+                    key={r.date} 
+                    className={`transition-colors ${
+                      isManual 
+                        ? 'bg-violet-950/25 hover:bg-violet-900/35 border-l-4 border-l-violet-500' 
+                        : r.status === 'Weekly Off (Worked OT)' 
+                          ? 'bg-amber-950/20 hover:bg-slate-800/80' 
+                          : 'hover:bg-slate-800/80'
+                    }`}
+                  >
+                    <td className="px-4 py-3.5 font-mono font-bold text-white whitespace-nowrap">
+                      <div className="flex items-center space-x-2">
+                        <span>{r.date} <span className="text-slate-400 font-normal">({r.weekday})</span></span>
+                        {isManual && (
+                          <span 
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-900/90 text-violet-200 border border-violet-500 flex items-center gap-1 shadow-sm"
+                            title={r.override_reason || 'Manual Admin Correction'}
+                          >
+                            <Edit3 className="w-2.5 h-2.5 text-violet-300" />
+                            <span>Manual Edit</span>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-3.5 font-mono text-slate-200">
+                      {r.raw_swipes ? (
+                        <span className="bg-slate-950 px-2.5 py-1 rounded border border-slate-700 text-xs font-bold text-cyan-300">
+                          {r.raw_swipes}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 italic">No Swipe</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3.5 font-mono text-center text-emerald-300 font-bold">
+                      {r.effective_in || '—'}
+                    </td>
+
+                    <td className="px-4 py-3.5 font-mono text-center text-emerald-300 font-bold">
+                      {r.effective_out || '—'}
+                    </td>
+
+                    <td className="px-4 py-3.5 text-center font-mono text-slate-100 font-bold">
+                      {formatHours(r.regular_hours)}
+                    </td>
+
+                    <td className="px-4 py-3.5 text-center font-mono text-blue-300 font-bold">
+                      {r.ot_hours > 0 ? formatHours(r.ot_hours) : '0h'}
+                    </td>
+
+                    <td className="px-4 py-3.5 text-center font-mono text-amber-300 font-bold">
+                      {r.sunday_ot_hours > 0 ? `${formatHours(r.sunday_ot_hours)} ☀️` : '—'}
+                    </td>
+
+                    <td className="px-4 py-3.5 text-center font-mono font-extrabold text-white text-base">
+                      {formatHours(r.total_hours)}
+                    </td>
+
+                    <td className="px-4 py-3.5 text-center">
+                      <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${getStatusBadge(r.status)}`}>
+                        {r.status}
                       </span>
-                    ) : (
-                      <span className="text-slate-500 italic">No Swipe</span>
-                    )}
-                  </td>
+                    </td>
 
-                  <td className="px-4 py-3.5 font-mono text-center text-emerald-300 font-bold">
-                    {r.effective_in || '—'}
-                  </td>
-
-                  <td className="px-4 py-3.5 font-mono text-center text-emerald-300 font-bold">
-                    {r.effective_out || '—'}
-                  </td>
-
-                  <td className="px-4 py-3.5 text-center font-mono text-slate-100 font-bold">
-                    {formatHours(r.regular_hours)}
-                  </td>
-
-                  <td className="px-4 py-3.5 text-center font-mono text-blue-300 font-bold">
-                    {r.ot_hours > 0 ? formatHours(r.ot_hours) : '0h'}
-                  </td>
-
-                  <td className="px-4 py-3.5 text-center font-mono text-amber-300 font-bold">
-                    {r.sunday_ot_hours > 0 ? `${formatHours(r.sunday_ot_hours)} ☀️` : '—'}
-                  </td>
-
-                  <td className="px-4 py-3.5 text-center font-mono font-extrabold text-white text-base">
-                    {formatHours(r.total_hours)}
-                  </td>
-
-                  <td className="px-4 py-3.5 text-center">
-                    <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${getStatusBadge(r.status)}`}>
-                      {r.status}
-                    </span>
-                  </td>
-
-                  <td className="px-4 py-3.5 text-center no-print">
-                    <button
-                      onClick={() => onEditRecord(r)}
-                      className="p-1.5 rounded-lg bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-700 transition-all"
-                      title="Edit Record"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-4 py-3.5 text-center no-print">
+                      <button
+                        onClick={() => onEditRecord(r)}
+                        className="p-1.5 rounded-lg bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-700 transition-all"
+                        title="Edit Record"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
