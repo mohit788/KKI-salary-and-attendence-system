@@ -1588,12 +1588,12 @@ app.post('/api/ai-assistant/execute', async (req, res) => {
         salaryRules,
       });
 
-      statusbar\return {
+      return {
         ...w,
         payroll,
         dailyRecords,
       };
-    });daily reco
+    });
 
     // Process prompt via Gemini
     const result = await processUniversalAssistantPrompt(prompt, apiKey, {
