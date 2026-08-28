@@ -259,21 +259,21 @@ export default function WorkerDetail({
           <span className="text-sm text-slate-300 font-bold">{dailyRecords.length} Days Recorded</span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-200">
-            <thead className="bg-slate-950 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 text-xs">
-              <tr>
-                <th className="px-4 py-3.5">Date</th>
-                <th className="px-4 py-3.5">Raw Swipes</th>
-                <th className="px-3 py-3.5 text-center text-teal-300">Shift</th>
-                <th className="px-4 py-3.5 text-center">Effective In</th>
-                <th className="px-4 py-3.5 text-center">Effective Out</th>
-                <th className="px-4 py-3.5 text-center">Reg Hrs (8h Duty)</th>
-                <th className="px-4 py-3.5 text-center text-blue-300">OT Hrs</th>
-                <th className="px-4 py-3.5 text-center text-amber-300">Sun OT ☀️</th>
-                <th className="px-4 py-3.5 text-center">Total Hrs</th>
-                <th className="px-4 py-3.5 text-center">Status</th>
-                <th className="px-4 py-3.5 text-center no-print">Action</th>
+        <div className="overflow-x-auto overflow-y-auto max-h-[68vh] relative">
+          <table className="w-full text-left text-sm text-slate-200 border-collapse">
+            <thead className="sticky top-0 bg-slate-950 z-20 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 text-xs shadow-md">
+              <tr className="divide-x divide-slate-800">
+                <th className="px-4 py-3.5 bg-slate-950">Date</th>
+                <th className="px-4 py-3.5 bg-slate-950">Raw Swipes</th>
+                <th className="px-3 py-3.5 text-center text-teal-300 bg-slate-950">Shift</th>
+                <th className="px-4 py-3.5 text-center bg-slate-950">Effective In</th>
+                <th className="px-4 py-3.5 text-center bg-slate-950">Effective Out</th>
+                <th className="px-4 py-3.5 text-center bg-slate-950">Reg Hrs (8h Duty)</th>
+                <th className="px-4 py-3.5 text-center text-blue-300 bg-slate-950">OT Hrs</th>
+                <th className="px-4 py-3.5 text-center text-amber-300 bg-slate-950">Sun OT ☀️</th>
+                <th className="px-4 py-3.5 text-center bg-slate-950">Total Hrs</th>
+                <th className="px-4 py-3.5 text-center bg-slate-950">Status</th>
+                <th className="px-4 py-3.5 text-center no-print bg-slate-950">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -283,12 +283,12 @@ export default function WorkerDetail({
                 return (
                   <tr 
                     key={r.date} 
-                    className={`transition-colors ${
+                    className={`transition-colors divide-x divide-slate-800/80 ${
                       isManual 
                         ? 'bg-violet-950/25 hover:bg-violet-900/35 border-l-4 border-l-violet-500' 
                         : r.status === 'Weekly Off (Worked OT)' 
-                          ? 'bg-amber-950/20 hover:bg-slate-800/80' 
-                          : 'hover:bg-slate-800/80'
+                          ? 'bg-amber-950/30 hover:bg-slate-800/90' 
+                          : 'even:bg-slate-950/40 odd:bg-slate-900/60 hover:bg-slate-800/90'
                     }`}
                   >
                     <td className="px-4 py-3.5 font-mono font-bold text-white whitespace-nowrap">

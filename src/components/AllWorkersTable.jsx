@@ -264,30 +264,30 @@ export default function AllWorkersTable({
         </div>
       </div>
 
-      {/* Workers Table - Crisp Alignment, Single-Line Timings */}
+      {/* Workers Table - Crisp Alignment, Sticky Header & Partition Lines */}
       <div className="glass-card rounded-2xl border-2 border-slate-700 overflow-hidden shadow-lg bg-slate-900">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-200">
-            <thead className="bg-slate-950 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 text-xs">
-              <tr>
-                <th className="px-3.5 py-3.5 whitespace-nowrap">Staff No.</th>
-                <th className="px-3.5 py-3.5 whitespace-nowrap">Worker Name</th>
+        <div className="overflow-x-auto overflow-y-auto max-h-[72vh] relative">
+          <table className="w-full text-left text-sm text-slate-200 border-collapse">
+            <thead className="sticky top-0 bg-slate-950 z-20 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 text-xs shadow-md">
+              <tr className="divide-x divide-slate-800">
+                <th className="px-3.5 py-3.5 whitespace-nowrap bg-slate-950">Staff No.</th>
+                <th className="px-3.5 py-3.5 whitespace-nowrap bg-slate-950">Worker Name</th>
                 {isPayrollUnlocked && (
-                  <th className="px-3.5 py-3.5 whitespace-nowrap text-right">Base Salary</th>
+                  <th className="px-3.5 py-3.5 whitespace-nowrap text-right bg-slate-950">Base Salary</th>
                 )}
-                <th className="px-3 py-3.5 text-center whitespace-nowrap">Payable Days</th>
-                <th className="px-3 py-3.5 text-center whitespace-nowrap">Absent</th>
-                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-blue-300">Wkday OT</th>
-                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-amber-300">Sun OT ☀️</th>
-                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-cyan-300">Total OT 🔥</th>
+                <th className="px-3 py-3.5 text-center whitespace-nowrap bg-slate-950">Payable Days</th>
+                <th className="px-3 py-3.5 text-center whitespace-nowrap bg-slate-950">Absent</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-blue-300 bg-slate-950">Wkday OT</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-amber-300 bg-slate-950">Sun OT ☀️</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-cyan-300 bg-slate-950">Total OT 🔥</th>
                 {isPayrollUnlocked && (
                   <>
-                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Gross Pay</th>
-                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap">Advances</th>
-                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap text-emerald-300">Net Payable</th>
+                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap bg-slate-950">Gross Pay</th>
+                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap bg-slate-950">Advances</th>
+                    <th className="px-3.5 py-3.5 text-right whitespace-nowrap text-emerald-300 bg-slate-950">Net Payable</th>
                   </>
                 )}
-                <th className="px-3.5 py-3.5 text-center whitespace-nowrap">Action</th>
+                <th className="px-3.5 py-3.5 text-center whitespace-nowrap bg-slate-950">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -305,7 +305,7 @@ export default function AllWorkersTable({
                   return (
                     <tr 
                       key={w.staff_no} 
-                      className="hover:bg-slate-800/80 transition-colors"
+                      className="hover:bg-slate-800/90 transition-colors divide-x divide-slate-800/80 even:bg-slate-950/40 odd:bg-slate-900/60"
                     >
                       {/* Staff No */}
                       <td className="px-3.5 py-3 font-mono font-bold text-cyan-300 whitespace-nowrap">
@@ -458,15 +458,14 @@ export default function AllWorkersTable({
                             <span>View</span>
                           </button>
 
-                          {isPayrollUnlocked && (
-                            <button
-                              onClick={() => onAddAdvance(w.staff_no)}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all"
-                              title="Log Advance Payment"
-                            >
-                              <DollarSign className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => onAddAdvance(w.staff_no)}
+                            className="px-2.5 py-1.5 rounded-lg bg-purple-800 hover:bg-purple-700 text-white font-bold text-xs flex items-center space-x-1 border border-purple-600 shadow transition-all"
+                            title="Record Advance Payment"
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                            <span>Advance</span>
+                          </button>
                         </div>
                       </td>
                     </tr>

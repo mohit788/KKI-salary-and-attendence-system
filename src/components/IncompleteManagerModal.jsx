@@ -342,18 +342,18 @@ export default function IncompleteManagerModal({
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 bg-slate-900 z-10 text-slate-300 font-bold uppercase tracking-wider border-b-2 border-slate-800">
-                <tr>
-                  <th className="py-3 px-3 w-10 text-center">Sel</th>
-                  <th className="py-3 px-3">Employee</th>
-                  <th className="py-3 px-3">Date & Day</th>
-                  <th className="py-3 px-3">Current Missing Swipe</th>
-                  <th className="py-3 px-3 text-center">Quick Add Action</th>
-                  <th className="py-3 px-3">Edited Punch Sequence</th>
-                  <th className="py-3 px-3">Target Status</th>
+              <thead className="sticky top-0 bg-slate-950 z-20 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 shadow-md">
+                <tr className="divide-x divide-slate-800">
+                  <th className="py-3 px-3 w-10 text-center bg-slate-950">Sel</th>
+                  <th className="py-3 px-3 bg-slate-950">Employee</th>
+                  <th className="py-3 px-3 bg-slate-950">Date & Day</th>
+                  <th className="py-3 px-3 bg-slate-950">Current Missing Swipe</th>
+                  <th className="py-3 px-3 text-center bg-slate-950">Quick Add Action</th>
+                  <th className="py-3 px-3 bg-slate-950">Edited Punch Sequence</th>
+                  <th className="py-3 px-3 bg-slate-950">Target Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/80">
+              <tbody className="divide-y divide-slate-800">
                 {filteredRecords.map(r => {
                   const key = `${r.staff_no}_${r.date}`;
                   const isSelected = selectedIds.has(key);
@@ -362,7 +362,7 @@ export default function IncompleteManagerModal({
                   return (
                     <tr 
                       key={key} 
-                      className={`hover:bg-slate-900/90 transition-colors ${isSelected ? 'bg-amber-950/20' : ''}`}
+                      className={`hover:bg-slate-800/90 transition-colors divide-x divide-slate-800/80 ${isSelected ? 'bg-amber-950/30' : 'even:bg-slate-950/40 odd:bg-slate-900/60'}`}
                     >
                       {/* Checkbox */}
                       <td className="py-3 px-3 text-center">

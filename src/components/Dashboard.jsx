@@ -540,25 +540,26 @@ export default function Dashboard({
             </div>
 
             {/* Attendance Entries Table for Selected Worker */}
-            <div className="flex-1 overflow-y-auto pr-1">
+            <div className="flex-1 overflow-y-auto overflow-x-auto max-h-[68vh] relative rounded-xl border border-slate-700">
               <table className="w-full text-left border-collapse text-sm">
-                <thead className="sticky top-0 bg-slate-950 z-10 border-b-2 border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-200">
-                  <tr>
-                    <th className="py-3 px-4">Date & Day</th>
-                    <th className="py-3 px-4">Punch Swipes (Pairs)</th>
-                    <th className="py-3 px-4 text-center">Effective IN</th>
-                    <th className="py-3 px-4 text-center">Effective OUT</th>
-                    <th className="py-3 px-4 text-center">Reg Hrs (8h Duty)</th>
-                    <th className="py-3 px-4 text-center text-amber-300">OT Hrs</th>
-                    <th className="py-3 px-4 text-center">Late Mins</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Action</th>
+                <thead className="sticky top-0 bg-slate-950 z-20 border-b-2 border-slate-700 text-xs font-bold uppercase tracking-wider text-slate-200 shadow-md">
+                  <tr className="divide-x divide-slate-800">
+                    <th className="py-3 px-4 bg-slate-950">Date & Day</th>
+                    <th className="py-3 px-4 bg-slate-950">Punch Swipes (Pairs)</th>
+                    <th className="py-3 px-3 text-center text-teal-300 bg-slate-950">Shift</th>
+                    <th className="py-3 px-4 text-center bg-slate-950">Effective IN</th>
+                    <th className="py-3 px-4 text-center bg-slate-950">Effective OUT</th>
+                    <th className="py-3 px-4 text-center bg-slate-950">Reg Hrs (8h Duty)</th>
+                    <th className="py-3 px-4 text-center text-amber-300 bg-slate-950">OT Hrs</th>
+                    <th className="py-3 px-4 text-center bg-slate-950">Late Mins</th>
+                    <th className="py-3 px-4 bg-slate-950">Status</th>
+                    <th className="py-3 px-4 text-right bg-slate-950">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {selectedWorkerAttendance.length === 0 ? (
                     <tr>
-                      <td colSpan="9" className="py-12 text-center text-slate-400 text-base">
+                      <td colSpan="10" className="py-12 text-center text-slate-400 text-base">
                         No daily punch records found for this worker.
                       </td>
                     </tr>
@@ -612,9 +613,9 @@ export default function Dashboard({
                       return (
                         <tr
                           key={`${r.date}-${idx}`}
-                          className={`transition-colors ${isManual
+                          className={`transition-colors divide-x divide-slate-800/80 ${isManual
                               ? 'bg-violet-950/25 hover:bg-violet-900/35 border-l-4 border-l-violet-500'
-                              : 'hover:bg-slate-800/80'
+                              : 'even:bg-slate-950/40 odd:bg-slate-900/60 hover:bg-slate-800/90'
                             }`}
                         >
                           <td className="py-3 px-4 font-mono font-bold text-white whitespace-nowrap">
@@ -644,6 +645,11 @@ export default function Dashboard({
                               <span className="text-slate-500 italic">No Swipes</span>
                             )}
                           </td>
+                          <td className="py-3 px-3 font-mono text-center whitespace-nowrap">
+                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-teal-950/80 text-teal-300 border border-teal-700/60 shadow-sm">
+                              {r.shift || '08:00'}
+                            </span>
+                          </td>
                           <td className="py-3 px-4 font-mono text-center text-emerald-300 font-bold whitespace-nowrap">
                             {r.effective_in || '—'}
                           </td>
@@ -662,7 +668,7 @@ export default function Dashboard({
                           <td className="py-3 px-4 whitespace-nowrap">
                             {statusBadge}
                           </td>
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
                             {onEditRecord && (
                               <button
                                 onClick={() => {
