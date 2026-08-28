@@ -42,6 +42,12 @@ async function getCustomRules() {
   return res.rows || [];
 }
 
+// Helper: Fetch active custom salary rules (bonus/deduction)
+async function getSalaryRules() {
+  const res = await execute(`SELECT * FROM custom_salary_rules WHERE is_active = 1`);
+  return res.rows || [];
+}
+
 // Helper: Get true incomplete count by verifying actual punch records in database
 async function getTrueIncompleteCount() {
   const settings = await getSettingsMap();
