@@ -49,19 +49,30 @@ export default function App() {
   // Fetch baseline metrics & worker list
   const refreshData = async () => {
     try {
+      const fetchJson = async (url) => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return { success: false };
+          return await res.json();
+        } catch (e) {
+          console.error(`Failed to fetch ${url}:`, e);
+          return { success: false, error: e.message };
+        }
+      };
+
       const [dashRes, workRes, setRes, auditRes, attAllRes] = await Promise.all([
-        fetch('/api/dashboard').then(r => r.json()),
-        fetch('/api/workers').then(r => r.json()),
-        fetch('/api/settings').then(r => r.json()),
-        fetch('/api/audit-logs').then(r => r.json()),
-        fetch('/api/attendance/all').then(r => r.json()),
+        fetchJson('/api/dashboard'),
+        fetchJson('/api/workers'),
+        fetchJson('/api/settings'),
+        fetchJson('/api/audit-logs'),
+        fetchJson('/api/attendance/all'),
       ]);
 
-      if (dashRes.success) setMetrics(dashRes.metrics);
-      if (workRes.success) setWorkers(workRes.workers);
-      if (setRes.success) setSettingsList(setRes.settings);
-      if (auditRes.success) setAuditLogs(auditRes.auditLogs);
-      if (attAllRes.success) setAllAttendance(attAllRes.records || []);
+      if (dashRes && dashRes.success) setMetrics(dashRes.metrics);
+      if (workRes && workRes.success) setWorkers(workRes.workers || []);
+      if (setRes && setRes.success) setSettingsList(setRes.settings || []);
+      if (auditRes && auditRes.success) setAuditLogs(auditRes.auditLogs || []);
+      if (attAllRes && attAllRes.success) setAllAttendance(attAllRes.records || []);
 
       if (selectedStaffNo) {
         fetchWorkerDetail(selectedStaffNo);
