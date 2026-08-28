@@ -475,9 +475,10 @@ function computeDailyAttendance(
     status = 'Weekly Off (Worked OT)';
   } else {
     // Regular weekday work (Mon - Sat)
-    if (finalEffectiveMins >= regularDutyMins) {
+    // Full Shift Completion: A worker completing standard shift (e.g. leaving at 16:25-16:30 for 16:30 shift end) gets full 8h regular duty
+    if (finalEffectiveMins >= (regularDutyMins - 15)) {
       regularHours = 8.0;
-      let rawOtMins = finalEffectiveMins - regularDutyMins;
+      let rawOtMins = Math.max(0, finalEffectiveMins - regularDutyMins);
       let computedOtHours = otRounding === '30min_block'
         ? Math.floor(rawOtMins / 30) * 0.5
         : +(rawOtMins / 60).toFixed(2);
