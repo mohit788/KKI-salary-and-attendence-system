@@ -1438,11 +1438,6 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
 // 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted)
 app.get('/api/export/excel', async (req, res) => {
   try {
-    const incompleteCount = await getTrueIncompleteCount();
-    if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
-    }
-
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
     const salaryRules = await getSalaryRules();
@@ -1568,11 +1563,6 @@ app.get('/api/export/excel', async (req, res) => {
 // 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet
 app.get('/api/export/excel/timings', async (req, res) => {
   try {
-    const incompleteCount = await getTrueIncompleteCount();
-    if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
-    }
-
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
@@ -1633,11 +1623,6 @@ app.get('/api/export/excel/timings', async (req, res) => {
 // 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime)
 app.get('/api/export/excel/summary', async (req, res) => {
   try {
-    const incompleteCount = await getTrueIncompleteCount();
-    if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
-    }
-
     const settings = await getSettingsMap();
     const [workersRes, allAttendanceRes] = await Promise.all([
       execute(`
@@ -1738,28 +1723,16 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
-    const workerIncompleteCheck = await execute(
-      `SELECT * FROM daily_attendance WHERE staff_no = ? AND (status LIKE '%Incomplete%' OR status = 'Incomplete')`,
-      [staff_no]
-    );
-    let workerIncompleteCount = 0;
-    for (const r of workerIncompleteCheck.rows) {
-      if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) continue;
-      const { timestamps } = parseSwipeRecord(r.raw_swipes);
-      const cleaned = cleanAndDebouncePunches(timestamps, 5);
-      if (cleaned.length % 2 !== 0 || r.status === 'Incomplete') {
-        workerIncompleteCount++;
-      }
-    }
-    if (workerIncompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: This worker has incomplete records. Please resolve missing punches first.`);
-    }
-
-    const workerRes = await execute(`SELECT * FROM workers WHERE staff_no = ?`, [staff_no]);
-    if (workerRes.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Worker not found' });
-    }
-    const w = workerRes.rows[0];
+    const workerRes = await execute(`
+      SELECT 
+        COALESCE(w.staff_no, ?) as staff_no,
+        COALESCE(w.staff_name, ?) as staff_name,
+        COALESCE(w.department, 'WORKER') as department,
+        COALESCE(w.monthly_salary, 15000) as monthly_salary
+      FROM (SELECT ? as staff_no) d
+      LEFT JOIN workers w ON d.staff_no = w.staff_no
+    `, [staff_no, staff_no, staff_no]);
+    const w = workerRes.rows[0] || { staff_no, staff_name: staff_no, department: 'WORKER', monthly_salary: 15000 };
 
     const attRes = await execute(
       `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
