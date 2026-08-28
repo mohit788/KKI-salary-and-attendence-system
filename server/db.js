@@ -210,7 +210,7 @@ async function initDatabase() {
     ['ot_rounding', '30min_block', 'OT rounding mode: "30min_block" or "minutes"'],
     ['short_hours_threshold', '4.0', 'Threshold hours below which day is short hours'],
     ['weekly_off_day', 'Sun', 'Default paid weekly off day (Sun/Sat/etc)'],
-    ['forfeiture_absent_threshold', '3', 'Number of absent days in Mon-Sat stretch to forfeit Sunday (Default: 3)'],
+    ['forfeiture_absent_threshold', '4', 'Number of absent days in Mon-Sat stretch to forfeit Sunday (Default: 4)'],
     ['weekly_off_forfeiture_threshold', '4', 'Number of weekly offs in same week to forfeit Sunday'],
     ['monthly_absent_forfeiture_threshold', '4', 'Total monthly absents to forfeit 1 Sunday weekly off (Default: 4)'],
     ['standard_month_days', 'calendar', 'Standard days in month for per-day rate calculation (calendar/26/30)'],
