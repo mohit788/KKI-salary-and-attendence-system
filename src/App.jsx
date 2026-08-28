@@ -12,6 +12,7 @@ import SettingsPanel from './components/SettingsPanel';
 import AuditLogsModal from './components/AuditLogsModal';
 import AiAssistantBar from './components/AiAssistantBar';
 import IncompleteManagerModal from './components/IncompleteManagerModal';
+import HolidaysManagerModal from './components/HolidaysManagerModal';
 import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
 
 export default function App() {
@@ -22,6 +23,13 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [allAttendance, setAllAttendance] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Month Selection State
+  const [selectedMonth, setSelectedMonth] = useState('all');
+  const [availableMonths, setAvailableMonths] = useState([]);
+
+  // Paid Holidays Manager State
+  const [showHolidaysModal, setShowHolidaysModal] = useState(false);
 
   // Payroll Security Mode State (Default Locked)
   const [isPayrollUnlocked, setIsPayrollUnlocked] = useState(
@@ -47,8 +55,11 @@ export default function App() {
   const [advanceStaffNo, setAdvanceStaffNo] = useState(null);
 
   // Fetch baseline metrics & worker list
-  const refreshData = async () => {
+  const refreshData = async (overrideMonth = null) => {
     try {
+      const activeM = overrideMonth !== null ? overrideMonth : selectedMonth;
+      const monthQuery = activeM && activeM !== 'all' ? `?month=${activeM}` : '';
+
       const fetchJson = async (url) => {
         try {
           const res = await fetch(url);
@@ -60,12 +71,13 @@ export default function App() {
         }
       };
 
-      const [dashRes, workRes, setRes, auditRes, attAllRes] = await Promise.all([
-        fetchJson('/api/dashboard'),
-        fetchJson('/api/workers'),
+      const [dashRes, workRes, setRes, auditRes, attAllRes, monthsRes] = await Promise.all([
+        fetchJson(`/api/dashboard${monthQuery}`),
+        fetchJson(`/api/workers${monthQuery}`),
         fetchJson('/api/settings'),
         fetchJson('/api/audit-logs'),
-        fetchJson('/api/attendance/all'),
+        fetchJson(`/api/attendance/all${monthQuery}`),
+        fetchJson('/api/months'),
       ]);
 
       if (dashRes && dashRes.success) setMetrics(dashRes.metrics);
@@ -73,6 +85,7 @@ export default function App() {
       if (setRes && setRes.success) setSettingsList(setRes.settings || []);
       if (auditRes && auditRes.success) setAuditLogs(auditRes.auditLogs || []);
       if (attAllRes && attAllRes.success) setAllAttendance(attAllRes.records || []);
+      if (monthsRes && monthsRes.success) setAvailableMonths(monthsRes.months || []);
 
       if (selectedStaffNo) {
         fetchWorkerDetail(selectedStaffNo);
@@ -80,6 +93,11 @@ export default function App() {
     } catch (err) {
       console.error('Error refreshing data:', err);
     }
+  };
+
+  const handleSelectMonth = (newMonth) => {
+    setSelectedMonth(newMonth);
+    refreshData(newMonth);
   };
 
   useEffect(() => {
@@ -329,6 +347,10 @@ export default function App() {
         onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
         onLockPayroll={handleLockPayroll}
         onOpenIncompleteManager={() => handleOpenIncompleteManager(null)}
+        selectedMonth={selectedMonth}
+        availableMonths={availableMonths}
+        onSelectMonth={handleSelectMonth}
+        onOpenHolidaysModal={() => setShowHolidaysModal(true)}
       />
 
       <AiAssistantBar onRefreshData={refreshData} />
@@ -345,6 +367,7 @@ export default function App() {
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
             onOpenIncompleteManager={handleOpenIncompleteManager}
+            selectedMonth={selectedMonth}
           />
         )}
 
@@ -357,6 +380,7 @@ export default function App() {
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
             onOpenIncompleteManager={handleOpenIncompleteManager}
+            selectedMonth={selectedMonth}
           />
         )}
 
@@ -410,6 +434,16 @@ export default function App() {
         }}
         onRefreshData={refreshData}
         initialStaffNo={incompleteStaffFilter}
+      />
+
+      {/* MODAL: PAID HOLIDAYS & NATIONAL OFFS MANAGER */}
+      <HolidaysManagerModal
+        isOpen={showHolidaysModal}
+        onClose={() => {
+          setShowHolidaysModal(false);
+          refreshData();
+        }}
+        onRefreshData={refreshData}
       />
 
       {/* MODAL: UNLOCK PAYROLL & SALARY MODE */}

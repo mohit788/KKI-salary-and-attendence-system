@@ -26,7 +26,8 @@ export default function AllWorkersTable({
   onUpdateSalary,
   isPayrollUnlocked = false,
   onOpenUnlockModal,
-  onOpenIncompleteManager
+  onOpenIncompleteManager,
+  selectedMonth
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [editingStaffNo, setEditingStaffNo] = useState(null);
@@ -35,6 +36,8 @@ export default function AllWorkersTable({
   const [webhookUrl, setWebhookUrl] = useState(localStorage.getItem('gsheets_webhook') || '');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+
+  const monthQueryParam = selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : '';
 
   const handleGoogleSheetsSync = async (e) => {
     e.preventDefault();
@@ -240,7 +243,7 @@ export default function AllWorkersTable({
           ) : (
             <>
               <a
-                href="/api/export/excel/summary"
+                href={`/api/export/excel/summary${monthQueryParam}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-teal-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -251,7 +254,7 @@ export default function AllWorkersTable({
               </a>
 
               <a
-                href="/api/export/excel/timings"
+                href={`/api/export/excel/timings${monthQueryParam}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-2 bg-blue-700 hover:bg-blue-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-blue-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -263,7 +266,7 @@ export default function AllWorkersTable({
               {isPayrollUnlocked ? (
                 <>
                   <a
-                    href="/api/export/excel"
+                    href={`/api/export/excel${monthQueryParam}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"

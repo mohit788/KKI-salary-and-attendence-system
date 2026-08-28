@@ -210,14 +210,20 @@ function buildDailyShiftMap(allRecords = [], defaultShift = '08:00') {
  * @param {string} rawInTime - HH:MM
  * @param {string} shiftStart - HH:MM (default 08:00)
  * @param {number} slabMinutes - default 30
+ * @param {boolean} isLeisureForgiven - if true, worker gets 2-minute leisure forgiveness
  */
-function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30) {
+function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30, isLeisureForgiven = false) {
   const inMins = timeToMins(rawInTime);
   const shiftMins = timeToMins(shiftStart);
 
   // Arrived early or on time -> Effective start is shift start (no early credit)
   if (inMins <= shiftMins) {
-    return { effectiveTime: shiftStart, effectiveMins: shiftMins, lateMins: 0 };
+    return { effectiveTime: shiftStart, effectiveMins: shiftMins, lateMins: 0, isLeisureForgiven: false };
+  }
+
+  // If 2-minute leisure time is approved/forgiven for this day
+  if (isLeisureForgiven) {
+    return { effectiveTime: shiftStart, effectiveMins: shiftMins, lateMins: 0, isLeisureForgiven: true };
   }
 
   // Late arrival: round UP to next slab boundary
@@ -229,6 +235,7 @@ function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30) 
     effectiveTime: minsToTime(effectiveMins),
     effectiveMins,
     lateMins: lateDelta,
+    isLeisureForgiven: false,
   };
 }
 
@@ -271,14 +278,24 @@ function cleanAndDebouncePunches(timestamps = [], debounceMins = 5) {
  * @param {string} weekday - "Mon", "Tue", "Sun" etc.
  * @param {Array<Object>} customRules - list of active custom rules
  * @param {string} dynamicShiftStart - Optional detected date-specific shift start (e.g. '07:00' or '06:00')
+ * @param {boolean} isPaidHoliday - true if date is a declared paid national/factory holiday
+ * @param {string} holidayName - Name of the holiday (e.g. 'Independence Day')
+ * @param {boolean} isLeisureForgiven - true if 2-minute leisure time is approved
  */
-function computeDailyAttendance(timestamps, settings = {}, weekday = '', customRules = [], dynamicShiftStart = '') {
+function computeDailyAttendance(
+  timestamps,
+  settings = {},
+  weekday = '',
+  customRules = [],
+  dynamicShiftStart = '',
+  isPaidHoliday = false,
+  holidayName = '',
+  isLeisureForgiven = false
+) {
   const cleanedPunches = cleanAndDebouncePunches(timestamps, 5);
   const firstIn = cleanedPunches && cleanedPunches.length > 0 ? cleanedPunches[0] : '';
 
   // Determine individual worker shift start:
-  // If an explicit non-empty dynamicShiftStart is provided (and not 'auto'), use it.
-  // Otherwise detect the shift anchor for this worker based on their first IN punch.
   let shiftStart = '08:00';
   if (dynamicShiftStart && dynamicShiftStart !== 'auto') {
     shiftStart = dynamicShiftStart;
@@ -297,9 +314,25 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const lunchDeductionMins = parseInt(settings.lunch_deduction_mins !== undefined ? settings.lunch_deduction_mins : 30, 10);
   const latePenaltyThresholdMins = parseInt(settings.late_penalty_threshold_mins || 120, 10);
 
-  // 1. No punches -> Absent / Weekly Off
+  // 1. No punches -> Absent / Weekly Off / Paid Holiday
   if (!cleanedPunches || cleanedPunches.length === 0) {
     const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
+    
+    if (isPaidHoliday) {
+      return {
+        shift: shiftStart,
+        effectiveIn: shiftStart,
+        effectiveOut: shiftEnd,
+        punchPairsFormatted: holidayName ? `[${holidayName}]` : '[Paid Holiday]',
+        regularHours: 8.0,
+        otHours: 0,
+        sundayOtHours: 0,
+        totalHours: 8.0,
+        lateMinutes: 0,
+        status: 'Holiday (Paid)',
+      };
+    }
+
     return {
       shift: shiftStart,
       effectiveIn: '',
@@ -317,7 +350,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   // 2. ODD PUNCHES (1, 3, 5 punches -> Unclosed session / Missing final OUT punch)
   // Flagged as 'Incomplete' until closing punch arrives!
   if (cleanedPunches.length % 2 !== 0) {
-    const { effectiveTime: effectiveInTime, lateMins } = getEffectiveFirstIn(firstIn, shiftStart, slabMinutes);
+    const { effectiveTime: effectiveInTime, lateMins } = getEffectiveFirstIn(firstIn, shiftStart, slabMinutes, isLeisureForgiven);
 
     const incompletePairStrings = [];
     for (let i = 0; i < cleanedPunches.length - 1; i += 2) {
@@ -342,11 +375,12 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 
   const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
 
-  // Span 1: apply grace slab to first IN punch
+  // Span 1: apply grace slab to first IN punch (with 2-min leisure forgiveness if approved)
   const { effectiveTime: effectiveInTime, effectiveMins: effectiveInMins, lateMins } = getEffectiveFirstIn(
     firstIn,
     shiftStart,
-    slabMinutes
+    slabMinutes,
+    isLeisureForgiven
   );
 
   let totalRawWorkedMins = 0;
@@ -363,146 +397,105 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const morningSessionThresholdMins = Math.round(shortThreshold * 60); // default 4.0h = 240 mins
   const isMorningSessionForfeited = hasMultipleSessions && (firstSessionWorkedMins < morningSessionThresholdMins);
 
-  // EVEN PUNCHES (2, 4, 6...): Process exact (IN, OUT) pairs
   for (let i = 0; i < cleanedPunches.length; i += 2) {
     const rawIn = cleanedPunches[i];
     const rawOut = cleanedPunches[i + 1];
 
-    // Check break duration between previous OUT and current IN
-    if (i >= 2) {
-      const prevOut = cleanedPunches[i - 1];
-      const prevOutMins = timeToMins(prevOut);
-      const curInMins = timeToMins(rawIn);
-      if (curInMins > prevOutMins) {
-        const breakSpan = curInMins - prevOutMins;
-        totalBreakMins += breakSpan;
-        if (breakSpan > maxMidDayExitMins) maxMidDayExitMins = breakSpan;
-      }
+    let sessionInMins = timeToMins(rawIn);
+    let sessionOutMins = timeToMins(rawOut);
+
+    if (i === 0) {
+      sessionInMins = effectiveInMins;
     }
 
-    const inMins = (i === 0) ? effectiveInMins : timeToMins(rawIn);
-    const outMins = timeToMins(rawOut);
-
-    if (outMins <= inMins) {
-      punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
+    if (i === 0 && isMorningSessionForfeited) {
+      punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut} (⚠️ Morning <4h Cut)`);
       continue;
     }
 
-    const span = outMins - inMins;
+    let sessionWorkedMins = Math.max(0, sessionOutMins - sessionInMins);
+    totalRawWorkedMins += sessionWorkedMins;
+    punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
 
-    if (i === 0 && isMorningSessionForfeited) {
-      punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut} (<4h Morning Exit)`);
-    } else {
-      punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
-      totalRawWorkedMins += span;
+    if (i + 2 < cleanedPunches.length) {
+      const nextIn = cleanedPunches[i + 2];
+      const gapMins = Math.max(0, timeToMins(nextIn) - sessionOutMins);
+      totalBreakMins += gapMins;
+      if (gapMins > maxMidDayExitMins) {
+        maxMidDayExitMins = gapMins;
+      }
     }
   }
 
-  // 1. Handle Lunch Deduction (UNPAID 30 minutes):
-  // 30 minutes lunch is not counted as working hours and not paid.
-  // Applies whenever worker is on shift and lunch was not punched out separately.
-  let effectiveLunchDeduct = 0;
-  if (lunchDeductionMins > 0 && totalBreakMins < lunchDeductionMins && totalRawWorkedMins > 0) {
-    const remainingLunch = lunchDeductionMins - totalBreakMins;
-    effectiveLunchDeduct = Math.min(remainingLunch, totalRawWorkedMins);
+  let finalEffectiveMins = totalRawWorkedMins;
+
+  // Custom Rules deduction
+  if (Array.isArray(customRules)) {
+    customRules.forEach(rule => {
+      if (!rule || !rule.is_active) return;
+      if (rule.rule_type === 'midday_exit' && maxMidDayExitMins >= (rule.threshold_mins || 30)) {
+        finalEffectiveMins -= (rule.deduction_mins || 30);
+      }
+    });
   }
 
-  const netWorkedMins = Math.max(0, totalRawWorkedMins - effectiveLunchDeduct);
-  const roundingBlock = (otRounding === '30min_block' || slabMinutes > 0) ? (slabMinutes || 30) : 30;
-
-  // SUNDAY / WEEKLY OFF: ALL worked time = Overtime (no regular hours)
-  if (isWeeklyOff) {
-    let totalSundayOtMins = netWorkedMins;
-    totalSundayOtMins = Math.floor(totalSundayOtMins / roundingBlock) * roundingBlock;
-
-    const sundayOtHours = +(totalSundayOtMins / 60).toFixed(2);
-    const totalHours = sundayOtHours;
-    const finalOutTime = timestamps[timestamps.length - 1];
-    const status = totalHours > 0 ? 'Weekly Off (Worked OT)' : 'Weekly Off (Paid)';
-
-    return {
-      shift: shiftStart,
-      effectiveIn: effectiveInTime,
-      effectiveOut: finalOutTime,
-      punchPairsFormatted: punchPairStrings.join(' | '),
-      regularHours: 0,
-      otHours: 0,
-      sundayOtHours,
-      totalHours,
-      lateMinutes: lateMins,
-      status,
-    };
+  // Automatic lunch deduction
+  if (finalEffectiveMins > 300 && lunchDeductionMins > 0) {
+    finalEffectiveMins = Math.max(0, finalEffectiveMins - lunchDeductionMins);
   }
 
-  // REGULAR WORKING DAY:
-  // Standard duty is 8 hours (480 minutes) of actual work.
-  // FACTORY RULE: Worker MUST complete full 8 hours (480 mins) of duty for the day to count as regular shift.
-  // If worker works LESS than 8 hours duty (e.g. 5.5h, 6h, etc.):
-  // - Day is marked 'Absent' (no regular daily shift credited)
-  // - All net worked hours (after lunch deduction & 30-min rounding) are credited to Overtime (OT Hours)
-  const standardDailyDutyMins = 480;
-  let totalRegularMins = 0;
-  let totalOtMins = 0;
+  finalEffectiveMins = Math.max(0, finalEffectiveMins);
+
+  const regularDutyMins = 8 * 60; // 480 mins = 8 hours
+  let regularHours = 0;
+  let otHours = 0;
+  let sundayOtHours = 0;
   let status = 'Present (Full)';
 
-  if (netWorkedMins >= standardDailyDutyMins) {
-    // Completed full 8 hours duty:
-    totalRegularMins = standardDailyDutyMins;
-    totalOtMins = netWorkedMins - standardDailyDutyMins;
-
-    // 3. Apply Active Custom Rules (mid-day exit & late penalty)
-    if (Array.isArray(customRules)) {
-      customRules.forEach(rule => {
-        if (!rule || !rule.is_active) return;
-
-        // Mid-day Exit Rule Evaluation
-        if (rule.rule_type === 'midday_exit' && maxMidDayExitMins > (rule.threshold_mins || 0)) {
-          const deduct = parseInt(rule.deduction_mins || 0, 10);
-          if (deduct > 0) totalRegularMins = Math.max(0, totalRegularMins - deduct);
-        }
-
-        // Late Penalty Rule Evaluation
-        if (rule.rule_type === 'late_penalty' && lateMins > (rule.threshold_mins || 0)) {
-          const deduct = parseInt(rule.deduction_mins || 0, 10);
-          if (deduct > 0) totalRegularMins = Math.max(0, totalRegularMins - deduct);
-        }
-      });
-    }
-
-    // 4. Apply 30-minute block rounding to both regular hours and overtime
-    totalRegularMins = Math.floor(totalRegularMins / roundingBlock) * roundingBlock;
-    totalOtMins = Math.floor(totalOtMins / roundingBlock) * roundingBlock;
-
-    // 5. Apply Max OT Cap if configured (> 0)
-    if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
-      totalOtMins = maxOtHours * 60;
-    }
-
-    if (lateMins >= latePenaltyThresholdMins) {
-      status = 'Present (Short)';
-    }
-  } else if (netWorkedMins > 0) {
-    // Incomplete Shift (< 8 hours duty):
-    // Count day as Absent, credit all net worked time as Overtime!
-    totalRegularMins = 0;
-    totalOtMins = Math.floor(netWorkedMins / roundingBlock) * roundingBlock;
-    if (maxOtHours > 0 && (totalOtMins / 60) > maxOtHours) {
-      totalOtMins = maxOtHours * 60;
-    }
-    status = 'Absent';
+  if (isPaidHoliday) {
+    // Worker worked on a Paid National / Declared Holiday
+    regularHours = 8.0; // Paid day
+    sundayOtHours = +(finalEffectiveMins / 60).toFixed(2); // All worked time as special Holiday OT!
+    status = 'Holiday (Worked OT)';
+  } else if (isWeeklyOff) {
+    // Sunday work: Worker gets paid day + all worked time as Sunday OT
+    regularHours = 8.0;
+    sundayOtHours = +(finalEffectiveMins / 60).toFixed(2);
+    status = 'Weekly Off (Worked OT)';
   } else {
-    // 0 worked time
-    totalRegularMins = 0;
-    totalOtMins = 0;
-    status = 'Absent';
+    // Regular weekday work (Mon - Sat)
+    if (finalEffectiveMins >= regularDutyMins) {
+      regularHours = 8.0;
+      let rawOtMins = finalEffectiveMins - regularDutyMins;
+      let computedOtHours = otRounding === '30min_block'
+        ? Math.floor(rawOtMins / 30) * 0.5
+        : +(rawOtMins / 60).toFixed(2);
+
+      if (maxOtHours > 0) {
+        computedOtHours = Math.min(computedOtHours, maxOtHours);
+      }
+
+      otHours = computedOtHours;
+      status = 'Present (Full)';
+    } else if (finalEffectiveMins > 0) {
+      let workedH = +(finalEffectiveMins / 60).toFixed(2);
+      if (workedH < shortThreshold) {
+        otHours = workedH;
+        regularHours = 0;
+        status = 'Absent (OT Credited)';
+      } else {
+        regularHours = workedH;
+        status = 'Present (Short)';
+      }
+    } else {
+      status = 'Absent';
+    }
   }
 
-  const regularHours = +(totalRegularMins / 60).toFixed(2);
-  const otHours = +(totalOtMins / 60).toFixed(2);
-  const sundayOtHours = 0;
-  const totalHours = +(regularHours + otHours).toFixed(2);
+  const lastOut = cleanedPunches[cleanedPunches.length - 1];
+  let finalOutTime = lastOut || shiftEnd;
 
-  const finalOutTime = timestamps[timestamps.length - 1];
+  const totalHours = +(regularHours + otHours + sundayOtHours).toFixed(2);
 
   return {
     shift: shiftStart,
@@ -519,12 +512,83 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
 }
 
 /**
+ * 2-Minute Leisure Time Policy Evaluation across a worker's monthly attendance:
+ * - Each worker is granted up to leisureMinsAllowed (2 min) on up to leisureDaysAllowed (2 days/month).
+ * - 3rd Strike Revocation: If the worker is late 3 or more times (even 1-2 mins),
+ *   ALL leisure forgiveness is REVOKED and all late days get full 30-min slab penalty!
+ */
+function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules = [], paidHolidaysMap = {}) {
+  const leisureMinsAllowed = parseInt(settings.leisure_mins_allowed || 2, 10);
+  const leisureDaysAllowed = parseInt(settings.leisure_days_allowed || 2, 10);
+
+  // Identify all late days for this worker in the month
+  const lateDayIndices = [];
+  const leisureCandidateIndices = [];
+
+  for (let i = 0; i < dailyRecords.length; i++) {
+    const r = dailyRecords[i];
+    const swipes = r.raw_swipes || r.swipe_record || '';
+    // Basic helper replacement for parseSwipeRecord
+    const timestamps = String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || [];
+    const cleaned = cleanAndDebouncePunches(timestamps, 5);
+    if (cleaned.length === 0) continue;
+
+    const firstIn = cleaned[0];
+    const shiftStart = r.shift || detectWorkerShiftAnchor(firstIn, settings.shift_start || '08:00', settings.assigned_shift || 'auto');
+    const inMins = timeToMins(firstIn);
+    const shiftMins = timeToMins(shiftStart);
+
+    if (inMins > shiftMins) {
+      const lateDelta = inMins - shiftMins;
+      lateDayIndices.push(i);
+      if (lateDelta <= leisureMinsAllowed) {
+        leisureCandidateIndices.push(i);
+      }
+    }
+  }
+
+  // Revocation Rule: If total late arrivals in month > leisureDaysAllowed (e.g. 3 or more late days):
+  // Or if worker had late arrivals > 2 mins: leisure grace is NOT granted (revoked).
+  const isEligibleForLeisure = (lateDayIndices.length <= leisureDaysAllowed) && (leisureCandidateIndices.length === lateDayIndices.length);
+
+  const forgivenSet = new Set(isEligibleForLeisure ? leisureCandidateIndices : []);
+
+  // Recompute records with leisure status
+  return dailyRecords.map((r, idx) => {
+    const swipes = r.raw_swipes || r.swipe_record || '';
+    const timestamps = String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || [];
+    const isLeisure = forgivenSet.has(idx);
+    const isHoliday = !!paidHolidaysMap[r.date];
+    const holidayName = paidHolidaysMap[r.date] || '';
+
+    const computed = computeDailyAttendance(
+      timestamps,
+      settings,
+      r.weekday,
+      customRules,
+      r.shift,
+      isHoliday,
+      holidayName,
+      isLeisure
+    );
+
+    return {
+      ...r,
+      ...computed,
+      is_leisure_forgiven: isLeisure ? 1 : 0
+    };
+  });
+}
+
+/**
  * Helper to determine if an Absent record is a PURE unworked absence (0 hours)
  * Partial duty (<8h) where hours were worked and credited to OT is EXEMPT from Sunday forfeiture.
+ * Paid holidays are EXEMPT from Sunday forfeiture.
  */
 function isPureAbsentForForfeiture(rec) {
   if (!rec) return false;
   const st = rec.status || '';
+  if (st.includes('Holiday')) return false; // Paid holidays never count as absents
   const isAbsent = st.includes('Absent') || st.includes('Incomplete') || (!st.includes('Present') && !st.includes('Weekly Off') && (rec.regular_hours || 0) === 0 && (rec.regularHours || 0) === 0);
   if (!isAbsent) return false;
   const ot = parseFloat(rec.ot_hours || rec.otHours || 0);
@@ -534,7 +598,7 @@ function isPureAbsentForForfeiture(rec) {
 }
 
 /**
- * Apply Weekly & Monthly Sunday Forfeiture rules
+ * Apply Weekly & Monthly Sunday Forfeiture rules (with cross-month boundary resilience)
  * @param {Array<Object>} dailyRecords - Array of daily attendance objects
  * @param {Object} settings - Configuration map
  */
@@ -613,7 +677,7 @@ module.exports = {
   cleanAndDebouncePunches,
   getEffectiveFirstIn,
   computeDailyAttendance,
+  applyMonthlyLeisureGrace,
   isPureAbsentForForfeiture,
   applyWeeklyOffForfeiture,
 };
-

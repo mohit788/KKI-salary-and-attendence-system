@@ -9,7 +9,9 @@ import {
   Building2,
   Lock,
   Unlock,
-  AlertTriangle
+  AlertTriangle,
+  Calendar,
+  Sparkles
 } from 'lucide-react';
 
 export default function Navbar({ 
@@ -19,7 +21,11 @@ export default function Navbar({
   isPayrollUnlocked, 
   onOpenUnlockModal, 
   onLockPayroll,
-  onOpenIncompleteManager
+  onOpenIncompleteManager,
+  selectedMonth,
+  availableMonths = [],
+  onSelectMonth,
+  onOpenHolidaysModal
 }) {
   const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresPayroll: false },
@@ -65,9 +71,38 @@ export default function Navbar({
             </div>
           </div>
 
-          {/* Navigation Tabs & Payroll Security Lock Button */}
+          {/* Month Selector & Action Controls */}
           <div className="flex items-center space-x-2 sm:space-x-3 flex-wrap justify-end">
             
+            {/* Active Month Selector */}
+            {availableMonths.length > 0 && (
+              <div className="flex items-center bg-slate-900 border-2 border-blue-500/50 rounded-xl px-2.5 py-1 text-xs shadow-md">
+                <Calendar className="w-3.5 h-3.5 text-cyan-400 mr-1.5 shrink-0" />
+                <select
+                  value={selectedMonth || ''}
+                  onChange={(e) => onSelectMonth && onSelectMonth(e.target.value)}
+                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="all" className="bg-slate-900 text-white">All Active Data</option>
+                  {availableMonths.map(m => (
+                    <option key={m.monthKey} value={m.monthKey} className="bg-slate-900 text-white">
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Paid Holidays Manager Button */}
+            <button
+              onClick={onOpenHolidaysModal}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-emerald-300 hover:text-emerald-200 border border-emerald-500/50 hover:border-emerald-400 shadow-sm transition-all whitespace-nowrap cursor-pointer"
+              title="Manage National & Declared Paid Holidays"
+            >
+              <Calendar className="w-4 h-4 text-emerald-400" />
+              <span>Paid Holidays</span>
+            </button>
+
             {/* Nav Tabs */}
             <nav className="flex items-center space-x-1 sm:space-x-2">
               {visibleTabs.map(tab => {
@@ -77,7 +112,7 @@ export default function Navbar({
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all border whitespace-nowrap ${
+                    className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all border whitespace-nowrap cursor-pointer ${
                       isActive
                         ? 'bg-blue-600 text-white border-blue-400 shadow-md ring-2 ring-blue-500/30'
                         : 'text-slate-200 hover:text-white hover:bg-slate-800 border-transparent hover:border-slate-700'
@@ -101,7 +136,7 @@ export default function Navbar({
             {metrics?.incompleteCount > 0 && onOpenIncompleteManager && (
               <button
                 onClick={() => onOpenIncompleteManager()}
-                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition-all whitespace-nowrap animate-pulse"
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-md shadow-amber-500/20 transition-all whitespace-nowrap animate-pulse cursor-pointer"
                 title={`${metrics.incompleteCount} incomplete records need resolution - Click to Fast-Fix`}
               >
                 <AlertTriangle className="w-4 h-4" />
@@ -113,7 +148,7 @@ export default function Navbar({
             {isPayrollUnlocked ? (
               <button
                 onClick={onLockPayroll}
-                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 shadow-md transition-all whitespace-nowrap"
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 shadow-md transition-all whitespace-nowrap cursor-pointer"
                 title="Click to Lock & Hide Salary / Finance fields"
               >
                 <Lock className="w-3.5 h-3.5" />
@@ -122,7 +157,7 @@ export default function Navbar({
             ) : (
               <button
                 onClick={onOpenUnlockModal}
-                className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-white border-2 border-amber-500/60 shadow-md transition-all whitespace-nowrap hover:border-amber-400"
+                className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-white border-2 border-amber-500/60 shadow-md transition-all whitespace-nowrap hover:border-amber-400 cursor-pointer"
                 title="Enter Admin PIN to view Salary, Gross & Net Pay"
               >
                 <Unlock className="w-3.5 h-3.5 text-amber-400" />

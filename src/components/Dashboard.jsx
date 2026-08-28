@@ -243,7 +243,7 @@ export default function Dashboard({
             ) : (
               <>
                 <a
-                  href="/api/export/excel/summary"
+                  href={`/api/export/excel/summary${monthQueryParam}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-teal-500 shadow-md transition-all cursor-pointer"
@@ -253,7 +253,7 @@ export default function Dashboard({
                 </a>
 
                 <a
-                  href="/api/export/excel/timings"
+                  href={`/api/export/excel/timings${monthQueryParam}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full py-3 px-4 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-blue-500 shadow-md transition-all cursor-pointer"
@@ -264,7 +264,7 @@ export default function Dashboard({
 
                 {isPayrollUnlocked ? (
                   <a
-                    href="/api/export/excel"
+                    href={`/api/export/excel${monthQueryParam}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-full py-3 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all cursor-pointer"

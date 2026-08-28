@@ -55,6 +55,8 @@ function calculateWorkerPayroll({
   let paidWeeklyOffs = 0;
   let forfeitedWeeklyOffs = 0;
   let sundayWorkedDays = 0;
+  let paidHolidays = 0;
+  let holidayWorkedDays = 0;
   let absentDays = 0;
   let incompleteDays = 0;
   let totalOtHours = 0;
@@ -71,6 +73,12 @@ function calculateWorkerPayroll({
       // Worker came on Sunday — gets paid day + all time is Sunday OT
       sundayWorkedDays += 1;
       paidWeeklyOffs += 1; // Sunday is still a paid day
+    } else if (st.includes('Holiday (Worked OT)')) {
+      // Worker worked on a Paid National/Factory Holiday
+      holidayWorkedDays += 1;
+      paidHolidays += 1; // Holiday is still a paid day
+    } else if (st.includes('Holiday (Paid)')) {
+      paidHolidays += 1;
     } else if (st.includes('Present (Full)')) {
       fullPresentDays += 1;
     } else if (st.includes('Present (Short)')) {
@@ -88,7 +96,7 @@ function calculateWorkerPayroll({
 
   // Short days count as 0.5 day (or prorated worked hours / 8)
   const proratedShortDays = +(shortDays * 0.5).toFixed(2);
-  const payableDays = +(fullPresentDays + proratedShortDays + paidWeeklyOffs).toFixed(2);
+  const payableDays = +(fullPresentDays + proratedShortDays + paidWeeklyOffs + paidHolidays).toFixed(2);
 
   const basePay = +(payableDays * perDayRate).toFixed(2);
   const otPay = +(totalOtHours * hourlyOtRate).toFixed(2);
@@ -215,6 +223,8 @@ function calculateWorkerPayroll({
     paidWeeklyOffs,
     forfeitedWeeklyOffs,
     sundayWorkedDays,
+    paidHolidays,
+    holidayWorkedDays,
     absentDays,
     incompleteDays,
     hasIncompleteEntries,

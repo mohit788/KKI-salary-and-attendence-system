@@ -7,7 +7,16 @@ const fs = require('fs');
 const { execute, batch, initDatabase } = require('./db');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
-const { computeDailyAttendance, applyWeeklyOffForfeiture, formatHours, detectWorkerShiftAnchor, detectDailyFactoryShift, buildDailyShiftMap, cleanAndDebouncePunches } = require('./rulesEngine');
+const { 
+  computeDailyAttendance, 
+  applyWeeklyOffForfeiture, 
+  applyMonthlyLeisureGrace,
+  formatHours, 
+  detectWorkerShiftAnchor, 
+  detectDailyFactoryShift, 
+  buildDailyShiftMap, 
+  cleanAndDebouncePunches 
+} = require('./rulesEngine');
 const { calculateWorkerPayroll } = require('./payrollEngine');
 const { parseNaturalLanguageRule } = require('./aiRuleEngine');
 const { processUniversalAssistantPrompt } = require('./aiAssistantEngine');
@@ -46,6 +55,20 @@ async function getCustomRules() {
 async function getSalaryRules() {
   const res = await execute(`SELECT * FROM custom_salary_rules WHERE is_active = 1`);
   return res.rows || [];
+}
+
+// Helper: Fetch all configured Paid Holidays map (YYYY-MM-DD -> Holiday Name)
+async function getPaidHolidaysMap() {
+  try {
+    const res = await execute(`SELECT holiday_date, holiday_name FROM paid_holidays`);
+    const map = {};
+    (res.rows || []).forEach(r => {
+      map[r.holiday_date] = r.holiday_name;
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
 }
 
 // Helper: Get true incomplete count by verifying actual punch records in database
@@ -642,8 +665,16 @@ app.post('/api/attendance/clear-range', async (req, res) => {
 async function recomputeAllAttendance() {
   const settings = await getSettingsMap();
   const customRules = await getCustomRules();
+  const paidHolidaysMap = await getPaidHolidaysMap();
 
-  const workersRes = await execute(`SELECT staff_no, assigned_shift FROM workers`);
+  const workersRes = await execute(`
+    SELECT staff_no, MAX(assigned_shift) as assigned_shift 
+    FROM (
+      SELECT staff_no, assigned_shift FROM workers
+      UNION
+      SELECT DISTINCT staff_no, 'auto' as assigned_shift FROM daily_attendance
+    ) GROUP BY staff_no
+  `);
 
   for (const w of workersRes.rows) {
     const dailyRes = await execute(
@@ -659,25 +690,26 @@ async function recomputeAllAttendance() {
       );
       recordsToCompute = punchesRes.rows;
     }
+    if (!recordsToCompute || recordsToCompute.length === 0) continue;
 
     const workerSettings = { ...settings, assigned_shift: w.assigned_shift || 'auto' };
 
-    let dailyComputed = recordsToCompute.map(r => {
-      const { timestamps } = parseSwipeRecord(r.raw_swipes);
-      const attendance = computeDailyAttendance(timestamps, workerSettings, r.weekday, customRules);
-      return {
-        staff_no: w.staff_no,
-        date: r.date,
-        weekday: r.weekday,
-        raw_swipes: r.raw_swipes,
-        is_manual_override: r.is_manual_override,
-        ...attendance,
-      };
+    // Group records by month so leisure time is evaluated per month
+    const recordsByMonth = new Map();
+    recordsToCompute.forEach(r => {
+      const mKey = (r.date || '').slice(0, 7) || 'general';
+      if (!recordsByMonth.has(mKey)) recordsByMonth.set(mKey, []);
+      recordsByMonth.get(mKey).push(r);
     });
 
-    dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings);
+    let allRecomputedRecords = [];
+    for (const [mKey, mRecords] of recordsByMonth.entries()) {
+      let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, customRules, paidHolidaysMap);
+      mComputed = applyWeeklyOffForfeiture(mComputed, workerSettings);
+      allRecomputedRecords.push(...mComputed);
+    }
 
-    for (const d of dailyComputed) {
+    for (const d of allRecomputedRecords) {
       await execute(
         `UPDATE daily_attendance SET
            effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?,
@@ -712,29 +744,119 @@ app.post('/api/attendance/recalculate', async (req, res) => {
   }
 });
 
-// 4b. GET All Daily Attendance Records (for Dashboard Master Sheet)
+// 4b. GET All Available Uploaded Months
+app.get('/api/months', async (req, res) => {
+  try {
+    const rowsRes = await execute(`
+      SELECT DISTINCT SUBSTR(date, 1, 7) as month_key 
+      FROM daily_attendance 
+      WHERE date IS NOT NULL AND date != '' 
+      ORDER BY month_key DESC
+    `);
+    const months = (rowsRes.rows || []).map(r => {
+      const parts = (r.month_key || '').split('-');
+      const year = parts[0];
+      const mNum = parseInt(parts[1], 10);
+      const name = (mNum >= 1 && mNum <= 12) ? MONTH_NAMES[mNum - 1] : r.month_key;
+      return {
+        monthKey: r.month_key,
+        label: `${name} ${year}`,
+        year,
+        monthName: name,
+      };
+    });
+    res.json({ success: true, months });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4c. Paid Holidays Management Endpoints
+app.get('/api/holidays', async (req, res) => {
+  try {
+    const holidaysRes = await execute(`SELECT * FROM paid_holidays ORDER BY holiday_date ASC`);
+    res.json({ success: true, holidays: holidaysRes.rows || [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/holidays', async (req, res) => {
+  try {
+    const { holiday_date, holiday_name, is_recurring } = req.body;
+    if (!holiday_date || !holiday_name) {
+      return res.status(400).json({ success: false, error: 'holiday_date and holiday_name are required.' });
+    }
+    await execute(
+      `INSERT INTO paid_holidays (holiday_date, holiday_name, is_recurring)
+       VALUES (?, ?, ?)
+       ON CONFLICT(holiday_date) DO UPDATE SET holiday_name = excluded.holiday_name, is_recurring = excluded.is_recurring`,
+      [holiday_date.trim(), holiday_name.trim(), is_recurring ? 1 : 0]
+    );
+    await recomputeAllAttendance();
+    res.json({ success: true, message: `Paid Holiday "${holiday_name}" saved successfully.` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/holidays/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await execute(`DELETE FROM paid_holidays WHERE id = ?`, [id]);
+    await recomputeAllAttendance();
+    res.json({ success: true, message: 'Holiday deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 4d. GET All Daily Attendance Records (with optional ?month=YYYY-MM filter)
 app.get('/api/attendance/all', async (req, res) => {
   try {
-    const result = await execute(`
+    const { month } = req.query;
+    let query = `
       SELECT 
         d.*, 
         w.staff_name, 
         w.department 
       FROM daily_attendance d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
-      ORDER BY d.date DESC, CAST(d.staff_no AS INTEGER) ASC
-    `);
+    `;
+    const params = [];
+    if (month && month !== 'all') {
+      query += ` WHERE d.date LIKE ? `;
+      params.push(`${month}%`);
+    }
+    query += ` ORDER BY d.date DESC, CAST(d.staff_no AS INTEGER) ASC `;
+
+    const result = await execute(query, params);
     res.json({ success: true, records: result.rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 5. GET All Workers & Payroll Summary (OPTIMIZED - Single Query Batch)
+// 5. GET All Workers & Payroll Summary (OPTIMIZED - Single Query Batch, optional ?month=YYYY-MM filter)
 app.get('/api/workers', async (req, res) => {
   try {
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
+    const { month } = req.query;
+
+    let attQuery = `SELECT * FROM daily_attendance`;
+    let advQuery = `SELECT * FROM advances`;
+    const attParams = [];
+    const advParams = [];
+
+    if (month && month !== 'all') {
+      attQuery += ` WHERE date LIKE ?`;
+      attParams.push(`${month}%`);
+      advQuery += ` WHERE date LIKE ?`;
+      advParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY staff_no, date ASC`;
+    advQuery += ` ORDER BY staff_no, date DESC`;
 
     // Batch fetch all data in parallel
     const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
@@ -756,8 +878,8 @@ app.get('/api/workers', async (req, res) => {
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
       `),
-      execute(`SELECT * FROM daily_attendance ORDER BY staff_no, date ASC`),
-      execute(`SELECT * FROM advances ORDER BY staff_no, date DESC`)
+      execute(attQuery, attParams),
+      execute(advQuery, advParams)
     ]);
 
     // Index attendance and advances by staff_no for O(1) lookup
@@ -1289,21 +1411,56 @@ function detectActiveMonthDetails(minDate, maxDate) {
   };
 }
 
-// 10. GET Dashboard Metrics (OPTIMIZED - Parallel Batch Fetch with Active Month Detection)
+// 10. GET Dashboard Metrics (OPTIMIZED - Parallel Batch Fetch with Active Month Detection, optional ?month=YYYY-MM)
 app.get('/api/dashboard', async (req, res) => {
   try {
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
+    const { month } = req.query;
+
+    let dateCond = '';
+    const dateParams = [];
+    if (month && month !== 'all') {
+      dateCond = ` WHERE date LIKE ? `;
+      dateParams.push(`${month}%`);
+    }
+
+    const whereDaily = dateCond;
+    const whereAdvances = dateCond;
+    const whereBounds = dateCond ? `${dateCond} AND date IS NOT NULL AND date != ''` : `WHERE date IS NOT NULL AND date != ''`;
 
     // Execute all count queries in parallel
     const [workersCountRes, recordsCountRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
-      execute(`SELECT COUNT(*) as cnt FROM workers`),
-      execute(`SELECT COUNT(*) as cnt FROM daily_attendance`),
-      execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance GROUP BY status`),
-      execute(`SELECT * FROM workers`),
-      execute(`SELECT * FROM daily_attendance ORDER BY staff_no`),
-      execute(`SELECT * FROM advances ORDER BY staff_no`),
-      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance WHERE date IS NOT NULL AND date != ''`)
+      execute(`
+        SELECT COUNT(DISTINCT staff_no) as cnt FROM (
+          SELECT staff_no FROM workers
+          UNION
+          SELECT DISTINCT staff_no FROM daily_attendance ${whereDaily}
+        )
+      `, dateParams),
+      execute(`SELECT COUNT(*) as cnt FROM daily_attendance ${whereDaily}`, dateParams),
+      execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance ${whereDaily} GROUP BY status`, dateParams),
+      execute(`
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance ${whereDaily}
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `, dateParams),
+      execute(`SELECT * FROM daily_attendance ${whereDaily} ORDER BY staff_no`, dateParams),
+      execute(`SELECT * FROM advances ${whereAdvances} ORDER BY staff_no`, dateParams),
+      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance ${whereBounds}`, dateParams)
     ]);
 
     const totalWorkers = workersCountRes.rows[0].cnt;
@@ -1455,7 +1612,7 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
   worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(Math.max(w, 13), 45) }));
 }
 
-// 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted)
+// 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted, optional ?month=YYYY-MM)
 app.get('/api/export/excel', async (req, res) => {
   try {
     const incompleteCount = await getTrueIncompleteCount();
@@ -1466,6 +1623,21 @@ app.get('/api/export/excel', async (req, res) => {
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
     const salaryRules = await getSalaryRules();
+    const { month } = req.query;
+
+    let attQuery = `SELECT * FROM daily_attendance`;
+    let advQuery = `SELECT * FROM advances`;
+    const attParams = [];
+    const advParams = [];
+
+    if (month && month !== 'all') {
+      attQuery += ` WHERE date LIKE ?`;
+      attParams.push(`${month}%`);
+      advQuery += ` WHERE date LIKE ?`;
+      advParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY staff_no, date ASC`;
+    advQuery += ` ORDER BY staff_no, date DESC`;
 
     const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
       execute(`
@@ -1486,8 +1658,8 @@ app.get('/api/export/excel', async (req, res) => {
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
       `),
-      execute(`SELECT * FROM daily_attendance ORDER BY staff_no, date ASC`),
-      execute(`SELECT * FROM advances ORDER BY staff_no, date DESC`)
+      execute(attQuery, attParams),
+      execute(advQuery, advParams)
     ]);
 
     const attendanceMap = new Map();
@@ -1503,11 +1675,11 @@ app.get('/api/export/excel', async (req, res) => {
     });
 
     const summaryRows = [
-      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours']
+      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Paid Holidays 🇮🇳', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday/Holiday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours']
     ];
 
     const dailyRows = [
-      ['Staff No', 'Employee Name', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Mins', 'Attendance Status']
+      ['Staff No', 'Employee Name', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday/Holiday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Mins', 'Attendance Status']
     ];
 
     for (const w of workersRes.rows) {
@@ -1530,6 +1702,7 @@ app.get('/api/export/excel', async (req, res) => {
         w.department || 'WORKER',
         p.fullPresentDays || 0,
         p.paidWeeklyOffs || 0,
+        p.paidHolidays || 0,
         p.absentDays || 0,
         p.payableDays || 0,
         regHours,
@@ -1576,9 +1749,10 @@ app.get('/api/export/excel', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Punch Breakdown');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileSuffix = month && month !== 'all' ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="Factory_Attendance_and_Overtime_Report.xlsx"');
+    res.setHeader('Content-Disposition', `attachment; filename="Factory_Attendance_and_Overtime_Report${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1595,16 +1769,24 @@ app.get('/api/export/excel/timings', async (req, res) => {
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
+    const { month } = req.query;
 
-    const result = await execute(`
+    let query = `
       SELECT 
         d.*, 
         COALESCE(w.staff_name, d.staff_no) as staff_name, 
         COALESCE(w.department, 'WORKER') as department 
       FROM daily_attendance d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
-      ORDER BY d.date DESC, CAST(d.staff_no AS INTEGER) ASC
-    `);
+    `;
+    const params = [];
+    if (month && month !== 'all') {
+      query += ` WHERE d.date LIKE ? `;
+      params.push(`${month}%`);
+    }
+    query += ` ORDER BY d.date DESC, CAST(d.staff_no AS INTEGER) ASC `;
+
+    const result = await execute(query, params);
 
     const dailyRows = [
       ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Minutes', 'Attendance Status']
@@ -1641,9 +1823,10 @@ app.get('/api/export/excel/timings', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Biometric Timings');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileSuffix = month && month !== 'all' ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="All_Employees_Daily_Biometric_Timings.xlsx"');
+    res.setHeader('Content-Disposition', `attachment; filename="All_Employees_Daily_Biometric_Timings${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1659,6 +1842,16 @@ app.get('/api/export/excel/summary', async (req, res) => {
     }
 
     const settings = await getSettingsMap();
+    const { month } = req.query;
+
+    let attQuery = `SELECT * FROM daily_attendance`;
+    const attParams = [];
+    if (month && month !== 'all') {
+      attQuery += ` WHERE date LIKE ?`;
+      attParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY staff_no, date ASC`;
+
     const [workersRes, allAttendanceRes] = await Promise.all([
       execute(`
         SELECT 
@@ -1674,7 +1867,7 @@ app.get('/api/export/excel/summary', async (req, res) => {
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
       `),
-      execute(`SELECT * FROM daily_attendance ORDER BY staff_no, date ASC`)
+      execute(attQuery, attParams)
     ]);
 
     const attendanceMap = new Map();
@@ -1739,12 +1932,13 @@ app.get('/api/export/excel/summary', async (req, res) => {
       { wch: 22 }, // Overtime (Hours)
     ];
 
-    XLSX.utils.book_append_sheet(wb, ws, 'Executive Summary');
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance & OT Summary');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileSuffix = month && month !== 'all' ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', 'attachment; filename="Concise_Attendance_and_Overtime_Report.xlsx"');
+    res.setHeader('Content-Disposition', `attachment; filename="Executive_Attendance_and_OT_Summary${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

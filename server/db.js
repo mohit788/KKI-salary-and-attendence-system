@@ -159,11 +159,36 @@ async function initDatabase() {
       ai_original_prompt TEXT,
       is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );`,
+
+    // Paid Holidays table (National holidays and factory declared paid offs)
+    `CREATE TABLE IF NOT EXISTS paid_holidays (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      holiday_date TEXT NOT NULL UNIQUE,
+      holiday_name TEXT NOT NULL,
+      is_recurring INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`
   ];
 
   for (const sql of schemaQueries) {
     await execute(sql);
+  }
+
+  // Seed default national holidays if empty
+  const defaultHolidays = [
+    ['2026-01-26', 'Republic Day 🇮🇳', 1],
+    ['2026-05-01', 'Labour Day / May Day 👷', 1],
+    ['2026-08-15', 'Independence Day 🇮🇳', 1],
+    ['2026-10-02', 'Gandhi Jayanti 🕊️', 1],
+  ];
+  for (const [hDate, hName, hRec] of defaultHolidays) {
+    try {
+      await execute(
+        `INSERT INTO paid_holidays (holiday_date, holiday_name, is_recurring) VALUES (?, ?, ?) ON CONFLICT(holiday_date) DO NOTHING;`,
+        [hDate, hName, hRec]
+      );
+    } catch (e) {}
   }
 
   // Migrations for existing database instances
@@ -179,6 +204,8 @@ async function initDatabase() {
     ['shift_start', '08:00', 'Standard shift start time (HH:MM)'],
     ['shift_end', '16:30', 'Standard shift end time (HH:MM)'],
     ['grace_slab_minutes', '30', 'Late arrival grace slab size in minutes'],
+    ['leisure_mins_allowed', '2', 'Leisure grace minutes allowed (e.g. 2 min)'],
+    ['leisure_days_allowed', '2', 'Maximum days per month eligible for leisure time forgiveness (Default: 2)'],
     ['ot_multiplier', '1.5', 'Overtime pay multiplier'],
     ['ot_rounding', 'minutes', 'OT rounding mode: "minutes" or "30min_block"'],
     ['short_hours_threshold', '4.0', 'Threshold hours below which day is short hours'],
