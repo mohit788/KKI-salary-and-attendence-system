@@ -60,6 +60,12 @@ export default function WorkerDetail({
         return 'bg-amber-950 text-amber-300 border-amber-600';
       case 'Weekly Off (Forfeited)':
         return 'bg-slate-800 text-slate-300 border-slate-600';
+      case 'Holiday (Paid)':
+        return 'bg-teal-950 text-teal-300 border-teal-500 font-bold';
+      case 'Holiday (Worked OT)':
+        return 'bg-indigo-950 text-indigo-300 border-indigo-500 font-bold';
+      case 'Holiday (Forfeited)':
+        return 'bg-rose-950 text-rose-300 border-rose-600 font-bold';
       case 'Incomplete':
         return 'bg-orange-950 text-orange-300 border-orange-600';
       default:

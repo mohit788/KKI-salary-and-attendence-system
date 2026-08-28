@@ -11,6 +11,7 @@ const {
   computeDailyAttendance, 
   applyWeeklyOffForfeiture, 
   applyMonthlyLeisureGrace,
+  applyPaidHolidayForfeiture,
   formatHours, 
   detectWorkerShiftAnchor, 
   detectDailyFactoryShift, 
@@ -389,6 +390,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const batchId = `BATCH_${Date.now()}`;
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
+    const paidHolidaysMap = await getPaidHolidaysMap();
 
     let totalRecords = 0;
     let flaggedCount = 0;
@@ -409,7 +411,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         totalRecords++;
         if (r.date) datesSet.add(r.date);
         const { timestamps } = parseSwipeRecord(r.swipe_record);
-        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+        const isHoliday = !!paidHolidaysMap[r.date];
+        const holidayName = paidHolidaysMap[r.date] || '';
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, '08:00', isHoliday, holidayName);
         if (attendance.status === 'Incomplete') {
           flaggedCount++;
         }
@@ -423,7 +427,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         };
       });
 
+      dailyComputed = applyMonthlyLeisureGrace(dailyComputed, settings, customRules, paidHolidaysMap);
       dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings);
+      dailyComputed = applyPaidHolidayForfeiture(dailyComputed, settings);
 
       for (const d of dailyComputed) {
         dbStatements.push({
@@ -706,6 +712,7 @@ async function recomputeAllAttendance() {
     for (const [mKey, mRecords] of recordsByMonth.entries()) {
       let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, customRules, paidHolidaysMap);
       mComputed = applyWeeklyOffForfeiture(mComputed, workerSettings);
+      mComputed = applyPaidHolidayForfeiture(mComputed, workerSettings);
       allRecomputedRecords.push(...mComputed);
     }
 

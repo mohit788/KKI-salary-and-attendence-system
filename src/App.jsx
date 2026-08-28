@@ -339,9 +339,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f19]">
-      <Navbar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+      <Navbar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         metrics={metrics}
         isPayrollUnlocked={isPayrollUnlocked}
         onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
@@ -450,7 +450,7 @@ export default function App() {
       {showUnlockModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in">
           <div className="glass-modal w-full max-w-md rounded-2xl p-6 shadow-2xl border-2 border-amber-500/60 bg-slate-900 space-y-4">
-            
+
             <div className="flex items-center justify-between border-b-2 border-slate-700 pb-3">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-950 text-amber-300 border border-amber-600 flex items-center justify-center">
@@ -461,7 +461,7 @@ export default function App() {
                   <p className="text-xs text-slate-300">Enter Admin Password to view Payroll</p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setShowUnlockModal(false)}
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
               >

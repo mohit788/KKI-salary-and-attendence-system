@@ -57,6 +57,7 @@ function calculateWorkerPayroll({
   let sundayWorkedDays = 0;
   let paidHolidays = 0;
   let holidayWorkedDays = 0;
+  let forfeitedHolidays = 0;
   let absentDays = 0;
   let incompleteDays = 0;
   let totalOtHours = 0;
@@ -79,6 +80,9 @@ function calculateWorkerPayroll({
       paidHolidays += 1; // Holiday is still a paid day
     } else if (st.includes('Holiday (Paid)')) {
       paidHolidays += 1;
+    } else if (st.includes('Holiday (Forfeited)')) {
+      forfeitedHolidays += 1;
+      absentDays += 1;
     } else if (st.includes('Present (Full)')) {
       fullPresentDays += 1;
     } else if (st.includes('Present (Short)')) {
@@ -225,6 +229,7 @@ function calculateWorkerPayroll({
     sundayWorkedDays,
     paidHolidays,
     holidayWorkedDays,
+    forfeitedHolidays,
     absentDays,
     incompleteDays,
     hasIncompleteEntries,

@@ -667,6 +667,68 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
   return dailyRecords;
 }
 
+/**
+ * Apply Paid Holiday Eligibility & Sandwich Forfeiture Rule:
+ * - Preceding days condition: Worker must not have any unworked absents in the working days of that week before the holiday (Monday to day before holiday).
+ * - Bridge day condition: Worker must not be absent on the immediate next scheduled working day after the holiday/weekend block.
+ * - If absent on either, the holiday is marked 'Holiday (Forfeited)' and not paid.
+ * @param {Array<Object>} dailyRecords - Array of daily attendance objects
+ * @param {Object} settings - Configuration map
+ */
+function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
+  const weeklyOffDay = settings.weekly_off_day || 'Sun';
+
+  for (let i = 0; i < dailyRecords.length; i++) {
+    const rec = dailyRecords[i];
+    if (rec.status !== 'Holiday (Paid)') continue;
+
+    let isForfeited = false;
+
+    // 1. Check preceding working days of the same week (from Monday up to the day before holiday)
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = dailyRecords[j];
+      const prevWeekday = (prev.weekday || '').slice(0, 3);
+      
+      // Stop if crossed into previous week's Sunday
+      if (prevWeekday.toLowerCase() === weeklyOffDay.toLowerCase().slice(0, 3)) break;
+
+      // If prev is an unworked absent:
+      if (isPureAbsentForForfeiture(prev)) {
+        isForfeited = true;
+        break;
+      }
+    }
+
+    // 2. Check immediate next scheduled working day after holiday/weekend block
+    if (!isForfeited) {
+      for (let k = i + 1; k < dailyRecords.length; k++) {
+        const next = dailyRecords[k];
+        const nextWeekday = (next.weekday || '').slice(0, 3);
+        const isNextOff = nextWeekday.toLowerCase() === weeklyOffDay.toLowerCase().slice(0, 3) || (next.status && next.status.includes('Holiday'));
+
+        // Skip consecutive holidays and Sundays
+        if (isNextOff) continue;
+
+        // First regular scheduled working day found:
+        if (isPureAbsentForForfeiture(next)) {
+          isForfeited = true;
+        }
+        break;
+      }
+    }
+
+    if (isForfeited) {
+      rec.status = 'Holiday (Forfeited)';
+      rec.regularHours = 0;
+      rec.regular_hours = 0;
+      rec.totalHours = 0;
+      rec.total_hours = 0;
+    }
+  }
+
+  return dailyRecords;
+}
+
 module.exports = {
   timeToMins,
   minsToTime,
@@ -680,4 +742,5 @@ module.exports = {
   applyMonthlyLeisureGrace,
   isPureAbsentForForfeiture,
   applyWeeklyOffForfeiture,
+  applyPaidHolidayForfeiture,
 };
