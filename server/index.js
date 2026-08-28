@@ -727,7 +727,24 @@ app.get('/api/workers', async (req, res) => {
 
     // Batch fetch all data in parallel
     const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
-      execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`),
+      execute(`
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `),
       execute(`SELECT * FROM daily_attendance ORDER BY staff_no, date ASC`),
       execute(`SELECT * FROM advances ORDER BY staff_no, date DESC`)
     ]);
@@ -1428,7 +1445,42 @@ app.get('/api/export/excel', async (req, res) => {
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
-    const workersRes = await execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`);
+    const salaryRules = await getSalaryRules();
+
+    const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
+      execute(`
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `),
+      execute(`SELECT * FROM daily_attendance ORDER BY staff_no, date ASC`),
+      execute(`SELECT * FROM advances ORDER BY staff_no, date DESC`)
+    ]);
+
+    const attendanceMap = new Map();
+    allAttendanceRes.rows.forEach(r => {
+      if (!attendanceMap.has(r.staff_no)) attendanceMap.set(r.staff_no, []);
+      attendanceMap.get(r.staff_no).push(r);
+    });
+
+    const advancesMap = new Map();
+    allAdvancesRes.rows.forEach(r => {
+      if (!advancesMap.has(r.staff_no)) advancesMap.set(r.staff_no, []);
+      advancesMap.get(r.staff_no).push(r);
+    });
 
     const summaryRows = [
       ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours']
@@ -1439,20 +1491,15 @@ app.get('/api/export/excel', async (req, res) => {
     ];
 
     for (const w of workersRes.rows) {
-      const attRes = await execute(
-        `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
-        [w.staff_no]
-      );
-      const advRes = await execute(
-        `SELECT * FROM advances WHERE staff_no = ? ORDER BY date DESC`,
-        [w.staff_no]
-      );
+      const dailyRecords = attendanceMap.get(w.staff_no) || [];
+      const advances = advancesMap.get(w.staff_no) || [];
 
       const p = calculateWorkerPayroll({
         monthlySalary: w.monthly_salary,
-        dailyRecords: attRes.rows,
-        advances: advRes.rows,
+        dailyRecords,
+        advances,
         settings,
+        salaryRules,
       });
 
       const regHours = +(p.totalWorkedHours - p.totalOtHours - p.totalSundayOtHours).toFixed(2);
@@ -1472,7 +1519,7 @@ app.get('/api/export/excel', async (req, res) => {
         p.totalWorkedHours || 0,
       ]);
 
-      attRes.rows.forEach(r => {
+      dailyRecords.forEach(r => {
         const { timestamps } = parseSwipeRecord(r.raw_swipes);
         const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
         const totalOt = +((r.ot_hours || 0) + (r.sunday_ot_hours || 0)).toFixed(2);
@@ -1532,8 +1579,8 @@ app.get('/api/export/excel/timings', async (req, res) => {
     const result = await execute(`
       SELECT 
         d.*, 
-        w.staff_name, 
-        w.department 
+        COALESCE(w.staff_name, d.staff_no) as staff_name, 
+        COALESCE(w.department, 'WORKER') as department 
       FROM daily_attendance d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
       ORDER BY d.date DESC, CAST(d.staff_no AS INTEGER) ASC
@@ -1592,7 +1639,29 @@ app.get('/api/export/excel/summary', async (req, res) => {
     }
 
     const settings = await getSettingsMap();
-    const workersRes = await execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`);
+    const [workersRes, allAttendanceRes] = await Promise.all([
+      execute(`
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `),
+      execute(`SELECT * FROM daily_attendance ORDER BY staff_no, date ASC`)
+    ]);
+
+    const attendanceMap = new Map();
+    allAttendanceRes.rows.forEach(r => {
+      if (!attendanceMap.has(r.staff_no)) attendanceMap.set(r.staff_no, []);
+      attendanceMap.get(r.staff_no).push(r);
+    });
 
     const summaryRows = [
       ['WORKER ID', 'WORKER NAME', 'PAYABLE DAYS', 'ABSENT DAYS', 'OVERTIME (HOURS)']
@@ -1603,14 +1672,11 @@ app.get('/api/export/excel/summary', async (req, res) => {
     let totalOtSum = 0;
 
     for (const w of workersRes.rows) {
-      const attRes = await execute(
-        `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
-        [w.staff_no]
-      );
+      const dailyRecords = attendanceMap.get(w.staff_no) || [];
 
       const p = calculateWorkerPayroll({
         monthlySalary: w.monthly_salary,
-        dailyRecords: attRes.rows,
+        dailyRecords,
         advances: [],
         settings,
       });
