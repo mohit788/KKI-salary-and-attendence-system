@@ -243,6 +243,16 @@ export default function Dashboard({
             ) : (
               <>
                 <a
+                  href="/api/export/excel/summary"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 px-4 bg-teal-700 hover:bg-teal-600 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-2 border border-teal-500 shadow-md transition-all"
+                >
+                  <FileSpreadsheet className="w-4.5 h-4.5 text-teal-200" />
+                  <span>Download 5-Column Summary Report (.xlsx)</span>
+                </a>
+
+                <a
                   href="/api/export/excel/timings"
                   target="_blank"
                   rel="noopener noreferrer"

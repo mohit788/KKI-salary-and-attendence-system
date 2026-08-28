@@ -77,6 +77,33 @@ export default function AllWorkersTable({
   };
 
   // Export to Excel (Full or Timings)
+  // Export Concise 5-Column Summary (Worker ID, Name, Payable Days, Absents, Overtime)
+  const exportConciseExcel = () => {
+    const exportData = filteredWorkers.map(w => {
+      const p = w.payroll || {};
+      const totalOt = +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2);
+      return {
+        'Worker ID': w.staff_no,
+        'Worker Name': w.staff_name,
+        'Payable Days': p.payableDays || 0,
+        'Absent Days': p.absentDays || 0,
+        'Overtime (Hours)': totalOt,
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet['!cols'] = [
+      { wch: 15 },
+      { wch: 32 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 22 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Executive Summary');
+    XLSX.writeFile(workbook, `Concise_Attendance_Summary_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
   const exportToExcel = () => {
     const exportData = filteredWorkers.map(w => {
       const row = {
@@ -212,6 +239,17 @@ export default function AllWorkersTable({
             </button>
           ) : (
             <>
+              <a
+                href="/api/export/excel/summary"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-teal-500 shadow-sm transition-all whitespace-nowrap"
+                title="Download Concise 5-Column Summary (Worker ID, Name, Payable Days, Absents, Overtime)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
+                <span>5-Col Summary (.xlsx)</span>
+              </a>
+
               <a
                 href="/api/export/excel/timings"
                 target="_blank"

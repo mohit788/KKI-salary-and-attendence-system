@@ -1532,6 +1532,89 @@ app.get('/api/export/excel/timings', async (req, res) => {
   }
 });
 
+// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime)
+app.get('/api/export/excel/summary', async (req, res) => {
+  try {
+    const incompleteCheck = await execute(`SELECT COUNT(*) as count FROM daily_attendance WHERE status LIKE '%Incomplete%' OR status = 'Incomplete'`);
+    const incompleteCount = incompleteCheck.rows[0]?.count || 0;
+    if (incompleteCount > 0) {
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+    }
+
+    const settings = await getSettingsMap();
+    const workersRes = await execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`);
+
+    const summaryRows = [
+      ['WORKER ID', 'WORKER NAME', 'PAYABLE DAYS', 'ABSENT DAYS', 'OVERTIME (HOURS)']
+    ];
+
+    let totalPayableSum = 0;
+    let totalAbsentSum = 0;
+    let totalOtSum = 0;
+
+    for (const w of workersRes.rows) {
+      const attRes = await execute(
+        `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+        [w.staff_no]
+      );
+
+      const p = calculateWorkerPayroll({
+        monthlySalary: w.monthly_salary,
+        dailyRecords: attRes.rows,
+        advances: [],
+        settings,
+      });
+
+      const workerTotalOt = +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2);
+      const payable = p.payableDays || 0;
+      const absent = p.absentDays || 0;
+
+      totalPayableSum += payable;
+      totalAbsentSum += absent;
+      totalOtSum += workerTotalOt;
+
+      summaryRows.push([
+        w.staff_no,
+        w.staff_name,
+        payable,
+        absent,
+        workerTotalOt,
+      ]);
+    }
+
+    // Add clean Total Summary Row
+    summaryRows.push([
+      'TOTAL',
+      `${workersRes.rows.length} Workers`,
+      totalPayableSum,
+      totalAbsentSum,
+      +totalOtSum.toFixed(2),
+    ]);
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(summaryRows);
+
+    // Precise custom column widths:
+    ws['!cols'] = [
+      { wch: 15 }, // Worker ID
+      { wch: 32 }, // Worker Name
+      { wch: 18 }, // Payable Days
+      { wch: 16 }, // Absent Days
+      { wch: 22 }, // Overtime (Hours)
+    ];
+
+    XLSX.utils.book_append_sheet(wb, ws, 'Executive Summary');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="Concise_Attendance_and_Overtime_Report.xlsx"');
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 13. GET Export Single Worker Excel Sheet
 app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
   try {
