@@ -565,11 +565,17 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
     }
   }
 
-  // Revocation Rule: If total late arrivals in month > leisureDaysAllowed (e.g. 3 or more late days):
-  // Or if worker had late arrivals > 2 mins: leisure grace is NOT granted (revoked).
-  const isEligibleForLeisure = (lateDayIndices.length <= leisureDaysAllowed) && (leisureCandidateIndices.length === lateDayIndices.length);
+  // Revocation Rule: If total late arrivals in month > leisureDaysAllowed (e.g. 3 or more late days in month):
+  // 3rd Strike triggers and ALL leisure forgiveness is revoked.
+  // If worker had <= leisureDaysAllowed late days (e.g. <= 2 total late days in month),
+  // each day with late arrival <= leisureMinsAllowed (up to 2 days) is granted 2-min leisure forgiveness.
+  const isRevokedBy3rdStrike = (lateDayIndices.length > leisureDaysAllowed);
 
-  const forgivenSet = new Set(isEligibleForLeisure ? leisureCandidateIndices : []);
+  const eligibleLeisureIndices = isRevokedBy3rdStrike
+    ? []
+    : leisureCandidateIndices.slice(0, leisureDaysAllowed);
+
+  const forgivenSet = new Set(eligibleLeisureIndices);
 
   // Recompute records with leisure status
   return dailyRecords.map((r, idx) => {
