@@ -524,7 +524,8 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
  */
 function isPureAbsentForForfeiture(rec) {
   if (!rec) return false;
-  const isAbsent = (rec.status === 'Absent');
+  const st = rec.status || '';
+  const isAbsent = st.includes('Absent') || st.includes('Incomplete') || (!st.includes('Present') && !st.includes('Weekly Off') && (rec.regular_hours || 0) === 0 && (rec.regularHours || 0) === 0);
   if (!isAbsent) return false;
   const ot = parseFloat(rec.ot_hours || rec.otHours || 0);
   const sunOt = parseFloat(rec.sunday_ot_hours || rec.sundayOtHours || 0);
@@ -541,7 +542,7 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
   const absentThreshold = parseInt(settings.forfeiture_absent_threshold || settings.absent_forfeiture_threshold || 3, 10);
   const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 4, 10);
-  const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 5, 10);
+  const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 4, 10);
 
   // Count total monthly PURE absents (0h worked)
   let totalMonthlyAbsents = 0;
@@ -591,7 +592,7 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
       for (let i = 0; i < dailyRecords.length; i++) {
         const rec = dailyRecords[i];
         const isWeeklyOff = rec.weekday && rec.weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3));
-        if (isWeeklyOff && rec.status === 'Weekly Off (Paid)') {
+        if (isWeeklyOff && (rec.status === 'Weekly Off (Paid)' || (rec.status?.includes('Weekly Off') && !rec.status?.includes('Worked OT')))) {
           rec.status = 'Weekly Off (Forfeited)';
           break; // Forfeit ONLY EXACTLY 1 Sunday!
         }

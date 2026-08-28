@@ -185,7 +185,7 @@ async function initDatabase() {
     ['weekly_off_day', 'Sun', 'Default paid weekly off day (Sun/Sat/etc)'],
     ['forfeiture_absent_threshold', '3', 'Number of absent days in Mon-Sat stretch to forfeit Sunday (Default: 3)'],
     ['weekly_off_forfeiture_threshold', '4', 'Number of weekly offs in same week to forfeit Sunday'],
-    ['monthly_absent_forfeiture_threshold', '5', 'Total monthly absents to forfeit ALL Sundays (except OT worked)'],
+    ['monthly_absent_forfeiture_threshold', '4', 'Total monthly absents to forfeit 1 Sunday weekly off (Default: 4)'],
     ['standard_month_days', 'calendar', 'Standard days in month for per-day rate calculation (calendar/26/30)'],
     ['max_ot_hours', '0', 'Maximum OT hours cap per day (0 = Unlimited)'],
     ['lunch_deduction_mins', '30', 'Automatic lunch/break deduction in minutes'],
@@ -201,11 +201,12 @@ async function initDatabase() {
     );
   }
 
-  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, or forfeiture_absent_threshold 2
+  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, or forfeiture_absent_threshold 2/5
   try {
     await execute(`UPDATE settings SET value = '08:00' WHERE key = 'shift_start' AND value = '08:30'`);
     await execute(`UPDATE settings SET value = '30' WHERE key = 'lunch_deduction_mins' AND value = '0'`);
     await execute(`UPDATE settings SET value = '3' WHERE key = 'forfeiture_absent_threshold' AND (value = '2' OR value IS NULL)`);
+    await execute(`UPDATE settings SET value = '4' WHERE key = 'monthly_absent_forfeiture_threshold' AND (value = '5' OR value IS NULL)`);
   } catch (e) {}
 
   // Insert default Rule Profile if rule_profiles table is empty
