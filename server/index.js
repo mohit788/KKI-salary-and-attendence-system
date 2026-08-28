@@ -66,35 +66,46 @@ async function getTrueIncompleteCount() {
 
     const { timestamps } = parseSwipeRecord(r.raw_swipes);
     const cleaned = cleanAndDebouncePunches(timestamps, 5);
-    const isOdd = cleaned.length % 2 !== 0;
 
-    // If punches are actually even (e.g. user added the OUT punch), auto-heal in DB!
-    if (!isOdd && cleaned.length >= 2) {
-      const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
-      await execute(
-        `UPDATE daily_attendance SET
-           effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
-         WHERE staff_no = ? AND date = ?`,
-        [
-          computed.effectiveIn || '',
-          computed.effectiveOut || '',
-          computed.regularHours || 0,
-          computed.otHours || 0,
-          computed.sundayOtHours || 0,
-          computed.totalHours || 0,
-          computed.lateMinutes || 0,
-          computed.status,
-          computed.shift || '08:00',
-          r.staff_no,
-          r.date
-        ]
-      );
+    // If 0 punches: Auto-heal to Absent
+    if (cleaned.length === 0) {
+      if (r.status.includes('Incomplete') && r.is_manual_override === 0) {
+        await execute(
+          `UPDATE daily_attendance SET status = 'Absent', regular_hours = 0, ot_hours = 0, total_hours = 0 WHERE staff_no = ? AND date = ?`,
+          [r.staff_no, r.date]
+        );
+      }
       continue;
     }
 
-    if (isOdd || r.status === 'Incomplete') {
-      count++;
+    // If punches are even (>= 2): Auto-heal to Present!
+    if (cleaned.length % 2 === 0) {
+      if (r.is_manual_override === 0 || r.status.includes('Incomplete')) {
+        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+        await execute(
+          `UPDATE daily_attendance SET
+             effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
+           WHERE staff_no = ? AND date = ?`,
+          [
+            computed.effectiveIn || '',
+            computed.effectiveOut || '',
+            computed.regularHours || 0,
+            computed.otHours || 0,
+            computed.sundayOtHours || 0,
+            computed.totalHours || 0,
+            computed.lateMinutes || 0,
+            computed.status,
+            computed.shift || '08:00',
+            r.staff_no,
+            r.date
+          ]
+        );
+      }
+      continue;
     }
+
+    // Odd punch count (1, 3): True missing punch!
+    count++;
   }
 
   return count;
@@ -1032,30 +1043,47 @@ app.get('/api/attendance/incomplete', async (req, res) => {
     const trueIncomplete = [];
 
     for (const r of allRecords.rows) {
-      const { timestamps } = parseSwipeRecord(r.raw_swipes);
-      const isOdd = timestamps.length % 2 !== 0;
+      if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
+        continue;
+      }
 
-      // If punch count is even (>= 2, like 07:55 17:34) and was stored as 'Incomplete', automatically recompute & update to Present!
-      if (!isOdd && timestamps.length >= 2 && r.is_manual_override === 0) {
-        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
-        await execute(
-          `UPDATE daily_attendance SET
-             effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
-           WHERE staff_no = ? AND date = ?`,
-          [
-            computed.effectiveIn || '',
-            computed.effectiveOut || '',
-            computed.regularHours || 0,
-            computed.otHours || 0,
-            computed.sundayOtHours || 0,
-            computed.totalHours || 0,
-            computed.lateMinutes || 0,
-            computed.status,
-            computed.shift || '08:00',
-            r.staff_no,
-            r.date
-          ]
-        );
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
+      const cleaned = cleanAndDebouncePunches(timestamps, 5);
+
+      // If 0 punches: Auto-heal to Absent
+      if (cleaned.length === 0) {
+        if (r.status.includes('Incomplete') && r.is_manual_override === 0) {
+          await execute(
+            `UPDATE daily_attendance SET status = 'Absent', regular_hours = 0, ot_hours = 0, total_hours = 0 WHERE staff_no = ? AND date = ?`,
+            [r.staff_no, r.date]
+          );
+        }
+        continue;
+      }
+
+      // If punch count is even (>= 2, like 07:55 17:34): Auto-heal to Present!
+      if (cleaned.length % 2 === 0) {
+        if (r.is_manual_override === 0 || r.status.includes('Incomplete')) {
+          const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+          await execute(
+            `UPDATE daily_attendance SET
+               effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
+             WHERE staff_no = ? AND date = ?`,
+            [
+              computed.effectiveIn || '',
+              computed.effectiveOut || '',
+              computed.regularHours || 0,
+              computed.otHours || 0,
+              computed.sundayOtHours || 0,
+              computed.totalHours || 0,
+              computed.lateMinutes || 0,
+              computed.status,
+              computed.shift || '08:00',
+              r.staff_no,
+              r.date
+            ]
+          );
+        }
         continue;
       }
 
@@ -1285,15 +1313,7 @@ app.get('/api/dashboard', async (req, res) => {
     const activeMonth = detectActiveMonthDetails(minDate, maxDate);
 
     // Calculate verified true incomplete count
-    let incompleteCount = 0;
-    allAttendanceRes.rows.forEach(r => {
-      if (r.status === 'Incomplete' || r.status.includes('Incomplete')) {
-        const { timestamps } = parseSwipeRecord(r.raw_swipes);
-        if (timestamps.length % 2 !== 0 || timestamps.length === 0) {
-          incompleteCount++;
-        }
-      }
-    });
+    const incompleteCount = await getTrueIncompleteCount();
 
     const statusBreakdown = {};
     statusCountsRes.rows.forEach(r => { statusBreakdown[r.status] = r.cnt; });
