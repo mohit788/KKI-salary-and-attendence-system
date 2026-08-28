@@ -33,11 +33,14 @@ export default function Dashboard({
   onEditRecord,
   isPayrollUnlocked = false,
   onOpenUnlockModal,
-  onOpenIncompleteManager
+  onOpenIncompleteManager,
+  selectedMonth
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWorkerModal, setSelectedWorkerModal] = useState(null);
+
+  const monthQueryParam = selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : '';
 
   const handleDrag = (e) => {
     e.preventDefault();
