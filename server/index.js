@@ -42,10 +42,56 @@ async function getCustomRules() {
   return res.rows || [];
 }
 
-// Helper: Fetch active custom salary rules (bonus/deduction)
-async function getSalaryRules() {
-  const res = await execute(`SELECT * FROM custom_salary_rules WHERE is_active = 1`);
-  return res.rows || [];
+// Helper: Get true incomplete count by verifying actual punch records in database
+async function getTrueIncompleteCount() {
+  const settings = await getSettingsMap();
+  const customRules = await getCustomRules();
+
+  const allRecords = await execute(`
+    SELECT * FROM daily_attendance 
+    WHERE status = 'Incomplete' OR status LIKE '%Incomplete%'
+  `);
+
+  let count = 0;
+  for (const r of allRecords.rows) {
+    if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
+      continue;
+    }
+
+    const { timestamps } = parseSwipeRecord(r.raw_swipes);
+    const cleaned = cleanAndDebouncePunches(timestamps, 5);
+    const isOdd = cleaned.length % 2 !== 0;
+
+    // If punches are actually even (e.g. user added the OUT punch), auto-heal in DB!
+    if (!isOdd && cleaned.length >= 2) {
+      const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+      await execute(
+        `UPDATE daily_attendance SET
+           effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
+         WHERE staff_no = ? AND date = ?`,
+        [
+          computed.effectiveIn || '',
+          computed.effectiveOut || '',
+          computed.regularHours || 0,
+          computed.otHours || 0,
+          computed.sundayOtHours || 0,
+          computed.totalHours || 0,
+          computed.lateMinutes || 0,
+          computed.status,
+          computed.shift || '08:00',
+          r.staff_no,
+          r.date
+        ]
+      );
+      continue;
+    }
+
+    if (isOdd || r.status === 'Incomplete') {
+      count++;
+    }
+  }
+
+  return count;
 }
 
 // -------------------------------------------------------------
@@ -583,30 +629,31 @@ async function recomputeAllAttendance() {
   const workersRes = await execute(`SELECT staff_no, assigned_shift FROM workers`);
 
   for (const w of workersRes.rows) {
-    const punchesRes = await execute(
-      `SELECT * FROM raw_punches WHERE staff_no = ? ORDER BY date ASC`,
+    const dailyRes = await execute(
+      `SELECT staff_no, date, weekday, raw_swipes, is_manual_override, status FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
       [w.staff_no]
     );
 
-    let recordsToCompute = punchesRes.rows;
+    let recordsToCompute = dailyRes.rows;
     if (!recordsToCompute || recordsToCompute.length === 0) {
-      const dailyRes = await execute(
-        `SELECT staff_no, date, weekday, raw_swipes as swipe_record FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+      const punchesRes = await execute(
+        `SELECT staff_no, date, weekday, swipe_record as raw_swipes, 0 as is_manual_override, 'Absent' as status FROM raw_punches WHERE staff_no = ? ORDER BY date ASC`,
         [w.staff_no]
       );
-      recordsToCompute = dailyRes.rows;
+      recordsToCompute = punchesRes.rows;
     }
 
     const workerSettings = { ...settings, assigned_shift: w.assigned_shift || 'auto' };
 
     let dailyComputed = recordsToCompute.map(r => {
-      const { timestamps } = parseSwipeRecord(r.swipe_record || r.raw_swipes);
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
       const attendance = computeDailyAttendance(timestamps, workerSettings, r.weekday, customRules);
       return {
         staff_no: w.staff_no,
         date: r.date,
         weekday: r.weekday,
-        raw_swipes: r.swipe_record || r.raw_swipes,
+        raw_swipes: r.raw_swipes,
+        is_manual_override: r.is_manual_override,
         ...attendance,
       };
     });
@@ -1368,8 +1415,7 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
 // 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted)
 app.get('/api/export/excel', async (req, res) => {
   try {
-    const incompleteCheck = await execute(`SELECT COUNT(*) as count FROM daily_attendance WHERE status LIKE '%Incomplete%' OR status = 'Incomplete'`);
-    const incompleteCount = incompleteCheck.rows[0]?.count || 0;
+    const incompleteCount = await getTrueIncompleteCount();
     if (incompleteCount > 0) {
       return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
     }
@@ -1469,8 +1515,7 @@ app.get('/api/export/excel', async (req, res) => {
 // 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet
 app.get('/api/export/excel/timings', async (req, res) => {
   try {
-    const incompleteCheck = await execute(`SELECT COUNT(*) as count FROM daily_attendance WHERE status LIKE '%Incomplete%' OR status = 'Incomplete'`);
-    const incompleteCount = incompleteCheck.rows[0]?.count || 0;
+    const incompleteCount = await getTrueIncompleteCount();
     if (incompleteCount > 0) {
       return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
     }
@@ -1535,8 +1580,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
 // 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime)
 app.get('/api/export/excel/summary', async (req, res) => {
   try {
-    const incompleteCheck = await execute(`SELECT COUNT(*) as count FROM daily_attendance WHERE status LIKE '%Incomplete%' OR status = 'Incomplete'`);
-    const incompleteCount = incompleteCheck.rows[0]?.count || 0;
+    const incompleteCount = await getTrueIncompleteCount();
     if (incompleteCount > 0) {
       return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
     }
@@ -1619,15 +1663,25 @@ app.get('/api/export/excel/summary', async (req, res) => {
 app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
   try {
     const { staff_no } = req.params;
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+
     const workerIncompleteCheck = await execute(
-      `SELECT COUNT(*) as count FROM daily_attendance WHERE staff_no = ? AND (status LIKE '%Incomplete%' OR status = 'Incomplete')`,
+      `SELECT * FROM daily_attendance WHERE staff_no = ? AND (status LIKE '%Incomplete%' OR status = 'Incomplete')`,
       [staff_no]
     );
-    if ((workerIncompleteCheck.rows[0]?.count || 0) > 0) {
+    let workerIncompleteCount = 0;
+    for (const r of workerIncompleteCheck.rows) {
+      if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) continue;
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
+      const cleaned = cleanAndDebouncePunches(timestamps, 5);
+      if (cleaned.length % 2 !== 0 || r.status === 'Incomplete') {
+        workerIncompleteCount++;
+      }
+    }
+    if (workerIncompleteCount > 0) {
       return res.status(400).send(`Excel Download Locked: This worker has incomplete records. Please resolve missing punches first.`);
     }
-
-    const settings = await getSettingsMap();
 
     const workerRes = await execute(`SELECT * FROM workers WHERE staff_no = ?`, [staff_no]);
     if (workerRes.rows.length === 0) {
