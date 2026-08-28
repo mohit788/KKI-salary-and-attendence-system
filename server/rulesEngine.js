@@ -81,17 +81,23 @@ function detectWorkerShiftAnchor(firstInTime, defaultShift = '08:00', assignedSh
 
   const mins = timeToMins(firstInTime);
 
-  // Shift Anchors:
-  if (mins >= timeToMins('05:30') && mins <= timeToMins('06:20')) {
+  // Shift Anchors (30-minute standard slots):
+  if (mins >= timeToMins('05:30') && mins <= timeToMins('06:15')) {
     return '06:00';
   }
-  if (mins > timeToMins('06:20') && mins <= timeToMins('07:20')) {
+  if (mins > timeToMins('06:15') && mins <= timeToMins('06:45')) {
+    return '06:30';
+  }
+  if (mins > timeToMins('06:45') && mins <= timeToMins('07:15')) {
     return '07:00';
   }
-  if (mins > timeToMins('07:20') && mins <= timeToMins('08:20')) {
+  if (mins > timeToMins('07:15') && mins <= timeToMins('07:45')) {
+    return '07:30';
+  }
+  if (mins > timeToMins('07:45') && mins <= timeToMins('08:15')) {
     return '08:00';
   }
-  if (mins > timeToMins('08:20') && mins <= timeToMins('08:45')) {
+  if (mins > timeToMins('08:15') && mins <= timeToMins('08:45')) {
     return '08:30';
   }
   if (mins > timeToMins('08:45') && mins <= timeToMins('09:45')) {
