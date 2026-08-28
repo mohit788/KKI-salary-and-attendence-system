@@ -579,6 +579,7 @@ export default function Dashboard({
                   ) : (
                     selectedWorkerAttendance.map((r, idx) => {
                       const isShort = r.status.includes('Short');
+                      const isAbsentOT = r.status.includes('Absent (OT Credited)');
                       const isAbsent = r.status.includes('Absent');
                       const isIncomplete = r.status.includes('Incomplete');
                       const isWeeklyPaid = r.status.includes('Weekly Off (Paid)');
@@ -589,7 +590,13 @@ export default function Dashboard({
                           Present (Full)
                         </span>
                       );
-                      if (isShort) {
+                      if (isAbsentOT) {
+                        statusBadge = (
+                          <span className="px-2.5 py-1 rounded-lg bg-cyan-950 text-cyan-300 font-bold text-xs border border-cyan-500">
+                            Absent (OT Credited)
+                          </span>
+                        );
+                      } else if (isShort) {
                         statusBadge = (
                           <span className="px-2.5 py-1 rounded-lg bg-amber-950 text-amber-300 font-bold text-xs border border-amber-600">
                             Present (Short)

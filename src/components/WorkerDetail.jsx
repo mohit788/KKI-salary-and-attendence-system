@@ -52,6 +52,8 @@ export default function WorkerDetail({
         return 'bg-emerald-950 text-emerald-300 border-emerald-600';
       case 'Present (Short)':
         return 'bg-amber-950 text-amber-300 border-amber-600';
+      case 'Absent (OT Credited)':
+        return 'bg-cyan-950 text-cyan-300 border-cyan-500 font-bold';
       case 'Absent':
         return 'bg-rose-950 text-rose-300 border-rose-600';
       case 'Weekly Off (Paid)':

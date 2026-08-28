@@ -494,14 +494,10 @@ function computeDailyAttendance(
         ? Math.floor(rawWorkedMins / 30) * 0.5
         : +(rawWorkedMins / 60).toFixed(2);
 
-      if (workedH < shortThreshold) {
-        otHours = workedH;
-        regularHours = 0;
-        status = 'Absent (OT Credited)';
-      } else {
-        regularHours = workedH;
-        status = 'Present (Short)';
-      }
+      // Core Rule: Any duty < 8 hours is credited entirely as Overtime (OT), with 0 regular hours and Absent (OT Credited) status.
+      otHours = workedH;
+      regularHours = 0;
+      status = 'Absent (OT Credited)';
     } else {
       status = 'Absent';
     }
