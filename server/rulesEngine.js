@@ -247,7 +247,12 @@ function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30, 
  */
 function cleanAndDebouncePunches(timestamps = [], debounceMins = 5) {
   if (!Array.isArray(timestamps) || timestamps.length === 0) return [];
-  const valid = timestamps.filter(t => t && /^\d{1,2}:\d{2}$/.test(String(t).trim()));
+  const valid = timestamps.filter(t => {
+    if (!t) return false;
+    const str = String(t).trim();
+    if (str === '00:00' || str === '0:00' || str === '0') return false;
+    return /^\d{1,2}:\d{2}$/.test(str);
+  });
   if (valid.length === 0) return [];
 
   // Chronological sort
@@ -529,7 +534,7 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
     const r = dailyRecords[i];
     const swipes = r.raw_swipes || r.swipe_record || '';
     // Basic helper replacement for parseSwipeRecord
-    const timestamps = String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || [];
+    const timestamps = (String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00' && t !== '0:00');
     const cleaned = cleanAndDebouncePunches(timestamps, 5);
     if (cleaned.length === 0) continue;
 
@@ -556,7 +561,7 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
   // Recompute records with leisure status
   return dailyRecords.map((r, idx) => {
     const swipes = r.raw_swipes || r.swipe_record || '';
-    const timestamps = String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || [];
+    const timestamps = (String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00' && t !== '0:00');
     const isLeisure = forgivenSet.has(idx);
     const isHoliday = !!paidHolidaysMap[r.date];
     const holidayName = paidHolidaysMap[r.date] || '';
