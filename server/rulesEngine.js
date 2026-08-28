@@ -458,16 +458,16 @@ function computeDailyAttendance(
   let status = 'Present (Full)';
 
   if (isPaidHoliday) {
-    // Worker worked on a Paid National / Declared Holiday
-    regularHours = 8.0; // Paid day
+    // Worker worked on a Paid National / Declared Holiday: In daily breakdown, regular duty is 0, all physical worked time is Sunday/Holiday OT
+    regularHours = 0;
     let rawMins = finalEffectiveMins;
     sundayOtHours = otRounding === '30min_block'
       ? Math.floor(rawMins / 30) * 0.5
       : +(rawMins / 60).toFixed(2);
     status = 'Holiday (Worked OT)';
   } else if (isWeeklyOff) {
-    // Sunday work: Worker gets paid day + all worked time as Sunday OT
-    regularHours = 8.0;
+    // Sunday work: In daily breakdown, regular duty is 0, all physical worked time is Sunday OT
+    regularHours = 0;
     let rawMins = finalEffectiveMins;
     sundayOtHours = otRounding === '30min_block'
       ? Math.floor(rawMins / 30) * 0.5
@@ -545,7 +545,7 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
     if (cleaned.length === 0) continue;
 
     const firstIn = cleaned[0];
-    const shiftStart = r.shift || detectWorkerShiftAnchor(firstIn, settings.shift_start || '08:00', settings.assigned_shift || 'auto');
+    const shiftStart = detectWorkerShiftAnchor(firstIn, settings.shift_start || '08:00', settings.assigned_shift || 'auto');
     const inMins = timeToMins(firstIn);
     const shiftMins = timeToMins(shiftStart);
 
@@ -577,7 +577,7 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
       settings,
       r.weekday,
       customRules,
-      r.shift,
+      settings.assigned_shift || 'auto',
       isHoliday,
       holidayName,
       isLeisure

@@ -413,7 +413,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         const { timestamps } = parseSwipeRecord(r.swipe_record);
         const isHoliday = !!paidHolidaysMap[r.date];
         const holidayName = paidHolidaysMap[r.date] || '';
-        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, '08:00', isHoliday, holidayName);
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, 'auto', isHoliday, holidayName);
         if (attendance.status === 'Incomplete') {
           flaggedCount++;
         }
