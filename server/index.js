@@ -7,7 +7,7 @@ const fs = require('fs');
 const { execute, batch, initDatabase } = require('./db');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
-const { computeDailyAttendance, applyWeeklyOffForfeiture, formatHours, detectDailyFactoryShift, buildDailyShiftMap } = require('./rulesEngine');
+const { computeDailyAttendance, applyWeeklyOffForfeiture, formatHours, detectWorkerShiftAnchor, detectDailyFactoryShift, buildDailyShiftMap } = require('./rulesEngine');
 const { calculateWorkerPayroll } = require('./payrollEngine');
 const { parseNaturalLanguageRule } = require('./aiRuleEngine');
 const { processUniversalAssistantPrompt } = require('./aiAssistantEngine');
@@ -304,13 +304,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
-    // Pre-calculate daily factory shift map across all uploaded records
-    const allUploadedRecords = [];
-    parsedWorkers.forEach(w => {
-      (w.records || []).forEach(r => allUploadedRecords.push(r));
-    });
-    const dailyShiftMap = buildDailyShiftMap(allUploadedRecords, settings.shift_start || '08:00');
-
     let totalRecords = 0;
     let flaggedCount = 0;
     const datesSet = new Set();
@@ -330,8 +323,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         totalRecords++;
         if (r.date) datesSet.add(r.date);
         const { timestamps } = parseSwipeRecord(r.swipe_record);
-        const dateShift = dailyShiftMap.get(r.date) || settings.shift_start || '08:00';
-        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, dateShift);
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
         if (attendance.status === 'Incomplete') {
           flaggedCount++;
         }
@@ -363,8 +355,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         });
 
         dbStatements.push({
-          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
                   effective_in = excluded.effective_in,
@@ -374,6 +366,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                   sunday_ot_hours = excluded.sunday_ot_hours,
                   total_hours = excluded.total_hours,
                   late_minutes = excluded.late_minutes,
+                  shift = excluded.shift,
                   status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
           args: [
             d.staff_no || '',
@@ -387,7 +380,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
             d.sundayOtHours || 0,
             d.totalHours || 0,
             d.lateMinutes || 0,
-            d.status || 'Absent'
+            d.status || 'Absent',
+            d.shift || '08:00'
           ]
         });
       }
@@ -438,11 +432,6 @@ app.post('/api/upload/commit', async (req, res) => {
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
-    const allRecordsFlat = [];
-    parsedData.forEach(w => {
-      (w.records || []).forEach(r => allRecordsFlat.push(r));
-    });
-    const dailyShiftMap = buildDailyShiftMap(allRecordsFlat, settings.shift_start || '08:00');
     const dbStatements = [];
 
     for (const worker of parsedData) {
@@ -456,8 +445,7 @@ app.post('/api/upload/commit', async (req, res) => {
 
       let dailyComputed = sortedRecords.map(r => {
         const { timestamps } = parseSwipeRecord(r.swipe_record);
-        const dateShift = dailyShiftMap.get(r.date) || settings.shift_start || '08:00';
-        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, dateShift);
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
         return {
           staff_no: worker.staff_no,
           date: r.date,
@@ -486,8 +474,8 @@ app.post('/api/upload/commit', async (req, res) => {
         });
 
         dbStatements.push({
-          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
                   effective_in = excluded.effective_in,
@@ -497,6 +485,7 @@ app.post('/api/upload/commit', async (req, res) => {
                   sunday_ot_hours = excluded.sunday_ot_hours,
                   total_hours = excluded.total_hours,
                   late_minutes = excluded.late_minutes,
+                  shift = excluded.shift,
                   status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
           args: [
             d.staff_no || '',
@@ -510,7 +499,8 @@ app.post('/api/upload/commit', async (req, res) => {
             d.sundayOtHours || 0,
             d.totalHours || 0,
             d.lateMinutes || 0,
-            d.status || 'Absent'
+            d.status || 'Absent',
+            d.shift || '08:00'
           ]
         });
       }
@@ -590,16 +580,7 @@ async function recomputeAllAttendance() {
   const settings = await getSettingsMap();
   const customRules = await getCustomRules();
 
-  // Pre-calculate daily factory shift map across all raw punches
-  const allPunchesRes = await execute(`SELECT date, swipe_record FROM raw_punches`);
-  let recordsForShiftMap = allPunchesRes.rows;
-  if (!recordsForShiftMap || recordsForShiftMap.length === 0) {
-    const dailyPunchesRes = await execute(`SELECT date, raw_swipes as swipe_record FROM daily_attendance`);
-    recordsForShiftMap = dailyPunchesRes.rows;
-  }
-  const dailyShiftMap = buildDailyShiftMap(recordsForShiftMap, settings.shift_start || '08:00');
-
-  const workersRes = await execute(`SELECT staff_no FROM workers`);
+  const workersRes = await execute(`SELECT staff_no, assigned_shift FROM workers`);
 
   for (const w of workersRes.rows) {
     const punchesRes = await execute(
@@ -616,10 +597,11 @@ async function recomputeAllAttendance() {
       recordsToCompute = dailyRes.rows;
     }
 
+    const workerSettings = { ...settings, assigned_shift: w.assigned_shift || 'auto' };
+
     let dailyComputed = recordsToCompute.map(r => {
       const { timestamps } = parseSwipeRecord(r.swipe_record || r.raw_swipes);
-      const dateShift = dailyShiftMap.get(r.date) || settings.shift_start || '08:00';
-      const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, dateShift);
+      const attendance = computeDailyAttendance(timestamps, workerSettings, r.weekday, customRules);
       return {
         staff_no: w.staff_no,
         date: r.date,
@@ -635,6 +617,7 @@ async function recomputeAllAttendance() {
       await execute(
         `UPDATE daily_attendance SET
            effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?,
+           shift = ?,
            status = CASE WHEN is_manual_override = 1 THEN status ELSE ? END
          WHERE staff_no = ? AND date = ?`,
         [
@@ -645,6 +628,7 @@ async function recomputeAllAttendance() {
           d.sundayOtHours || 0,
           d.totalHours || 0,
           d.lateMinutes || 0,
+          d.shift || '08:00',
           d.status || 'Absent',
           d.staff_no,
           d.date
@@ -790,6 +774,35 @@ app.get('/api/workers/:staff_no', async (req, res) => {
   }
 });
 
+// Update Worker Profile (Name, Dept, Assigned Shift)
+app.post('/api/workers/:staff_no/profile', async (req, res) => {
+  try {
+    const { staff_no } = req.params;
+    const { staff_name, department, assigned_shift = 'auto' } = req.body;
+
+    await execute(
+      `UPDATE workers SET 
+         staff_name = COALESCE(?, staff_name),
+         department = COALESCE(?, department),
+         assigned_shift = ?
+       WHERE staff_no = ?`,
+      [
+        staff_name || null,
+        department || null,
+        assigned_shift || 'auto',
+        staff_no
+      ]
+    );
+
+    // Recompute attendance for this worker
+    await recomputeAllAttendance();
+
+    res.json({ success: true, message: 'Worker profile & assigned shift updated.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Update Worker Salary & Allowances (Compensation)
 app.post('/api/workers/:staff_no/compensation', async (req, res) => {
   try {
@@ -839,13 +852,11 @@ app.post('/api/attendance/edit', async (req, res) => {
     const effectiveSwipes = raw_swipes !== undefined ? raw_swipes : (oldRec.raw_swipes || '');
     const { timestamps } = parseSwipeRecord(effectiveSwipes);
 
-    const datePunchesRes = await execute(`SELECT raw_swipes as swipe_record FROM daily_attendance WHERE date = ?`, [date]);
-    const dateShift = detectDailyFactoryShift(
-      (datePunchesRes.rows || []).map(r => parseSwipeRecord(r.swipe_record).timestamps[0]).filter(Boolean),
-      settings.shift_start || '08:00'
-    );
+    const workerRes = await execute(`SELECT assigned_shift FROM workers WHERE staff_no = ?`, [staff_no]);
+    const workerAssignedShift = workerRes.rows[0]?.assigned_shift || 'auto';
+    const workerSettings = { ...settings, assigned_shift: workerAssignedShift };
 
-    const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday, customRules, dateShift);
+    const computed = computeDailyAttendance(timestamps, workerSettings, oldRec.weekday, customRules);
 
     let regularHours = computed.regularHours;
     let otHours = computed.otHours;
@@ -860,7 +871,7 @@ app.post('/api/attendance/edit', async (req, res) => {
     if (finalStatus === 'Present (Full)' && regularHours === 0 && timestamps.length === 0) {
       regularHours = 8.0;
       totalHours = 8.0;
-      effectiveIn = dateShift || settings.shift_start || '08:00';
+      effectiveIn = computed.shift || settings.shift_start || '08:00';
       effectiveOut = settings.shift_end || '16:30';
     }
 
@@ -891,7 +902,7 @@ app.post('/api/attendance/edit', async (req, res) => {
     await execute(
       `UPDATE daily_attendance SET
          raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
-         late_minutes = ?, status = ?, is_manual_override = 1, override_reason = ?
+         late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?
        WHERE staff_no = ? AND date = ?`,
       [
         effectiveSwipes,
@@ -903,6 +914,7 @@ app.post('/api/attendance/edit', async (req, res) => {
         totalHours,
         lateMinutes,
         finalStatus,
+        computed.shift || '08:00',
         reason || 'Manual correction',
         staff_no,
         date,
@@ -955,15 +967,10 @@ app.get('/api/attendance/incomplete', async (req, res) => {
 
       // If punch count is even (>= 2, like 07:55 17:34) and was stored as 'Incomplete', automatically recompute & update to Present!
       if (!isOdd && timestamps.length >= 2 && r.is_manual_override === 0) {
-        const datePunchesRes = await execute(`SELECT raw_swipes as swipe_record FROM daily_attendance WHERE date = ?`, [r.date]);
-        const dateShift = detectDailyFactoryShift(
-          (datePunchesRes.rows || []).map(row => parseSwipeRecord(row.swipe_record).timestamps[0]).filter(Boolean),
-          settings.shift_start || '08:00'
-        );
-        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules, dateShift);
+        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
         await execute(
           `UPDATE daily_attendance SET
-             effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?
+             effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
            WHERE staff_no = ? AND date = ?`,
           [
             computed.effectiveIn || '',
@@ -974,6 +981,7 @@ app.get('/api/attendance/incomplete', async (req, res) => {
             computed.totalHours || 0,
             computed.lateMinutes || 0,
             computed.status,
+            computed.shift || '08:00',
             r.staff_no,
             r.date
           ]
@@ -1014,13 +1022,11 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       const effectiveSwipes = raw_swipes !== undefined ? raw_swipes : (oldRec.raw_swipes || '');
       const { timestamps } = parseSwipeRecord(effectiveSwipes);
 
-      const datePunchesRes = await execute(`SELECT raw_swipes as swipe_record FROM daily_attendance WHERE date = ?`, [date]);
-      const dateShift = detectDailyFactoryShift(
-        (datePunchesRes.rows || []).map(r => parseSwipeRecord(r.swipe_record).timestamps[0]).filter(Boolean),
-        settings.shift_start || '08:00'
-      );
+      const workerRes = await execute(`SELECT assigned_shift FROM workers WHERE staff_no = ?`, [staff_no]);
+      const workerAssignedShift = workerRes.rows[0]?.assigned_shift || 'auto';
+      const workerSettings = { ...settings, assigned_shift: workerAssignedShift };
 
-      const computed = computeDailyAttendance(timestamps, settings, oldRec.weekday, customRules, dateShift);
+      const computed = computeDailyAttendance(timestamps, workerSettings, oldRec.weekday, customRules);
 
       let regularHours = computed.regularHours;
       let otHours = computed.otHours;
@@ -1034,7 +1040,7 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       if (finalStatus === 'Present (Full)' && regularHours === 0 && timestamps.length === 0) {
         regularHours = 8.0;
         totalHours = 8.0;
-        effectiveIn = dateShift || settings.shift_start || '08:00';
+        effectiveIn = computed.shift || settings.shift_start || '08:00';
         effectiveOut = settings.shift_end || '16:30';
       }
 
@@ -1062,7 +1068,7 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       await execute(
         `UPDATE daily_attendance SET
            raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
-           late_minutes = ?, status = ?, is_manual_override = 1, override_reason = ?
+           late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?
          WHERE staff_no = ? AND date = ?`,
         [
           effectiveSwipes,
@@ -1074,6 +1080,7 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
           totalHours,
           lateMinutes,
           finalStatus,
+          computed.shift || '08:00',
           reason || 'Fast-Fix Resolution',
           staff_no,
           date,

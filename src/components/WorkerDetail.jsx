@@ -265,6 +265,7 @@ export default function WorkerDetail({
               <tr>
                 <th className="px-4 py-3.5">Date</th>
                 <th className="px-4 py-3.5">Raw Swipes</th>
+                <th className="px-3 py-3.5 text-center text-teal-300">Shift</th>
                 <th className="px-4 py-3.5 text-center">Effective In</th>
                 <th className="px-4 py-3.5 text-center">Effective Out</th>
                 <th className="px-4 py-3.5 text-center">Reg Hrs (8h Duty)</th>
@@ -313,6 +314,12 @@ export default function WorkerDetail({
                       ) : (
                         <span className="text-slate-500 italic">No Swipe</span>
                       )}
+                    </td>
+
+                    <td className="px-3 py-3.5 font-mono text-center">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-teal-950/80 text-teal-300 border border-teal-700/60 shadow-sm">
+                        {r.shift || '08:00'}
+                      </span>
                     </td>
 
                     <td className="px-4 py-3.5 font-mono text-center text-emerald-300 font-bold">

@@ -57,6 +57,51 @@ function formatHours(decimalHours, format = 'hm') {
 }
 
 /**
+ * Detects the shift start anchor for an individual worker based on their first IN punch.
+ * Supports standard factory shift slots:
+ * - 06:00 Shift: Punches between 05:30 and 06:20 (e.g. 05:45, 05:55, 06:00, 06:04)
+ * - 07:00 Shift: Punches between 06:21 and 07:20 (e.g. 06:48, 06:52, 07:00, 07:15)
+ * - 08:00 Shift: Punches between 07:21 and 08:20 (e.g. 07:45, 07:55, 08:00, 08:15)
+ * - 08:30 Shift: Punches between 08:21 and 08:45
+ * - 09:00 Shift: Punches between 08:46 and 09:45
+ * 
+ * @param {string} firstInTime - First IN punch (e.g. '05:55', '06:52', '07:55')
+ * @param {string} defaultShift - Default fallback shift start (default '08:00')
+ * @param {string} assignedShift - Optional fixed worker assigned shift (e.g. '06:00', '07:00', 'auto')
+ * @returns {string} Detected or assigned shift start time (e.g. '06:00', '07:00', '08:00')
+ */
+function detectWorkerShiftAnchor(firstInTime, defaultShift = '08:00', assignedShift = 'auto') {
+  if (assignedShift && assignedShift !== 'auto' && /^\d{1,2}:\d{2}$/.test(String(assignedShift).trim())) {
+    return assignedShift.trim();
+  }
+
+  if (!firstInTime || !/^\d{1,2}:\d{2}$/.test(String(firstInTime).trim())) {
+    return defaultShift || '08:00';
+  }
+
+  const mins = timeToMins(firstInTime);
+
+  // Shift Anchors:
+  if (mins >= timeToMins('05:30') && mins <= timeToMins('06:20')) {
+    return '06:00';
+  }
+  if (mins > timeToMins('06:20') && mins <= timeToMins('07:20')) {
+    return '07:00';
+  }
+  if (mins > timeToMins('07:20') && mins <= timeToMins('08:20')) {
+    return '08:00';
+  }
+  if (mins > timeToMins('08:20') && mins <= timeToMins('08:45')) {
+    return '08:30';
+  }
+  if (mins > timeToMins('08:45') && mins <= timeToMins('09:45')) {
+    return '09:00';
+  }
+
+  return defaultShift || '08:00';
+}
+
+/**
  * Detects the factory shift start time for a specific date based on all workers' first IN punches on that date.
  * Uses crowd-clustering / voting among standard factory shift anchors (e.g. 07:00, 08:00, 08:30, 09:00).
  * 
@@ -76,10 +121,12 @@ function detectDailyFactoryShift(firstInTimes = [], defaultShift = '08:00') {
   const totalWorkers = validTimes.length;
 
   // Counters for Shift Anchors:
-  // 07:00 Shift Slot: Punches between 06:00 and 07:25 (e.g., 6:50, 6:58, 7:10, 7:20)
+  // 06:00 Shift Slot: Punches between 05:30 and 06:20
+  // 07:00 Shift Slot: Punches between 06:21 and 07:25 (e.g., 6:50, 6:58, 7:10, 7:20)
   // 08:00 Shift Slot: Punches between 07:26 and 08:20 (e.g., 7:45, 7:55, 8:00, 8:15)
   // 08:30 Shift Slot: Punches between 08:21 and 08:45
   // 09:00 Shift Slot: Punches between 08:46 and 09:45
+  let early6Count = 0;
   let early7Count = 0;
   let normal8Count = 0;
   let mid830Count = 0;
@@ -87,7 +134,9 @@ function detectDailyFactoryShift(firstInTimes = [], defaultShift = '08:00') {
 
   validTimes.forEach(timeStr => {
     const mins = timeToMins(timeStr);
-    if (mins >= timeToMins('06:00') && mins <= timeToMins('07:25')) {
+    if (mins >= timeToMins('05:30') && mins <= timeToMins('06:20')) {
+      early6Count++;
+    } else if (mins > timeToMins('06:20') && mins <= timeToMins('07:25')) {
       early7Count++;
     } else if (mins > timeToMins('07:25') && mins <= timeToMins('08:20')) {
       normal8Count++;
@@ -97,6 +146,11 @@ function detectDailyFactoryShift(firstInTimes = [], defaultShift = '08:00') {
       late9Count++;
     }
   });
+
+  const early6Ratio = early6Count / totalWorkers;
+  if ((early6Count >= 2 && early6Ratio >= 0.20) || early6Ratio >= 0.30 || (early6Count > 0 && early6Count > normal8Count)) {
+    return '06:00';
+  }
 
   const early7Ratio = early7Count / totalWorkers;
   // If at least 20% of workers (or >=2 in small groups) came early OR early count exceeds 8 AM count -> 07:00 Shift
@@ -216,10 +270,24 @@ function cleanAndDebouncePunches(timestamps = [], debounceMins = 5) {
  * @param {Object} settings - rule parameters
  * @param {string} weekday - "Mon", "Tue", "Sun" etc.
  * @param {Array<Object>} customRules - list of active custom rules
- * @param {string} dynamicShiftStart - Optional detected date-specific shift start (e.g. '07:00')
+ * @param {string} dynamicShiftStart - Optional detected date-specific shift start (e.g. '07:00' or '06:00')
  */
 function computeDailyAttendance(timestamps, settings = {}, weekday = '', customRules = [], dynamicShiftStart = '') {
-  const shiftStart = dynamicShiftStart || settings.daily_shift_start || settings.shift_start || '08:00';
+  const cleanedPunches = cleanAndDebouncePunches(timestamps, 5);
+  const firstIn = cleanedPunches && cleanedPunches.length > 0 ? cleanedPunches[0] : '';
+
+  // Determine individual worker shift start:
+  // If an explicit non-empty dynamicShiftStart is provided (and not 'auto'), use it.
+  // Otherwise detect the shift anchor for this worker based on their first IN punch.
+  let shiftStart = '08:00';
+  if (dynamicShiftStart && dynamicShiftStart !== 'auto') {
+    shiftStart = dynamicShiftStart;
+  } else if (firstIn) {
+    shiftStart = detectWorkerShiftAnchor(firstIn, settings.shift_start || '08:00', settings.assigned_shift || 'auto');
+  } else {
+    shiftStart = settings.shift_start || '08:00';
+  }
+
   const shiftEnd = settings.shift_end || '16:30';
   const slabMinutes = parseInt(settings.grace_slab_minutes || 30, 10);
   const otRounding = settings.ot_rounding || 'minutes';
@@ -229,12 +297,11 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const lunchDeductionMins = parseInt(settings.lunch_deduction_mins !== undefined ? settings.lunch_deduction_mins : 30, 10);
   const latePenaltyThresholdMins = parseInt(settings.late_penalty_threshold_mins || 120, 10);
 
-  const cleanedPunches = cleanAndDebouncePunches(timestamps, 5);
-
   // 1. No punches -> Absent / Weekly Off
   if (!cleanedPunches || cleanedPunches.length === 0) {
     const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
     return {
+      shift: shiftStart,
       effectiveIn: '',
       effectiveOut: '',
       punchPairsFormatted: '',
@@ -250,7 +317,6 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   // 2. ODD PUNCHES (1, 3, 5 punches -> Unclosed session / Missing final OUT punch)
   // Flagged as 'Incomplete' until closing punch arrives!
   if (cleanedPunches.length % 2 !== 0) {
-    const firstIn = cleanedPunches[0];
     const { effectiveTime: effectiveInTime, lateMins } = getEffectiveFirstIn(firstIn, shiftStart, slabMinutes);
 
     const incompletePairStrings = [];
@@ -261,6 +327,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     incompletePairStrings.push(`IN ${lastOddPunch} (Missed OUT)`);
 
     return {
+      shift: shiftStart,
       effectiveIn: effectiveInTime,
       effectiveOut: '—',
       punchPairsFormatted: incompletePairStrings.join(' | '),
@@ -276,7 +343,6 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
 
   // Span 1: apply grace slab to first IN punch
-  const firstIn = cleanedPunches[0];
   const { effectiveTime: effectiveInTime, effectiveMins: effectiveInMins, lateMins } = getEffectiveFirstIn(
     firstIn,
     shiftStart,
@@ -355,6 +421,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
     const status = totalHours > 0 ? 'Weekly Off (Worked OT)' : 'Weekly Off (Paid)';
 
     return {
+      shift: shiftStart,
       effectiveIn: effectiveInTime,
       effectiveOut: finalOutTime,
       punchPairsFormatted: punchPairStrings.join(' | '),
@@ -438,6 +505,7 @@ function computeDailyAttendance(timestamps, settings = {}, weekday = '', customR
   const finalOutTime = timestamps[timestamps.length - 1];
 
   return {
+    shift: shiftStart,
     effectiveIn: effectiveInTime,
     effectiveOut: finalOutTime,
     punchPairsFormatted: punchPairStrings.join(' | '),
@@ -538,6 +606,7 @@ module.exports = {
   timeToMins,
   minsToTime,
   formatHours,
+  detectWorkerShiftAnchor,
   detectDailyFactoryShift,
   buildDailyShiftMap,
   cleanAndDebouncePunches,

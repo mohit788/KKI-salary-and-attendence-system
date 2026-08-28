@@ -170,7 +170,9 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE workers ADD COLUMN housing_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE workers ADD COLUMN food_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE workers ADD COLUMN other_allowance REAL DEFAULT 0`); } catch (e) {}
+  try { await execute(`ALTER TABLE workers ADD COLUMN assigned_shift TEXT DEFAULT 'auto'`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}
+  try { await execute(`ALTER TABLE daily_attendance ADD COLUMN shift TEXT DEFAULT '08:00'`); } catch (e) {}
 
   // Insert default settings if empty or update legacy defaults
   const defaultSettings = [
