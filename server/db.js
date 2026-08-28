@@ -207,7 +207,7 @@ async function initDatabase() {
     ['leisure_mins_allowed', '2', 'Leisure grace minutes allowed (e.g. 2 min)'],
     ['leisure_days_allowed', '2', 'Maximum days per month eligible for leisure time forgiveness (Default: 2)'],
     ['ot_multiplier', '1.5', 'Overtime pay multiplier'],
-    ['ot_rounding', 'minutes', 'OT rounding mode: "minutes" or "30min_block"'],
+    ['ot_rounding', '30min_block', 'OT rounding mode: "30min_block" or "minutes"'],
     ['short_hours_threshold', '4.0', 'Threshold hours below which day is short hours'],
     ['weekly_off_day', 'Sun', 'Default paid weekly off day (Sun/Sat/etc)'],
     ['forfeiture_absent_threshold', '3', 'Number of absent days in Mon-Sat stretch to forfeit Sunday (Default: 3)'],

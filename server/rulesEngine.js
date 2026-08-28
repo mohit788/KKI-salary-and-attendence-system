@@ -312,7 +312,7 @@ function computeDailyAttendance(
 
   const shiftEnd = settings.shift_end || '16:30';
   const slabMinutes = parseInt(settings.grace_slab_minutes || 30, 10);
-  const otRounding = settings.ot_rounding || 'minutes';
+  const otRounding = settings.ot_rounding || '30min_block';
   const shortThreshold = parseFloat(settings.short_hours_threshold || 4.0);
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
   const maxOtHours = parseFloat(settings.max_ot_hours || 0);
@@ -460,12 +460,18 @@ function computeDailyAttendance(
   if (isPaidHoliday) {
     // Worker worked on a Paid National / Declared Holiday
     regularHours = 8.0; // Paid day
-    sundayOtHours = +(finalEffectiveMins / 60).toFixed(2); // All worked time as special Holiday OT!
+    let rawMins = finalEffectiveMins;
+    sundayOtHours = otRounding === '30min_block'
+      ? Math.floor(rawMins / 30) * 0.5
+      : +(rawMins / 60).toFixed(2);
     status = 'Holiday (Worked OT)';
   } else if (isWeeklyOff) {
     // Sunday work: Worker gets paid day + all worked time as Sunday OT
     regularHours = 8.0;
-    sundayOtHours = +(finalEffectiveMins / 60).toFixed(2);
+    let rawMins = finalEffectiveMins;
+    sundayOtHours = otRounding === '30min_block'
+      ? Math.floor(rawMins / 30) * 0.5
+      : +(rawMins / 60).toFixed(2);
     status = 'Weekly Off (Worked OT)';
   } else {
     // Regular weekday work (Mon - Sat)
@@ -483,7 +489,11 @@ function computeDailyAttendance(
       otHours = computedOtHours;
       status = 'Present (Full)';
     } else if (finalEffectiveMins > 0) {
-      let workedH = +(finalEffectiveMins / 60).toFixed(2);
+      let rawWorkedMins = finalEffectiveMins;
+      let workedH = otRounding === '30min_block'
+        ? Math.floor(rawWorkedMins / 30) * 0.5
+        : +(rawWorkedMins / 60).toFixed(2);
+
       if (workedH < shortThreshold) {
         otHours = workedH;
         regularHours = 0;
