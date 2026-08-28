@@ -221,6 +221,15 @@ export default function IncompleteManagerModal({
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-300 text-xs font-bold font-mono border border-amber-500">
                   {records.length} Records Need Resolution
                 </span>
+                <button
+                  onClick={fetchIncomplete}
+                  disabled={loading}
+                  className="px-2.5 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 flex items-center space-x-1 transition-all cursor-pointer"
+                  title="Reload Incomplete Records"
+                >
+                  <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
                 Fix missing swipes across workers in one click to automatically unlock their payroll & salary calculations.
@@ -230,7 +239,7 @@ export default function IncompleteManagerModal({
 
           <button 
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-all"
+            className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-all cursor-pointer"
           >
             <X className="w-6 h-6" />
           </button>
