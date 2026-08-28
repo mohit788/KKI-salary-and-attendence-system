@@ -228,27 +228,27 @@ export default function AllWorkersTable({
             />
           </div>
 
-          {workers.some(w => w.payroll?.hasIncompleteEntries || (w.payroll?.incompleteDays || 0) > 0) && (
+          {workers.some(w => w.payroll?.hasIncompleteEntries || (w.payroll?.incompleteDays || 0) > 0) ? (
             <button
               onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
-              className="px-3 py-2 bg-amber-950/90 text-amber-300 border-2 border-amber-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-sm transition-all whitespace-nowrap cursor-pointer hover:bg-amber-900"
-              title="Click to review and fix missing punches in Fast-Fix Center"
+              className="px-4 py-2 bg-amber-950 text-amber-300 border-2 border-amber-500 rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md transition-all whitespace-nowrap cursor-pointer hover:bg-amber-900"
+              title="Reports Locked: Click here to fix all incomplete punches in Fast-Fix Center first"
             >
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Review Incomplete</span>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span>🔒 Reports Locked ({workers.reduce((acc, w) => acc + (w.payroll?.incompleteDays || 0), 0)} Incomplete — Click to Fix)</span>
             </button>
-          )}
-
-          <a
-            href="/api/export/excel/summary"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-teal-500 shadow-sm transition-all whitespace-nowrap"
-            title="Download Concise 5-Column Summary (Worker ID, Name, Payable Days, Absents, Overtime)"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
-            <span>5-Col Summary (.xlsx)</span>
-          </a>
+          ) : (
+            <>
+              <a
+                href="/api/export/excel/summary"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-teal-500 shadow-sm transition-all whitespace-nowrap"
+                title="Download Concise 5-Column Summary (Worker ID, Name, Payable Days, Absents, Overtime)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
+                <span>5-Col Summary (.xlsx)</span>
+              </a>
 
               <a
                 href="/api/export/excel/timings"
@@ -290,13 +290,15 @@ export default function AllWorkersTable({
                 </button>
               )}
 
-          <button
-            onClick={exportToPDF}
-            className="px-3 py-2 bg-rose-800 hover:bg-rose-700 text-white border border-rose-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>PDF</span>
-          </button>
+              <button
+                onClick={exportToPDF}
+                className="px-3 py-2 bg-rose-800 hover:bg-rose-700 text-white border border-rose-500 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all whitespace-nowrap"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>PDF</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
