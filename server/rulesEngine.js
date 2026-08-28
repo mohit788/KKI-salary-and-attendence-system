@@ -669,9 +669,11 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
 
 /**
  * Apply Paid Holiday Eligibility & Sandwich Forfeiture Rule:
- * - Preceding days condition: Worker must not have any unworked absents in the working days of that week before the holiday (Monday to day before holiday).
- * - Bridge day condition: Worker must not be absent on the immediate next scheduled working day after the holiday/weekend block.
- * - If absent on either, the holiday is marked 'Holiday (Forfeited)' and not paid.
+ * - Immediate Preceding Days (Up to 2 working days right before the holiday, e.g. Aug 13 & 14 for Aug 15):
+ *   If worker is absent on either of the 1-2 working days directly before the holiday to bridge a long weekend,
+ *   the holiday is forfeited. (Absences earlier in the week like Mon 10, Tue 11, Wed 12 do NOT forfeit).
+ * - Immediate Next Scheduled Working Day (Bridge day after holiday/weekend block, e.g. Mon Aug 17):
+ *   If worker is absent on the immediate next working day, the holiday is forfeited.
  * @param {Array<Object>} dailyRecords - Array of daily attendance objects
  * @param {Object} settings - Configuration map
  */
@@ -684,22 +686,25 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
 
     let isForfeited = false;
 
-    // 1. Check preceding working days of the same week (from Monday up to the day before holiday)
-    for (let j = i - 1; j >= 0; j--) {
+    // 1. Check ONLY the 1-2 immediate preceding working days right before the holiday (e.g. 13th & 14th)
+    let precedingWorkingDaysChecked = 0;
+    for (let j = i - 1; j >= 0 && precedingWorkingDaysChecked < 2; j--) {
       const prev = dailyRecords[j];
       const prevWeekday = (prev.weekday || '').slice(0, 3);
       
       // Stop if crossed into previous week's Sunday
       if (prevWeekday.toLowerCase() === weeklyOffDay.toLowerCase().slice(0, 3)) break;
 
-      // If prev is an unworked absent:
+      precedingWorkingDaysChecked++;
+
+      // If absent on either of the 1-2 days directly preceding the holiday:
       if (isPureAbsentForForfeiture(prev)) {
         isForfeited = true;
         break;
       }
     }
 
-    // 2. Check immediate next scheduled working day after holiday/weekend block
+    // 2. Check immediate next scheduled working day after holiday/weekend block (e.g. Mon 17th)
     if (!isForfeited) {
       for (let k = i + 1; k < dailyRecords.length; k++) {
         const next = dailyRecords[k];
@@ -709,7 +714,7 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
         // Skip consecutive holidays and Sundays
         if (isNextOff) continue;
 
-        // First regular scheduled working day found:
+        // First regular scheduled working day found (e.g. Mon Aug 17):
         if (isPureAbsentForForfeiture(next)) {
           isForfeited = true;
         }
