@@ -19,6 +19,23 @@ async function execute(sql, args = []) {
   try {
     return await db.execute({ sql, args });
   } catch (err) {
+    // Self-Healing Auto-Migration: If SQLite encounters a missing column, add it on the fly and retry!
+    const colMatch = err.message && err.message.match(/no such column:\s*([a-zA-Z0-9_]+)/i);
+    if (colMatch && colMatch[1]) {
+      const missingCol = colMatch[1];
+      const tableMatch = sql.match(/(?:FROM|UPDATE|INTO)\s+([a-zA-Z0-9_]+)/i);
+      if (tableMatch && tableMatch[1]) {
+        const table = tableMatch[1];
+        try {
+          console.warn(`🛡️ Self-Healing DB: Auto-adding missing column '${missingCol}' to table '${table}' and retrying...`);
+          await db.execute({ sql: `ALTER TABLE ${table} ADD COLUMN ${missingCol} TEXT DEFAULT ''` });
+          return await db.execute({ sql, args });
+        } catch (healErr) {
+          console.error(`Self-heal migration error on ${table}.${missingCol}:`, healErr.message);
+        }
+      }
+    }
+
     console.error('DB Execute Error:', err.message, 'SQL:', sql);
     throw err;
   }
