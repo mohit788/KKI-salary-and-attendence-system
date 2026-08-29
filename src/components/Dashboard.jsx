@@ -675,16 +675,18 @@ export default function Dashboard({
                                     return (
                                       <span
                                         key={tokenIdx}
-                                        className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono transition-all inline-flex items-center gap-1.5 ${
+                                        className={`px-2 py-0.5 rounded-lg text-xs font-bold font-mono transition-all inline-flex items-center gap-1.5 ${
                                           isAddedTiming
-                                            ? 'bg-amber-400 text-slate-950 border-2 border-amber-300 shadow-lg shadow-amber-500/40 ring-2 ring-amber-400/80 font-black'
+                                            ? 'bg-sky-950/90 text-sky-200 border border-sky-400 font-bold shadow-sm shadow-sky-500/20 ring-1 ring-sky-400/40'
                                             : isManual
-                                              ? 'bg-violet-950/80 text-violet-200 border border-violet-600'
-                                              : 'bg-slate-950 text-cyan-300 border border-slate-700'
+                                              ? 'bg-violet-950/80 text-violet-200 border border-violet-700/70'
+                                              : 'bg-slate-950 text-cyan-300 border border-slate-700/80'
                                         }`}
-                                        title={isAddedTiming ? `✨ Manually Added Punch Timing: ${token}` : `Biometric Punch: ${token}`}
+                                        title={isAddedTiming ? `Manually Added Timing: ${token}` : `Biometric Punch: ${token}`}
                                       >
-                                        {isAddedTiming && <Sparkles className="w-3 h-3 text-slate-950 shrink-0" />}
+                                        {isAddedTiming && (
+                                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block"></span>
+                                        )}
                                         <span>{token}</span>
                                       </span>
                                     );

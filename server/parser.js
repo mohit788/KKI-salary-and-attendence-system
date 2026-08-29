@@ -51,8 +51,45 @@ function getWeekdayFromISO(isoStr) {
 function parseSwipeRecord(rawSwipes) {
   if (!rawSwipes) return { timestamps: [], isOdd: false, isEmpty: true };
   
-  // Extract all HH:MM pattern timestamps
-  const matches = String(rawSwipes).match(/\b\d{1,2}:\d{2}\b/g) || [];
+  // Normalize tokens first (handling e.g. "190", "901", "1830", "19:0", "19")
+  const tokens = String(rawSwipes).trim().split(/[\s,]+/);
+  const normalizedTokens = tokens.map(t => {
+    if (!t) return '';
+    t = String(t).trim();
+    if (/^\d{2}:\d{2}$/.test(t)) return t;
+    if (/^\d{1}:\d{1,2}$/.test(t)) {
+      const [h, m] = t.split(':');
+      const mPadded = m.length === 1 ? `${m}0` : m;
+      return `${String(h).padStart(2, '0')}:${mPadded}`;
+    }
+    if (/^\d{2}:\d{1}$/.test(t)) {
+      const [h, m] = t.split(':');
+      return `${h}:${m}0`;
+    }
+    if (/^\d{4}$/.test(t)) {
+      const h = t.slice(0, 2);
+      const m = t.slice(2, 4);
+      if (parseInt(h, 10) < 24 && parseInt(m, 10) < 60) return `${h}:${m}`;
+    }
+    if (/^\d{3}$/.test(t)) {
+      const h2 = parseInt(t.slice(0, 2), 10);
+      if (h2 >= 10 && h2 < 24) {
+        const m2 = `${t.slice(2)}0`;
+        if (parseInt(m2, 10) < 60) return `${h2}:${m2}`;
+      }
+      const h1 = t.slice(0, 1);
+      const m1 = t.slice(1, 3);
+      if (parseInt(m1, 10) < 60) return `0${h1}:${m1}`;
+    }
+    if (/^\d{1,2}$/.test(t)) {
+      const hNum = parseInt(t, 10);
+      if (hNum >= 0 && hNum < 24) return `${String(hNum).padStart(2, '0')}:00`;
+    }
+    return t;
+  }).filter(Boolean);
+
+  const normalizedStr = normalizedTokens.join(' ');
+  const matches = normalizedStr.match(/\b\d{1,2}:\d{2}\b/g) || [];
   const timestamps = matches.filter(t => t !== '00:00').map(t => {
     const parts = t.split(':');
     const hh = parts[0].padStart(2, '0');
@@ -60,13 +97,11 @@ function parseSwipeRecord(rawSwipes) {
     return `${hh}:${mm}`;
   });
 
-  const isEmpty = timestamps.length === 0;
-  const isOdd = timestamps.length % 2 !== 0;
-
   return {
     timestamps,
-    isOdd,
-    isEmpty,
+    isOdd: timestamps.length % 2 !== 0,
+    isEmpty: timestamps.length === 0,
+    normalizedStr: timestamps.join(' ')
   };
 }
 

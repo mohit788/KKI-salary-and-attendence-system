@@ -71,29 +71,20 @@ export function normalizeSingleTimeToken(token) {
     return token;
   }
 
-  // Single digit hour with colon: e.g. "9:05" -> "09:05", "9:1" -> "09:01"
+  // Single digit hour with colon: e.g. "9:05" -> "09:05", "9:1" -> "09:10", "9:0" -> "09:00"
   if (/^\d{1}:\d{1,2}$/.test(token)) {
     const [h, m] = token.split(':');
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    const mPadded = m.length === 1 ? `${m}0` : m;
+    return `${String(h).padStart(2, '0')}:${mPadded}`;
   }
 
-  // Two digit hour with colon: e.g. "18:5" -> "18:05"
+  // Two digit hour with colon: e.g. "18:5" -> "18:50", "19:0" -> "19:00"
   if (/^\d{2}:\d{1}$/.test(token)) {
     const [h, m] = token.split(':');
-    return `${h}:${String(m).padStart(2, '0')}`;
+    return `${h}:${m}0`;
   }
 
-  // Pure digits: 3 digits (e.g. 901 -> 09:01, 830 -> 08:30, 910 -> 09:10)
-  if (/^\d{3}$/.test(token)) {
-    const h = token.slice(0, 1);
-    const m = token.slice(1, 3);
-    const mNum = parseInt(m, 10);
-    if (mNum < 60) {
-      return `0${h}:${m}`;
-    }
-  }
-
-  // Pure digits: 4 digits (e.g. 0901 -> 09:01, 1838 -> 18:38, 1830 -> 18:30)
+  // Pure digits: 4 digits (e.g. 0901 -> 09:01, 1838 -> 18:38, 1900 -> 19:00)
   if (/^\d{4}$/.test(token)) {
     const h = token.slice(0, 2);
     const m = token.slice(2, 4);
@@ -104,7 +95,24 @@ export function normalizeSingleTimeToken(token) {
     }
   }
 
-  // Pure digits: 1 or 2 digits (e.g. 9 -> 09:00, 18 -> 18:00)
+  // Pure digits: 3 digits (e.g. 190 -> 19:00, 183 -> 18:30, 901 -> 09:01, 830 -> 08:30)
+  if (/^\d{3}$/.test(token)) {
+    const h2 = parseInt(token.slice(0, 2), 10);
+    if (h2 >= 10 && h2 < 24) {
+      const m2 = `${token.slice(2)}0`;
+      if (parseInt(m2, 10) < 60) {
+        return `${h2}:${m2}`;
+      }
+    }
+    const h1 = token.slice(0, 1);
+    const m1 = token.slice(1, 3);
+    const m1Num = parseInt(m1, 10);
+    if (m1Num < 60) {
+      return `0${h1}:${m1}`;
+    }
+  }
+
+  // Pure digits: 1 or 2 digits (e.g. 9 -> 09:00, 19 -> 19:00, 18 -> 18:00)
   if (/^\d{1,2}$/.test(token)) {
     const hNum = parseInt(token, 10);
     if (hNum >= 0 && hNum < 24) {
