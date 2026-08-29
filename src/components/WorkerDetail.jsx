@@ -16,7 +16,11 @@ import {
   ChevronRight,
   Coffee,
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  X,
+  Save,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 
