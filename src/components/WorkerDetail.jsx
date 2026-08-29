@@ -270,10 +270,10 @@ export default function WorkerDetail({
         {/* Center/Right: Large Quick Search Switcher Dropdown & Action Buttons */}
         <div className="flex items-center space-x-2.5 flex-wrap gap-y-2 justify-between lg:justify-end flex-1">
           
-          {/* Large, Prominent Worker Search Bar */}
+          {/* Large, Prominent & Spacious Worker Search Bar */}
           {onSelectWorker && workers.length > 0 && (
-            <div className="relative flex-1 sm:w-80 md:w-96 lg:w-[480px]">
-              <Search className="w-4 h-4 text-cyan-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <div className="relative flex-1 sm:w-[450px] md:w-[560px] lg:w-[680px]">
+              <Search className="w-5 h-5 text-cyan-400 absolute left-4 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Search Worker by Name, ID (#341), Dept..."
@@ -283,14 +283,14 @@ export default function WorkerDetail({
                   setShowSearchDropdown(true);
                 }}
                 onFocus={() => setShowSearchDropdown(true)}
-                className="w-full bg-slate-950 border-2 border-slate-700 hover:border-cyan-500/60 focus:border-cyan-400 rounded-xl pl-10 pr-8 py-2 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-medium"
+                className="w-full bg-slate-950/95 border-2 border-slate-600 hover:border-cyan-500/60 focus:border-cyan-400 rounded-2xl pl-12 pr-10 py-3 text-sm sm:text-base text-white placeholder-slate-400 focus:outline-none transition-all shadow-xl shadow-cyan-950/20 font-bold focus:ring-4 focus:ring-cyan-500/20"
               />
               {workerSearchTerm && (
                 <button
                   onClick={() => { setWorkerSearchTerm(''); setShowSearchDropdown(false); }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               )}
 
