@@ -535,17 +535,20 @@ function computeDailyAttendance(
 
       otHours = computedOtHours;
       status = 'Present (Full)';
-    } else if (finalEffectiveMins > 0) {
+    } else if (finalEffectiveMins >= (shortThreshold * 60)) {
       let rawWorkedMins = finalEffectiveMins;
       let workedH = otRounding === '30min_block'
         ? Math.floor(rawWorkedMins / 30) * 0.5
         : +(rawWorkedMins / 60).toFixed(2);
 
-      // Core Rule: Any duty < 8 hours is credited entirely as Overtime (OT), with 0 regular hours and Absent (OT Credited) status.
+      // Core Rule: Duty >= 4 hours but < 8 hours is credited as Overtime (OT), with 0 regular hours and Absent (OT Credited) status.
       otHours = workedH;
       regularHours = 0;
       status = 'Absent (OT Credited)';
     } else {
+      // Worked < 4 hours (e.g. 45 mins): 0 OT, 0 Regular Hours, Strictly ABSENT!
+      otHours = 0;
+      regularHours = 0;
       status = 'Absent';
     }
   }
