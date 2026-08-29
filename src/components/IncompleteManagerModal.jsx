@@ -12,8 +12,17 @@ import {
   Square,
   ArrowRight,
   ShieldCheck,
-  RefreshCw
+  RefreshCw,
+  Check,
+  CornerDownLeft
 } from 'lucide-react';
+import { normalizeTimeInput, normalizeSingleTimeToken } from '../utils/formatters';
+
+function parseMins(timeStr) {
+  if (!timeStr) return 0;
+  const parts = String(timeStr).split(':');
+  return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+}
 
 export default function IncompleteManagerModal({ 
   isOpen, 
@@ -25,10 +34,12 @@ export default function IncompleteManagerModal({
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingRows, setSavingRows] = useState({}); // key -> boolean
+  const [savedRows, setSavedRows] = useState({});   // key -> boolean
   const [records, setRecords] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [rowEdits, setRowEdits] = useState({}); // key: `${staff_no}_${date}` -> { raw_swipes, status }
+  const [rowEdits, setRowEdits] = useState({});     // key: `${staff_no}_${date}` -> { raw_swipes, status, missing_input }
   const [globalSuccessMsg, setGlobalSuccessMsg] = useState('');
 
   // Fetch incomplete records from server
@@ -37,14 +48,16 @@ export default function IncompleteManagerModal({
     try {
       const res = await fetch('/api/attendance/incomplete').then(r => r.json());
       if (res.success) {
-        setRecords(res.incompleteRecords || []);
+        const incRecords = res.incompleteRecords || [];
+        setRecords(incRecords);
         // Initialize editable state
         const initialEdits = {};
-        (res.incompleteRecords || []).forEach(r => {
+        incRecords.forEach(r => {
           const key = `${r.staff_no}_${r.date}`;
           initialEdits[key] = {
             raw_swipes: r.raw_swipes || '',
-            status: r.status || 'Present (Full)'
+            status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
+            missing_input: ''
           };
         });
         setRowEdits(initialEdits);
@@ -103,34 +116,108 @@ export default function IncompleteManagerModal({
     }));
   };
 
-  // Append a closing punch timestamp to an existing swipe string
-  const handleQuickAppend = (key, currentSwipes, closingPunch, newStatus = 'Present (Full)') => {
-    const trimmed = (currentSwipes || '').trim();
-    let updated = '';
-    if (!trimmed) {
-      updated = `08:00 ${closingPunch}`;
-    } else {
-      updated = `${trimmed} ${closingPunch}`;
+  // Helper to extract clean single punch
+  const getSinglePunchInfo = (record) => {
+    const raw = (record.raw_swipes || '').trim();
+    const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
+    if (punches.length === 1) {
+      const punch = punches[0];
+      const mins = parseMins(punch);
+      // > 12:30 PM (750 mins) -> Afternoon/Evening OUT punch -> Missing IN in morning!
+      const isMissingIn = mins > 750;
+      return { hasSingle: true, punch, isMissingIn };
     }
+    return { hasSingle: false, punch: '', isMissingIn: false };
+  };
+
+  // Apply quick punch (Prepend if Missing IN, Append if Missing OUT)
+  const handleQuickFill = (key, record, punchTime) => {
+    const normPunch = normalizeSingleTimeToken(punchTime);
+    const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(record);
+
+    let updatedSwipes = '';
+    if (hasSingle) {
+      if (isMissingIn) {
+        // Prepend morning IN before evening punch (e.g. "08:00 18:38")
+        updatedSwipes = `${normPunch} ${punch}`;
+      } else {
+        // Append evening OUT after morning punch (e.g. "08:00 18:30")
+        updatedSwipes = `${punch} ${normPunch}`;
+      }
+    } else {
+      const current = (rowEdits[key]?.raw_swipes || record.raw_swipes || '').trim();
+      updatedSwipes = current ? `${current} ${normPunch}` : `08:00 ${normPunch}`;
+    }
+
     setRowEdits(prev => ({
       ...prev,
       [key]: {
-        raw_swipes: updated,
-        status: newStatus
+        ...prev[key],
+        raw_swipes: updatedSwipes,
+        status: 'Present (Full)'
       }
     }));
   };
 
-  const handleBatchAppend = (closingPunch, newStatus = 'Present (Full)') => {
+  // Apply typed missing time (supports short formats: 901 -> 09:01, 1838 -> 18:38)
+  const handleApplyMissingInput = (key, record) => {
+    const edit = rowEdits[key];
+    const inputVal = (edit?.missing_input || '').trim();
+    if (!inputVal) return;
+
+    const normInput = normalizeTimeInput(inputVal);
+    const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(record);
+
+    let updatedSwipes = '';
+    if (hasSingle) {
+      if (isMissingIn) {
+        updatedSwipes = `${normInput} ${punch}`;
+      } else {
+        updatedSwipes = `${punch} ${normInput}`;
+      }
+    } else {
+      updatedSwipes = normInput;
+    }
+
+    setRowEdits(prev => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        raw_swipes: updatedSwipes,
+        missing_input: '',
+        status: 'Present (Full)'
+      }
+    }));
+  };
+
+  // Batch actions
+  const handleBatchFill = (punchTime) => {
     if (selectedIds.size === 0) return;
+    const normPunch = normalizeSingleTimeToken(punchTime);
+
     setRowEdits(prev => {
       const next = { ...prev };
       selectedIds.forEach(key => {
-        const cur = next[key]?.raw_swipes || '';
-        const trimmed = cur.trim();
+        const record = records.find(r => `${r.staff_no}_${r.date}` === key);
+        if (!record) return;
+        const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(record);
+
+        let updatedSwipes = '';
+        if (hasSingle) {
+          if (isMissingIn) {
+            updatedSwipes = `${normPunch} ${punch}`;
+          } else {
+            updatedSwipes = `${punch} ${normPunch}`;
+          }
+        } else {
+          const cur = (next[key]?.raw_swipes || record.raw_swipes || '').trim();
+          updatedSwipes = cur ? `${cur} ${normPunch}` : `08:00 ${normPunch}`;
+        }
+
         next[key] = {
-          raw_swipes: trimmed ? `${trimmed} ${closingPunch}` : `08:00 ${closingPunch}`,
-          status: newStatus
+          ...next[key],
+          raw_swipes: updatedSwipes,
+          status: 'Present (Full)'
         };
       });
       return next;
@@ -143,6 +230,7 @@ export default function IncompleteManagerModal({
       const next = { ...prev };
       selectedIds.forEach(key => {
         next[key] = {
+          ...next[key],
           raw_swipes: next[key]?.raw_swipes || '',
           status: 'Absent'
         };
@@ -151,7 +239,51 @@ export default function IncompleteManagerModal({
     });
   };
 
-  // Submit all modified records
+  // INLINE SAVE A SINGLE ROW
+  const handleSaveSingleRow = async (record) => {
+    const key = `${record.staff_no}_${record.date}`;
+    const edit = rowEdits[key];
+    if (!edit) return;
+
+    const normSwipes = normalizeTimeInput(edit.raw_swipes);
+
+    setSavingRows(prev => ({ ...prev, [key]: true }));
+
+    try {
+      const res = await fetch('/api/attendance/bulk-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          updates: [{
+            staff_no: record.staff_no,
+            date: record.date,
+            raw_swipes: normSwipes,
+            status: edit.status || 'Present (Full)',
+            reason: 'Fast-Fix Center Individual Save'
+          }],
+          reason: 'Individual Fast-Fix Resolution',
+          edited_by: 'Admin Fast-Fix'
+        })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setSavedRows(prev => ({ ...prev, [key]: true }));
+        setRowEdits(prev => ({
+          ...prev,
+          [key]: { ...prev[key], raw_swipes: normSwipes }
+        }));
+        if (onRefreshData) onRefreshData();
+      } else {
+        alert('Save error: ' + res.error);
+      }
+    } catch (err) {
+      alert('Save failed: ' + err.message);
+    } finally {
+      setSavingRows(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
+  // SUBMIT ALL MODIFIED RECORDS
   const handleSaveAll = async () => {
     setSaving(true);
     setGlobalSuccessMsg('');
@@ -165,7 +297,7 @@ export default function IncompleteManagerModal({
           updates.push({
             staff_no: r.staff_no,
             date: r.date,
-            raw_swipes: edit.raw_swipes,
+            raw_swipes: normalizeTimeInput(edit.raw_swipes),
             status: edit.status,
             reason: 'Fast-Fix Center Manual Resolution'
           });
@@ -189,10 +321,10 @@ export default function IncompleteManagerModal({
 
       if (res.success) {
         setGlobalSuccessMsg(`🎉 Successfully resolved ${res.updatedCount} record(s)! Worker calculations unlocked.`);
-        await onRefreshData();
+        if (onRefreshData) await onRefreshData();
         setTimeout(() => {
           onClose();
-        }, 1500);
+        }, 1200);
       } else {
         alert('Bulk update error: ' + res.error);
       }
@@ -204,11 +336,11 @@ export default function IncompleteManagerModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
-      <div className="glass-modal w-full max-w-6xl max-h-[92vh] flex flex-col rounded-3xl p-6 shadow-2xl border-2 border-amber-500/50 bg-slate-900 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
+      <div className="glass-modal w-full max-w-7xl max-h-[94vh] flex flex-col rounded-3xl p-5 sm:p-6 shadow-2xl border-2 border-amber-500/50 bg-slate-900 overflow-hidden">
         
         {/* Header Bar */}
-        <div className="flex items-center justify-between border-b-2 border-slate-800 pb-4 mb-4 shrink-0">
+        <div className="flex items-center justify-between border-b-2 border-slate-800 pb-4 mb-3.5 shrink-0">
           <div className="flex items-center space-x-3.5">
             <div className="w-12 h-12 rounded-2xl bg-amber-950 text-amber-300 border-2 border-amber-500 flex items-center justify-center shadow-lg shadow-amber-950/50">
               <Sparkles className="w-6 h-6" />
@@ -219,7 +351,7 @@ export default function IncompleteManagerModal({
                   Incomplete Records Fast-Fix Center
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-300 text-xs font-bold font-mono border border-amber-500">
-                  {records.length} Records Need Resolution
+                  {records.length} Pending Resolution
                 </span>
                 <button
                   onClick={fetchIncomplete}
@@ -232,7 +364,7 @@ export default function IncompleteManagerModal({
                 </button>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Fix missing swipes across workers in one click to automatically unlock their payroll & salary calculations.
+                Smart IN/OUT missing detection • Quick short-typing (e.g. <span className="text-amber-300 font-mono font-bold">901</span> $\rightarrow$ <span className="text-emerald-300 font-mono font-bold">09:01</span>) • Instant row-by-row saving.
               </p>
             </div>
           </div>
@@ -247,32 +379,32 @@ export default function IncompleteManagerModal({
 
         {/* Global Notification Banner */}
         {globalSuccessMsg ? (
-          <div className="bg-emerald-950/80 border-2 border-emerald-500 text-emerald-200 px-4 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2.5 mb-4 animate-in slide-in-from-top-2">
+          <div className="bg-emerald-950/80 border-2 border-emerald-500 text-emerald-200 px-4 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2.5 mb-3.5 animate-in slide-in-from-top-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
             <span>{globalSuccessMsg}</span>
           </div>
         ) : (
           records.length > 0 && (
-            <div className="bg-amber-950/40 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-2xl text-xs flex items-center justify-between mb-4 shrink-0">
+            <div className="bg-amber-950/40 border border-amber-500/40 text-amber-200 px-4 py-2 rounded-2xl text-xs flex items-center justify-between mb-3.5 shrink-0">
               <div className="flex items-center space-x-2">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
-                  <strong>Locked Calculation Notice:</strong> Salary and total duty hours for workers with incomplete entries are kept on hold until all their entries are completed.
+                  <strong>Calculation Notice:</strong> Missing punches put salary on hold. Save each row individually or resolve all at once.
                 </span>
               </div>
               <span className="text-[11px] font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-600">
-                Rule: 4h Morning Exit Auto-Evaluated
+                Short Format: 901 $\rightarrow$ 09:01 | 1838 $\rightarrow$ 18:38
               </span>
             </div>
           )
         )}
 
         {/* Search & Bulk Action Bar */}
-        <div className="bg-slate-950 border-2 border-slate-800 rounded-2xl p-3.5 mb-4 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
+        <div className="bg-slate-950 border-2 border-slate-800 rounded-2xl p-3 mb-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shrink-0">
           <div className="flex items-center space-x-3 w-full md:w-auto">
             <button
               onClick={handleSelectAll}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all"
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition-all cursor-pointer"
             >
               {selectedIds.size === filteredRecords.length && filteredRecords.length > 0 ? (
                 <CheckSquare className="w-4 h-4 text-amber-400" />
@@ -298,33 +430,33 @@ export default function IncompleteManagerModal({
           <div className="flex items-center space-x-2 flex-wrap gap-y-2 w-full md:w-auto justify-end">
             <span className="text-[11px] font-bold text-slate-400 uppercase mr-1">Batch Fill:</span>
             <button
-              onClick={() => handleBatchAppend('16:30')}
+              onClick={() => handleBatchFill('08:00')}
               disabled={selectedIds.size === 0}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-900/60 text-cyan-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all"
-              title="Append 16:30 OUT to selected"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-emerald-900/60 text-emerald-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
+              title="Apply 08:00 to selected (Smart IN/OUT)"
             >
-              + 16:30 OUT
+              + 08:00
             </button>
             <button
-              onClick={() => handleBatchAppend('18:30')}
+              onClick={() => handleBatchFill('16:30')}
               disabled={selectedIds.size === 0}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-900/60 text-amber-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all"
-              title="Append 18:30 OUT to selected"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-900/60 text-cyan-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
+              title="Apply 16:30 to selected"
             >
-              + 18:30 OUT
+              + 16:30
             </button>
             <button
-              onClick={() => handleBatchAppend('19:30')}
+              onClick={() => handleBatchFill('18:30')}
               disabled={selectedIds.size === 0}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-purple-900/60 text-purple-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all"
-              title="Append 19:30 OUT to selected"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-900/60 text-amber-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
+              title="Apply 18:30 to selected"
             >
-              + 19:30 OUT
+              + 18:30
             </button>
             <button
               onClick={handleBatchMarkAbsent}
               disabled={selectedIds.size === 0}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-rose-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-900/60 text-rose-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
               title="Mark selected as Absent"
             >
               Mark Absent
@@ -353,31 +485,41 @@ export default function IncompleteManagerModal({
             <table className="w-full text-left text-xs border-collapse">
               <thead className="sticky top-0 bg-slate-950 z-20 text-slate-200 font-bold uppercase tracking-wider border-b-2 border-slate-700 shadow-md">
                 <tr className="divide-x divide-slate-800">
-                  <th className="py-3 px-3 w-10 text-center bg-slate-950">Sel</th>
+                  <th className="py-3 px-2.5 w-10 text-center bg-slate-950">Sel</th>
                   <th className="py-3 px-3 bg-slate-950">Employee</th>
-                  <th className="py-3 px-3 bg-slate-950">Date & Day</th>
-                  <th className="py-3 px-3 bg-slate-950">Current Missing Swipe</th>
-                  <th className="py-3 px-3 text-center bg-slate-950">Quick Add Action</th>
-                  <th className="py-3 px-3 bg-slate-950">Edited Punch Sequence</th>
-                  <th className="py-3 px-3 bg-slate-950">Target Status</th>
+                  <th className="py-3 px-3 bg-slate-950">Date</th>
+                  <th className="py-3 px-3 bg-slate-950">Detected State</th>
+                  <th className="py-3 px-3 text-center bg-slate-950">Quick One-Click Fix</th>
+                  <th className="py-3 px-3 bg-slate-950">Type Missing Punch</th>
+                  <th className="py-3 px-3 bg-slate-950">Punch Sequence</th>
+                  <th className="py-3 px-2 text-center bg-slate-950 w-24">Save Row</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
                 {filteredRecords.map(r => {
                   const key = `${r.staff_no}_${r.date}`;
                   const isSelected = selectedIds.has(key);
-                  const editData = rowEdits[key] || { raw_swipes: r.raw_swipes || '', status: r.status };
+                  const isRowSaving = savingRows[key];
+                  const isRowSaved = savedRows[key];
+                  const editData = rowEdits[key] || { raw_swipes: r.raw_swipes || '', status: r.status, missing_input: '' };
+                  const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(r);
 
                   return (
                     <tr 
                       key={key} 
-                      className={`hover:bg-slate-800/90 transition-colors divide-x divide-slate-800/80 ${isSelected ? 'bg-amber-950/30' : 'even:bg-slate-950/40 odd:bg-slate-900/60'}`}
+                      className={`hover:bg-slate-800/90 transition-colors divide-x divide-slate-800/80 ${
+                        isRowSaved 
+                          ? 'bg-emerald-950/20 border-l-4 border-l-emerald-500' 
+                          : isSelected 
+                            ? 'bg-amber-950/30' 
+                            : 'even:bg-slate-950/40 odd:bg-slate-900/60'
+                      }`}
                     >
                       {/* Checkbox */}
-                      <td className="py-3 px-3 text-center">
+                      <td className="py-2.5 px-2.5 text-center">
                         <button 
                           onClick={() => handleToggleSelect(key)}
-                          className="text-slate-400 hover:text-amber-400 transition-colors"
+                          className="text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
                         >
                           {isSelected ? (
                             <CheckSquare className="w-4 h-4 text-amber-400" />
@@ -388,95 +530,184 @@ export default function IncompleteManagerModal({
                       </td>
 
                       {/* Employee Info */}
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <div className="flex items-center space-x-2.5">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <div className="flex items-center space-x-2">
                           <span className="w-7 h-7 rounded-lg bg-blue-950 text-cyan-300 border border-blue-600 font-mono font-bold flex items-center justify-center text-[11px]">
                             #{r.staff_no}
                           </span>
                           <div>
-                            <p className="font-bold text-white">{r.staff_name || 'WORKER'}</p>
+                            <p className="font-bold text-white leading-tight">{r.staff_name || 'WORKER'}</p>
                             <p className="text-[10px] text-slate-400">{r.department || 'WORKER'}</p>
                           </div>
                         </div>
                       </td>
 
                       {/* Date & Weekday */}
-                      <td className="py-3 px-3 whitespace-nowrap font-mono font-bold text-slate-200">
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono font-bold text-slate-200 text-[11px]">
                         {r.date} <span className="text-slate-400 font-normal">({r.weekday || ''})</span>
                       </td>
 
-                      {/* Current Punch with Alert */}
-                      <td className="py-3 px-3 font-mono">
-                        {r.punchPairsFormatted ? (
-                          <span className="px-2 py-1 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
-                            {r.punchPairsFormatted}
-                          </span>
+                      {/* Detected Missing State */}
+                      <td className="py-2.5 px-3 font-mono">
+                        {hasSingle ? (
+                          isMissingIn ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="px-2 py-0.5 rounded bg-rose-950/90 text-rose-300 border border-rose-600 text-[11px] font-bold inline-flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                                <span>Missing IN (Morning)</span>
+                              </span>
+                              <span className="text-[10px] text-slate-300">
+                                OUT Punch: <strong className="text-cyan-300 font-bold">{punch}</strong>
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="px-2 py-0.5 rounded bg-amber-950/90 text-amber-300 border border-amber-600 text-[11px] font-bold inline-flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+                                <span>Missing OUT (Evening)</span>
+                              </span>
+                              <span className="text-[10px] text-slate-300">
+                                IN Punch: <strong className="text-emerald-300 font-bold">{punch}</strong>
+                              </span>
+                            </div>
+                          )
                         ) : r.raw_swipes ? (
-                          <span className="px-2 py-1 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
-                            {r.raw_swipes.trim().split(/\s+/).length % 2 !== 0 
-                              ? `${r.raw_swipes} (Missing OUT)` 
-                              : r.raw_swipes}
+                          <span className="px-2 py-0.5 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
+                            {r.raw_swipes} (Odd Punches)
                           </span>
                         ) : (
-                          <span className="px-2 py-1 rounded bg-slate-800 text-slate-400 text-[11px] font-bold inline-block">
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[11px] font-bold inline-block">
                             No Swipes Recorded
                           </span>
                         )}
                       </td>
 
-                      {/* Quick Add Buttons */}
-                      <td className="py-3 px-3 text-center whitespace-nowrap">
-                        <div className="flex items-center justify-center space-x-1.5">
+                      {/* Smart Quick Fix Buttons tailored to Missing IN vs Missing OUT */}
+                      <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center space-x-1">
+                          {hasSingle && isMissingIn ? (
+                            <>
+                              <button
+                                onClick={() => handleQuickFill(key, r, '08:00')}
+                                className="px-2 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-mono font-bold text-[11px] border border-emerald-700 transition-all shadow-sm cursor-pointer"
+                                title="Add 08:00 morning IN punch"
+                              >
+                                + 08:00 IN
+                              </button>
+                              <button
+                                onClick={() => handleQuickFill(key, r, '08:30')}
+                                className="px-2 py-1 rounded-lg bg-teal-950 hover:bg-teal-900 text-teal-300 font-mono font-bold text-[11px] border border-teal-700 transition-all shadow-sm cursor-pointer"
+                                title="Add 08:30 morning IN punch"
+                              >
+                                + 08:30 IN
+                              </button>
+                              <button
+                                onClick={() => handleQuickFill(key, r, '09:00')}
+                                className="px-2 py-1 rounded-lg bg-blue-950 hover:bg-blue-900 text-cyan-300 font-mono font-bold text-[11px] border border-blue-700 transition-all shadow-sm cursor-pointer"
+                                title="Add 09:00 morning IN punch"
+                              >
+                                + 09:00 IN
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleQuickFill(key, r, '16:30')}
+                                className="px-2 py-1 rounded-lg bg-blue-950 hover:bg-blue-900 text-cyan-300 font-mono font-bold text-[11px] border border-blue-700 transition-all shadow-sm cursor-pointer"
+                                title="Add 16:30 OUT punch"
+                              >
+                                + 16:30 OUT
+                              </button>
+                              <button
+                                onClick={() => handleQuickFill(key, r, '18:30')}
+                                className="px-2 py-1 rounded-lg bg-amber-950 hover:bg-amber-900 text-amber-300 font-mono font-bold text-[11px] border border-amber-700 transition-all shadow-sm cursor-pointer"
+                                title="Add 18:30 OUT punch"
+                              >
+                                + 18:30 OUT
+                              </button>
+                              <button
+                                onClick={() => handleQuickFill(key, r, '19:30')}
+                                className="px-2 py-1 rounded-lg bg-purple-950 hover:bg-purple-900 text-purple-300 font-mono font-bold text-[11px] border border-purple-700 transition-all shadow-sm cursor-pointer"
+                                title="Add 19:30 OUT punch"
+                              >
+                                + 19:30 OUT
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Direct Missing Punch Fast-Typing (e.g. 901 -> 09:01) */}
+                      <td className="py-2.5 px-2.5 whitespace-nowrap">
+                        <div className="flex items-center space-x-1">
+                          <input
+                            type="text"
+                            value={editData.missing_input || ''}
+                            onChange={(e) => handleInputChange(key, 'missing_input', e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleApplyMissingInput(key, r);
+                              }
+                            }}
+                            placeholder={hasSingle ? (isMissingIn ? 'e.g. 901 / 830' : 'e.g. 1838 / 1700') : 'e.g. 901'}
+                            className="w-28 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 font-mono text-white text-xs placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          />
                           <button
-                            onClick={() => handleQuickAppend(key, r.raw_swipes, '16:30')}
-                            className="px-2 py-1 rounded-lg bg-blue-950 hover:bg-blue-900 text-cyan-300 font-mono font-bold text-[11px] border border-blue-700 transition-all shadow-sm"
-                            title="Add 16:30 OUT punch"
+                            onClick={() => handleApplyMissingInput(key, r)}
+                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all cursor-pointer"
+                            title="Apply typed time"
                           >
-                            + 16:30
-                          </button>
-                          <button
-                            onClick={() => handleQuickAppend(key, r.raw_swipes, '18:30')}
-                            className="px-2 py-1 rounded-lg bg-amber-950 hover:bg-amber-900 text-amber-300 font-mono font-bold text-[11px] border border-amber-700 transition-all shadow-sm"
-                            title="Add 18:30 OUT punch"
-                          >
-                            + 18:30
-                          </button>
-                          <button
-                            onClick={() => handleQuickAppend(key, r.raw_swipes, '19:30')}
-                            className="px-2 py-1 rounded-lg bg-purple-950 hover:bg-purple-900 text-purple-300 font-mono font-bold text-[11px] border border-purple-700 transition-all shadow-sm"
-                            title="Add 19:30 OUT punch"
-                          >
-                            + 19:30
+                            <CornerDownLeft className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </td>
 
                       {/* Editable Swipes Input */}
-                      <td className="py-3 px-3">
+                      <td className="py-2.5 px-3">
                         <input
                           type="text"
                           value={editData.raw_swipes}
                           onChange={(e) => handleInputChange(key, 'raw_swipes', e.target.value)}
-                          placeholder="e.g. 08:00 09:00 15:00 19:30"
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 font-mono text-white text-xs placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                          onBlur={() => {
+                            if (editData.raw_swipes) {
+                              const norm = normalizeTimeInput(editData.raw_swipes);
+                              handleInputChange(key, 'raw_swipes', norm);
+                            }
+                          }}
+                          placeholder="e.g. 08:00 18:38"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 font-mono text-white text-xs placeholder-slate-600 focus:outline-none focus:border-amber-500 font-bold"
                         />
                       </td>
 
-                      {/* Target Status Select */}
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <select
-                          value={editData.status}
-                          onChange={(e) => handleInputChange(key, 'status', e.target.value)}
-                          className="bg-slate-900 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-amber-500"
+                      {/* INLINE ROW SAVE BUTTON */}
+                      <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                        <button
+                          onClick={() => handleSaveSingleRow(r)}
+                          disabled={isRowSaving}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center space-x-1 w-full cursor-pointer ${
+                            isRowSaved 
+                              ? 'bg-emerald-700 text-white border border-emerald-400' 
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400'
+                          }`}
+                          title="Save this single row immediately"
                         >
-                          <option value="Present (Full)">Present (Full Day)</option>
-                          <option value="Present (Short)">Present (Short Hours)</option>
-                          <option value="Absent">Absent</option>
-                          <option value="Weekly Off (Paid)">Weekly Off (Paid)</option>
-                          <option value="Weekly Off (Forfeited)">Weekly Off (Forfeited)</option>
-                          <option value="Incomplete">Keep Incomplete</option>
-                        </select>
+                          {isRowSaving ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : isRowSaved ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-white" />
+                              <span>Saved</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-3.5 h-3.5" />
+                              <span>Save</span>
+                            </>
+                          )}
+                        </button>
                       </td>
+
                     </tr>
                   );
                 })}
@@ -486,7 +717,7 @@ export default function IncompleteManagerModal({
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between border-t-2 border-slate-800 pt-4 mt-4 shrink-0">
+        <div className="flex items-center justify-between border-t-2 border-slate-800 pt-3.5 mt-3.5 shrink-0">
           <div className="text-xs text-slate-400 font-medium">
             Showing <strong className="text-white">{filteredRecords.length}</strong> incomplete records 
             {selectedIds.size > 0 && <span> • <strong className="text-amber-400">{selectedIds.size}</strong> selected for batch action</span>}
@@ -496,9 +727,9 @@ export default function IncompleteManagerModal({
             <button
               onClick={onClose}
               disabled={saving}
-              className="px-4 py-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all"
+              className="px-4 py-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all cursor-pointer"
             >
-              Cancel
+              Close
             </button>
 
             <button

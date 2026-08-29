@@ -395,6 +395,8 @@ export default function App() {
           <WorkerDetail
             staffNo={selectedStaffNo}
             workerData={selectedWorkerData}
+            workers={workers}
+            onSelectWorker={handleSelectWorker}
             onBack={() => setActiveTab('workers')}
             onEditRecord={(rec) => setEditingRecord(rec)}
             onAddAdvance={(staffNo) => setAdvanceStaffNo(staffNo)}

@@ -3,6 +3,7 @@
  * @param {Object} params 
  */
 function calculateWorkerPayroll({
+  staffNo = '',
   monthlySalary = 15000,
   housingAllowance = 0,
   foodAllowance = 0,
@@ -119,6 +120,9 @@ function calculateWorkerPayroll({
   if (Array.isArray(salaryRules)) {
     salaryRules.forEach(rule => {
       if (!rule || !rule.is_active) return;
+      if (rule.target_staff_no && rule.target_staff_no !== 'all' && staffNo && String(rule.target_staff_no).trim() !== String(staffNo).trim()) {
+        return; // Rule specifically targets another worker
+      }
 
       let ruleApplies = false;
       const condValue = parseFloat(rule.condition_value) || 0;
@@ -210,6 +214,8 @@ function calculateWorkerPayroll({
   const totalAdvances = advances.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
   const netPayable = Math.max(0, +(grossSalary - totalAdvances).toFixed(2));
 
+  const sundayAndHolidayWorkedDays = (sundayWorkedDays || 0) + (holidayWorkedDays || 0);
+
   return {
     monthlySalary,
     housingAllowance: hAllowance,
@@ -229,6 +235,7 @@ function calculateWorkerPayroll({
     sundayWorkedDays,
     paidHolidays,
     holidayWorkedDays,
+    sundayAndHolidayWorkedDays,
     forfeitedHolidays,
     absentDays,
     incompleteDays,

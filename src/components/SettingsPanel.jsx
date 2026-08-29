@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Settings as SettingsIcon, 
-  Save, 
-  RefreshCw, 
-  CheckCircle, 
-  Info, 
-  Sliders, 
-  Clock, 
-  ShieldCheck, 
-  Calculator, 
-  Plus, 
-  Sparkles, 
-  Trash2, 
+import {
+  Settings as SettingsIcon,
+  Save,
+  RefreshCw,
+  CheckCircle,
+  Info,
+  Sliders,
+  Clock,
+  ShieldCheck,
+  Calculator,
+  Plus,
+  Sparkles,
+  Trash2,
   Calendar,
-  CheckCircle2, 
+  CheckCircle2,
   Zap,
   ToggleLeft,
   ToggleRight,
@@ -33,11 +33,11 @@ import {
   Unlock
 } from 'lucide-react';
 
-export default function SettingsPanel({ 
-  settingsList = [], 
-  onSaveSettings, 
+export default function SettingsPanel({
+  settingsList = [],
+  onSaveSettings,
   onSettingsUpdated,
-  loading 
+  loading
 }) {
   const [form, setForm] = useState({
     shift_start: '08:00',
@@ -62,9 +62,9 @@ export default function SettingsPanel({
   const [showCreateProfileModal, setShowCreateProfileModal] = useState(false);
   const [showCreateRuleModal, setShowCreateRuleModal] = useState(false);
   const [showCreateSalaryRuleModal, setShowCreateSalaryRuleModal] = useState(false);
-  
+
   const [newProfileName, setNewProfileName] = useState('');
-  
+
   // Custom Rule Form State (timing-based)
   const [ruleName, setRuleName] = useState('');
   const [ruleType, setRuleType] = useState('midday_exit');
@@ -472,7 +472,7 @@ export default function SettingsPanel({
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-300">
-      
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
@@ -993,13 +993,12 @@ export default function SettingsPanel({
           {ruleProfiles.map((prof) => {
             const isActive = prof.is_default === 1;
             return (
-              <div 
-                key={prof.id} 
-                className={`p-4 rounded-xl border transition-all ${
-                  isActive 
-                    ? 'bg-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/5' 
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-                }`}
+              <div
+                key={prof.id}
+                className={`p-4 rounded-xl border transition-all ${isActive
+                  ? 'bg-emerald-500/10 border-emerald-500/40 shadow-lg shadow-emerald-500/5'
+                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                  }`}
               >
                 <div className="flex items-start justify-between">
                   <div>
@@ -1093,7 +1092,7 @@ export default function SettingsPanel({
 
       {/* Baseline Settings Form */}
       <form onSubmit={handleSubmitSettings} className="space-y-6">
-        
+
         {/* Section 1: Shift & Late Grace Slab Rules */}
         <div className="glass-card rounded-2xl p-6 border border-slate-800 space-y-4">
           <h3 className="text-sm font-bold text-white font-display uppercase tracking-wider text-indigo-400 flex items-center gap-2">

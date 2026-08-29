@@ -155,6 +155,8 @@ app.post('/api/custom-rules', async (req, res) => {
     const {
       rule_name,
       rule_type,
+      target_staff_no = 'all',
+      exemption_type = '',
       start_time = '',
       end_time = '',
       threshold_mins = 0,
@@ -167,11 +169,13 @@ app.post('/api/custom-rules', async (req, res) => {
     }
 
     await execute(
-      `INSERT INTO custom_rules (rule_name, rule_type, start_time, end_time, threshold_mins, deduction_mins, deduction_amount, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO custom_rules (rule_name, rule_type, target_staff_no, exemption_type, start_time, end_time, threshold_mins, deduction_mins, deduction_amount, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         rule_name,
         rule_type,
+        target_staff_no || 'all',
+        exemption_type || '',
         start_time,
         end_time,
         parseInt(threshold_mins, 10) || 0,
@@ -708,10 +712,12 @@ async function recomputeAllAttendance() {
       recordsByMonth.get(mKey).push(r);
     });
 
+    const workerCustomRules = (customRules || []).filter(r => !r.target_staff_no || r.target_staff_no === 'all' || String(r.target_staff_no).trim() === String(w.staff_no).trim());
+
     let allRecomputedRecords = [];
     for (const [mKey, mRecords] of recordsByMonth.entries()) {
-      let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, customRules, paidHolidaysMap);
-      mComputed = applyWeeklyOffForfeiture(mComputed, workerSettings);
+      let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, workerCustomRules, paidHolidaysMap);
+      mComputed = applyWeeklyOffForfeiture(mComputed, workerSettings, workerCustomRules);
       mComputed = applyPaidHolidayForfeiture(mComputed, workerSettings);
       allRecomputedRecords.push(...mComputed);
     }
@@ -909,6 +915,7 @@ app.get('/api/workers', async (req, res) => {
       const advances = advancesMap.get(w.staff_no) || [];
 
       const payroll = calculateWorkerPayroll({
+        staffNo: w.staff_no,
         monthlySalary: w.monthly_salary,
         housingAllowance: w.housing_allowance,
         foodAllowance: w.food_allowance,
@@ -961,6 +968,7 @@ app.get('/api/workers/:staff_no', async (req, res) => {
 
     const salaryRules = await getSalaryRules();
     const payroll = calculateWorkerPayroll({
+      staffNo: worker.staff_no,
       monthlySalary: worker.monthly_salary,
       housingAllowance: worker.housing_allowance,
       foodAllowance: worker.food_allowance,
@@ -1216,7 +1224,22 @@ app.get('/api/attendance/incomplete', async (req, res) => {
         continue;
       }
 
-      trueIncomplete.push(r);
+      // Annotate smart detection: is single punch an evening punch (Missing IN) or morning punch (Missing OUT)?
+      let missingType = 'OUT';
+      let existingPunch = '';
+      if (cleaned.length === 1) {
+        existingPunch = cleaned[0];
+        const punchMins = timeToMins(existingPunch);
+        // If single punch is after 12:30 PM (e.g. 13:00, 16:30, 18:38) -> Worker forgot IN punch in morning!
+        missingType = punchMins > 12 * 60 + 30 ? 'IN' : 'OUT';
+      }
+
+      trueIncomplete.push({
+        ...r,
+        missing_type: missingType,
+        existing_punch: existingPunch,
+        cleaned_punches: cleaned
+      });
     }
 
     res.json({ success: true, incompleteRecords: trueIncomplete });
@@ -1682,7 +1705,7 @@ app.get('/api/export/excel', async (req, res) => {
     });
 
     const summaryRows = [
-      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Paid Holidays 🇮🇳', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday/Holiday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours']
+      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Paid Holidays 🇮🇳', 'Sunday/Holiday Worked Days ☕ (Tea/Food Exp)', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday/Holiday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours']
     ];
 
     const dailyRows = [
@@ -1694,6 +1717,7 @@ app.get('/api/export/excel', async (req, res) => {
       const advances = advancesMap.get(w.staff_no) || [];
 
       const p = calculateWorkerPayroll({
+        staffNo: w.staff_no,
         monthlySalary: w.monthly_salary,
         dailyRecords,
         advances,
@@ -1710,6 +1734,7 @@ app.get('/api/export/excel', async (req, res) => {
         p.fullPresentDays || 0,
         p.paidWeeklyOffs || 0,
         p.paidHolidays || 0,
+        p.sundayAndHolidayWorkedDays || 0,
         p.absentDays || 0,
         p.payableDays || 0,
         regHours,
@@ -1796,7 +1821,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
     const result = await execute(query, params);
 
     const dailyRows = [
-      ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Minutes', 'Attendance Status']
+      ['Staff No', 'Employee Name', 'Department', 'Date', 'Day', 'Raw Punches', 'Punch Pairs (IN ➔ OUT)', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Minutes', 'Attendance Status', 'Punch Type']
     ];
 
     result.rows.forEach(r => {
@@ -1821,6 +1846,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
         r.total_hours || 0,
         r.late_minutes || 0,
         r.status || 'Absent',
+        r.is_manual_override === 1 ? 'Manual Edit / Correction' : 'Biometric Auto',
       ]);
     });
 
@@ -1884,17 +1910,19 @@ app.get('/api/export/excel/summary', async (req, res) => {
     });
 
     const summaryRows = [
-      ['WORKER ID', 'WORKER NAME', 'PAYABLE DAYS', 'ABSENT DAYS', 'OVERTIME (HOURS)']
+      ['WORKER ID', 'WORKER NAME', 'PAYABLE DAYS', 'ABSENT DAYS', 'SUN/HOL WORKED (DAYS)', 'OVERTIME (HOURS)']
     ];
 
     let totalPayableSum = 0;
     let totalAbsentSum = 0;
+    let totalSunHolSum = 0;
     let totalOtSum = 0;
 
     for (const w of workersRes.rows) {
       const dailyRecords = attendanceMap.get(w.staff_no) || [];
 
       const p = calculateWorkerPayroll({
+        staffNo: w.staff_no,
         monthlySalary: w.monthly_salary,
         dailyRecords,
         advances: [],
@@ -1904,9 +1932,11 @@ app.get('/api/export/excel/summary', async (req, res) => {
       const workerTotalOt = +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2);
       const payable = p.payableDays || 0;
       const absent = p.absentDays || 0;
+      const sunHolWorked = p.sundayAndHolidayWorkedDays || 0;
 
       totalPayableSum += payable;
       totalAbsentSum += absent;
+      totalSunHolSum += sunHolWorked;
       totalOtSum += workerTotalOt;
 
       summaryRows.push([
@@ -1914,6 +1944,7 @@ app.get('/api/export/excel/summary', async (req, res) => {
         w.staff_name,
         payable,
         absent,
+        sunHolWorked,
         workerTotalOt,
       ]);
     }
@@ -1924,6 +1955,7 @@ app.get('/api/export/excel/summary', async (req, res) => {
       `${workersRes.rows.length} Workers`,
       totalPayableSum,
       totalAbsentSum,
+      totalSunHolSum,
       +totalOtSum.toFixed(2),
     ]);
 
@@ -2053,6 +2085,7 @@ app.post('/api/salary-rules', async (req, res) => {
     const {
       rule_name,
       rule_type = 'bonus',
+      target_staff_no = 'all',
       condition_type = 'always',
       condition_value = '0',
       action_type = 'add_fixed',
@@ -2068,11 +2101,12 @@ app.post('/api/salary-rules', async (req, res) => {
     }
 
     await execute(
-      `INSERT INTO custom_salary_rules (rule_name, rule_type, condition_type, condition_value, action_type, action_value, applies_to_day, description, source, ai_original_prompt, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO custom_salary_rules (rule_name, rule_type, target_staff_no, condition_type, condition_value, action_type, action_value, applies_to_day, description, source, ai_original_prompt, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         rule_name,
         rule_type,
+        target_staff_no || 'all',
         condition_type,
         String(condition_value),
         action_type,

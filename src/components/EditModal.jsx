@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Edit3, CheckCircle, X, AlertTriangle } from 'lucide-react';
+import { normalizeTimeInput } from '../utils/formatters';
 
 export default function EditModal({ record, staffNo, onSave, onCancel, loading }) {
   if (!record) return null;
@@ -16,10 +17,12 @@ export default function EditModal({ record, staffNo, onSave, onCancel, loading }
       return;
     }
 
+    const normSwipes = normalizeTimeInput(rawSwipes);
+
     onSave({
       staff_no: staffNo,
       date: record.date,
-      raw_swipes: rawSwipes,
+      raw_swipes: normSwipes,
       status,
       reason,
       edited_by: 'HR Admin',

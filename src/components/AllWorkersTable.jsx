@@ -80,16 +80,18 @@ export default function AllWorkersTable({
   };
 
   // Export to Excel (Full or Timings)
-  // Export Concise 5-Column Summary (Worker ID, Name, Payable Days, Absents, Overtime)
+  // Export Concise 6-Column Summary (Worker ID, Name, Payable Days, Absents, Sun/Hol Worked, Overtime)
   const exportConciseExcel = () => {
     const exportData = filteredWorkers.map(w => {
       const p = w.payroll || {};
       const totalOt = +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2);
+      const sunHolWorked = p.sundayAndHolidayWorkedDays !== undefined ? p.sundayAndHolidayWorkedDays : ((p.sundayWorkedDays || 0) + (p.holidayWorkedDays || 0));
       return {
         'Worker ID': w.staff_no,
         'Worker Name': w.staff_name,
         'Payable Days': p.payableDays || 0,
         'Absent Days': p.absentDays || 0,
+        'Sun/Hol Worked (Days)': sunHolWorked,
         'Overtime (Hours)': totalOt,
       };
     });
@@ -101,6 +103,7 @@ export default function AllWorkersTable({
       { wch: 18 },
       { wch: 16 },
       { wch: 22 },
+      { wch: 22 },
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Executive Summary');
@@ -109,6 +112,10 @@ export default function AllWorkersTable({
 
   const exportToExcel = () => {
     const exportData = filteredWorkers.map(w => {
+      const sunHolWorked = w.payroll?.sundayAndHolidayWorkedDays !== undefined 
+        ? w.payroll.sundayAndHolidayWorkedDays 
+        : ((w.payroll?.sundayWorkedDays || 0) + (w.payroll?.holidayWorkedDays || 0));
+
       const row = {
         'Staff No.': w.staff_no,
         'Staff Name': w.staff_name,
@@ -117,10 +124,13 @@ export default function AllWorkersTable({
         'Full Present Days': w.payroll?.fullPresentDays || 0,
         'Short Days': w.payroll?.shortDays || 0,
         'Paid Weekly Offs': w.payroll?.paidWeeklyOffs || 0,
+        'Paid Holidays': w.payroll?.paidHolidays || 0,
+        'Sunday & Holiday Worked Days (Tea/Food Allowance)': sunHolWorked,
         'Sunday Worked Days': w.payroll?.sundayWorkedDays || 0,
         'Absent Days': w.payroll?.absentDays || 0,
         'Weekday OT Hours': w.payroll?.totalOtHours || 0,
         'Sunday OT Hours': w.payroll?.totalSundayOtHours || 0,
+        'Total OT Hours': +((w.payroll?.totalOtHours || 0) + (w.payroll?.totalSundayOtHours || 0)).toFixed(2),
       };
 
       if (isPayrollUnlocked) {
@@ -151,13 +161,14 @@ export default function AllWorkersTable({
     doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
 
     const tableColumn = isPayrollUnlocked
-      ? ['Staff No', 'Name', 'Base Sal', 'Pay Days', 'Absent', 'Wk OT', 'Sun OT', 'Gross', 'Advances', 'Net Pay']
-      : ['Staff No', 'Name', 'Department', 'Payable Days', 'Present Days', 'Absent Days', 'Wkday OT', 'Sunday OT', 'Total OT'];
+      ? ['Staff No', 'Name', 'Base Sal', 'Pay Days', 'Absent', 'Sun/Hol Work ☕', 'Wk OT', 'Sun OT', 'Gross', 'Advances', 'Net Pay']
+      : ['Staff No', 'Name', 'Department', 'Payable Days', 'Present Days', 'Absent Days', 'Sun/Hol Work ☕', 'Wkday OT', 'Sunday OT', 'Total OT'];
 
     const tableRows = [];
 
     filteredWorkers.forEach(w => {
       const p = w.payroll || {};
+      const sunHolWorked = p.sundayAndHolidayWorkedDays !== undefined ? p.sundayAndHolidayWorkedDays : ((p.sundayWorkedDays || 0) + (p.holidayWorkedDays || 0));
       if (isPayrollUnlocked) {
         tableRows.push([
           w.staff_no,
@@ -165,6 +176,7 @@ export default function AllWorkersTable({
           `Rs. ${w.monthly_salary || 15000}`,
           p.payableDays || 0,
           p.absentDays || 0,
+          `${sunHolWorked} d`,
           `${p.totalOtHours || 0}h`,
           `${p.totalSundayOtHours || 0}h`,
           `Rs. ${p.grossSalary || 0}`,
@@ -180,6 +192,7 @@ export default function AllWorkersTable({
           `${p.payableDays || 0} d`,
           `${p.fullPresentDays || 0} d`,
           `${p.absentDays || 0} d`,
+          `${sunHolWorked} d`,
           formatHours(p.totalOtHours || 0),
           formatHours(p.totalSundayOtHours || 0),
           formatHours(totalOtSum),
@@ -202,7 +215,7 @@ export default function AllWorkersTable({
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
       
-      {/* Top Header & Perfectly Aligned Action Bar */}
+      {/* Top Header & Prominent Action Bar */}
       <div className="glass-card rounded-2xl p-5 sm:p-6 border-2 border-slate-700 bg-slate-900 shadow-md flex flex-col xl:flex-row xl:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-white font-display flex items-center gap-3">
@@ -213,22 +226,33 @@ export default function AllWorkersTable({
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 mt-0.5 font-medium">
             {isPayrollUnlocked 
-              ? 'Complete list of workers, duty hours, payable days, overtime pay, and net salary'
-              : 'Complete list of workers, duty hours, payable days, and overtime breakdown'}
+              ? 'Complete list of workers, duty hours, payable days, Sunday/Holiday tea allowance, overtime pay, and net salary'
+              : 'Complete list of workers, duty hours, payable days, Sunday/Holiday duty, and overtime breakdown'}
           </p>
         </div>
 
-        {/* Action Buttons & Search Input */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-grow sm:flex-grow-0">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+        {/* Action Buttons & Enlarged Prominent Search Input */}
+        <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-between xl:justify-end">
+          
+          {/* BIGGER, PROMINENT SEARCH BAR */}
+          <div className="relative flex-1 sm:w-80 lg:w-96 min-w-[240px]">
+            <Search className="w-4 h-4 text-blue-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search Name / Staff No..."
+              placeholder="Search Worker by Name, ID (#341), Dept..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-slate-950 border-2 border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 w-full sm:w-56 font-medium"
+              className="bg-slate-950 border-2 border-slate-700 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-10 pr-9 py-2 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none w-full font-medium shadow-inner transition-all"
             />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 rounded-full hover:bg-slate-800"
+                title="Clear Search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           {workers.some(w => w.payroll?.hasIncompleteEntries || (w.payroll?.incompleteDays || 0) > 0) ? (
@@ -318,6 +342,7 @@ export default function AllWorkersTable({
                 )}
                 <th className="px-3 py-3.5 text-center whitespace-nowrap bg-slate-950">Payable Days</th>
                 <th className="px-3 py-3.5 text-center whitespace-nowrap bg-slate-950">Absent</th>
+                <th className="px-3 py-3.5 text-center whitespace-nowrap text-amber-300 bg-slate-950" title="Sunday & Paid Holiday Worked Days for Tea/Food Reimbursement">Sun/Hol Work ☕</th>
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-blue-300 bg-slate-950">Wkday OT</th>
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-amber-300 bg-slate-950">Sun OT ☀️</th>
                 <th className="px-3.5 py-3.5 text-center whitespace-nowrap text-cyan-300 bg-slate-950">Total OT 🔥</th>
@@ -334,7 +359,7 @@ export default function AllWorkersTable({
             <tbody className="divide-y divide-slate-800">
               {filteredWorkers.length === 0 ? (
                 <tr>
-                  <td colSpan={isPayrollUnlocked ? 12 : 8} className="text-center py-12 text-slate-400 text-base">
+                  <td colSpan={isPayrollUnlocked ? 13 : 9} className="text-center py-12 text-slate-400 text-base">
                     No worker records found. Upload a punch file to get started.
                   </td>
                 </tr>
@@ -342,6 +367,7 @@ export default function AllWorkersTable({
                 filteredWorkers.map(w => {
                   const p = w.payroll || {};
                   const totalOtSum = (p.totalOtHours || 0) + (p.totalSundayOtHours || 0);
+                  const sunHolWorked = p.sundayAndHolidayWorkedDays !== undefined ? p.sundayAndHolidayWorkedDays : ((p.sundayWorkedDays || 0) + (p.holidayWorkedDays || 0));
 
                   return (
                     <tr 
@@ -362,7 +388,7 @@ export default function AllWorkersTable({
                           {p.hasIncompleteEntries && (
                             <button
                               onClick={() => onOpenIncompleteManager && onOpenIncompleteManager(w.staff_no)}
-                              className="px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500 text-[10px] font-bold font-mono hover:bg-amber-900 transition-all flex items-center gap-1 shadow-sm"
+                              className="px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-500 text-[10px] font-bold font-mono hover:bg-amber-900 transition-all flex items-center gap-1 shadow-sm cursor-pointer"
                               title={`${p.incompleteDays} incomplete day(s) - Click to resolve`}
                             >
                               <span>⚠️ {p.incompleteDays} Incomplete (Locked)</span>
@@ -386,10 +412,10 @@ export default function AllWorkersTable({
                                 className="w-20 bg-slate-950 border-2 border-blue-500 rounded px-1.5 py-0.5 text-xs text-white font-mono"
                                 autoFocus
                               />
-                              <button onClick={() => handleSaveSalary(w.staff_no)} className="p-1 rounded bg-emerald-700 text-white">
+                              <button onClick={() => handleSaveSalary(w.staff_no)} className="p-1 rounded bg-emerald-700 text-white cursor-pointer">
                                 <Check className="w-3.5 h-3.5" />
                               </button>
-                              <button onClick={() => setEditingStaffNo(null)} className="p-1 rounded bg-slate-800 text-slate-300">
+                              <button onClick={() => setEditingStaffNo(null)} className="p-1 rounded bg-slate-800 text-slate-300 cursor-pointer">
                                 <X className="w-3.5 h-3.5" />
                               </button>
                             </div>
@@ -433,6 +459,23 @@ export default function AllWorkersTable({
                         }`}>
                           {p.absentDays || 0}
                         </span>
+                      </td>
+
+                      {/* Sunday & Holiday Worked Days (Tea/Food Allowance) */}
+                      <td className="px-3 py-3 text-center whitespace-nowrap font-mono">
+                        {p.hasIncompleteEntries ? (
+                          <span className="text-amber-400/80 text-xs font-medium">⚠️ Hold</span>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-lg font-bold text-xs inline-block ${
+                            sunHolWorked > 0
+                              ? 'bg-amber-950/80 text-amber-300 border border-amber-600' 
+                              : 'text-slate-500'
+                          }`}
+                          title={`Tea/Food Expense: ${p.sundayWorkedDays || 0} Sundays + ${p.holidayWorkedDays || 0} Paid Holidays`}
+                          >
+                            {sunHolWorked} d
+                          </span>
+                        )}
                       </td>
 
                       {/* Wkday OT */}

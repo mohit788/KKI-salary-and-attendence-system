@@ -49,3 +49,82 @@ export function minsToTimeStr(mins) {
   const m = Math.floor(mins % 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
+
+/**
+ * Normalizes a single time token into valid HH:MM format.
+ * Supports:
+ * - 3 digits: "901" -> "09:01", "830" -> "08:30", "910" -> "09:10"
+ * - 4 digits: "1838" -> "18:38", "0901" -> "09:01", "1830" -> "18:30"
+ * - 1-2 digits: "9" -> "09:00", "18" -> "18:00", "8" -> "08:00"
+ * - Partial colon: "9:1" -> "09:01", "8:5" -> "08:05"
+ * - Standard HH:MM: "09:01", "18:38"
+ * @param {string} token 
+ * @returns {string} Normalized HH:MM or original if invalid
+ */
+export function normalizeSingleTimeToken(token) {
+  if (!token) return '';
+  token = String(token).trim();
+  if (!token) return '';
+
+  // Already standard HH:MM
+  if (/^\d{2}:\d{2}$/.test(token)) {
+    return token;
+  }
+
+  // Single digit hour with colon: e.g. "9:05" -> "09:05", "9:1" -> "09:01"
+  if (/^\d{1}:\d{1,2}$/.test(token)) {
+    const [h, m] = token.split(':');
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  // Two digit hour with colon: e.g. "18:5" -> "18:05"
+  if (/^\d{2}:\d{1}$/.test(token)) {
+    const [h, m] = token.split(':');
+    return `${h}:${String(m).padStart(2, '0')}`;
+  }
+
+  // Pure digits: 3 digits (e.g. 901 -> 09:01, 830 -> 08:30, 910 -> 09:10)
+  if (/^\d{3}$/.test(token)) {
+    const h = token.slice(0, 1);
+    const m = token.slice(1, 3);
+    const mNum = parseInt(m, 10);
+    if (mNum < 60) {
+      return `0${h}:${m}`;
+    }
+  }
+
+  // Pure digits: 4 digits (e.g. 0901 -> 09:01, 1838 -> 18:38, 1830 -> 18:30)
+  if (/^\d{4}$/.test(token)) {
+    const h = token.slice(0, 2);
+    const m = token.slice(2, 4);
+    const hNum = parseInt(h, 10);
+    const mNum = parseInt(m, 10);
+    if (hNum < 24 && mNum < 60) {
+      return `${h}:${m}`;
+    }
+  }
+
+  // Pure digits: 1 or 2 digits (e.g. 9 -> 09:00, 18 -> 18:00)
+  if (/^\d{1,2}$/.test(token)) {
+    const hNum = parseInt(token, 10);
+    if (hNum >= 0 && hNum < 24) {
+      return `${String(hNum).padStart(2, '0')}:00`;
+    }
+  }
+
+  return token;
+}
+
+/**
+ * Normalizes user-entered swipe strings into properly formatted HH:MM tokens.
+ * e.g. "901 1838" -> "09:01 18:38"
+ * e.g. "800 1200 1300 1700" -> "08:00 12:00 13:00 17:00"
+ * @param {string} inputStr 
+ * @returns {string}
+ */
+export function normalizeTimeInput(inputStr) {
+  if (!inputStr) return '';
+  const tokens = String(inputStr).trim().split(/[\s,]+/);
+  return tokens.map(normalizeSingleTimeToken).filter(Boolean).join(' ');
+}
+

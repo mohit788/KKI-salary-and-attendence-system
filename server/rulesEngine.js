@@ -227,9 +227,19 @@ function getEffectiveFirstIn(rawInTime, shiftStart = '08:00', slabMinutes = 30, 
     return { effectiveTime: shiftStart, effectiveMins: shiftMins, lateMins: 0, isLeisureForgiven: false };
   }
 
-  // If 2-minute leisure time is approved/forgiven for this day
+  // If leisure time is approved/forgiven for this day
   if (isLeisureForgiven) {
     return { effectiveTime: shiftStart, effectiveMins: shiftMins, lateMins: 0, isLeisureForgiven: true };
+  }
+
+  // If worker is exempted from slab rounding (exact minute arrival)
+  if (slabMinutes <= 0) {
+    return {
+      effectiveTime: minsToTime(inMins),
+      effectiveMins: inMins,
+      lateMins: inMins - shiftMins,
+      isLeisureForgiven: false,
+    };
   }
 
   // Late arrival: round UP to next slab boundary
@@ -308,7 +318,10 @@ function computeDailyAttendance(
 
   // Determine individual worker shift start:
   let shiftStart = '08:00';
-  if (dynamicShiftStart && dynamicShiftStart !== 'auto') {
+  const customShiftRule = Array.isArray(customRules) && customRules.find(r => r && r.is_active && (r.exemption_type === 'shift_override' || r.rule_type === 'shift_override') && r.start_time);
+  if (customShiftRule && customShiftRule.start_time) {
+    shiftStart = customShiftRule.start_time;
+  } else if (dynamicShiftStart && dynamicShiftStart !== 'auto') {
     shiftStart = dynamicShiftStart;
   } else if (firstIn) {
     shiftStart = detectWorkerShiftAnchor(firstIn, settings.shift_start || '08:00', settings.assigned_shift || 'auto');
@@ -316,8 +329,9 @@ function computeDailyAttendance(
     shiftStart = settings.shift_start || '08:00';
   }
 
+  const isGraceExempt = Array.isArray(customRules) && customRules.some(r => r && r.is_active && (r.exemption_type === 'grace_slab_exempt' || r.rule_type === 'grace_slab_exempt'));
+  const slabMinutes = isGraceExempt ? 0 : parseInt(settings.grace_slab_minutes || 30, 10);
   const shiftEnd = settings.shift_end || '16:30';
-  const slabMinutes = parseInt(settings.grace_slab_minutes || 30, 10);
   const otRounding = settings.ot_rounding || '30min_block';
   const shortThreshold = parseFloat(settings.short_hours_threshold || 4.0);
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
@@ -530,13 +544,13 @@ function computeDailyAttendance(
 }
 
 /**
- * 2-Minute Leisure Time Policy Evaluation across a worker's monthly attendance:
- * - Each worker is granted up to leisureMinsAllowed (2 min) on up to leisureDaysAllowed (2 days/month).
- * - 3rd Strike Revocation: If the worker is late 3 or more times (even 1-2 mins),
+ * 5-Minute Leisure Time Policy Evaluation across a worker's monthly attendance:
+ * - Each worker is granted up to leisureMinsAllowed (Default: 5 min) on up to leisureDaysAllowed (2 days/month).
+ * - 3rd Strike Revocation: If the worker is late 3 or more times (even 1-5 mins),
  *   ALL leisure forgiveness is REVOKED and all late days get full 30-min slab penalty!
  */
 function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules = [], paidHolidaysMap = {}) {
-  const leisureMinsAllowed = parseInt(settings.leisure_mins_allowed || 2, 10);
+  const leisureMinsAllowed = parseInt(settings.leisure_mins_allowed || 5, 10);
   const leisureDaysAllowed = parseInt(settings.leisure_days_allowed || 2, 10);
 
   // Identify all late days for this worker in the month
@@ -626,7 +640,13 @@ function isPureAbsentForForfeiture(rec) {
  * @param {Array<Object>} dailyRecords - Array of daily attendance objects
  * @param {Object} settings - Configuration map
  */
-function applyWeeklyOffForfeiture(dailyRecords, settings = {}) {
+function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = []) {
+  // Check if worker has an active forfeiture exemption
+  const isForfeitureExempt = Array.isArray(customRules) && customRules.some(r => r && r.is_active && (r.exemption_type === 'forfeiture_exempt' || r.rule_type === 'forfeiture_exempt'));
+  if (isForfeitureExempt) {
+    return dailyRecords;
+  }
+
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
   const absentThreshold = parseInt(settings.forfeiture_absent_threshold || settings.absent_forfeiture_threshold || 4, 10);
   const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 4, 10);

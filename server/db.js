@@ -198,13 +198,16 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE workers ADD COLUMN assigned_shift TEXT DEFAULT 'auto'`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN shift TEXT DEFAULT '08:00'`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_rules ADD COLUMN exemption_type TEXT DEFAULT ''`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_salary_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
 
   // Insert default settings if empty or update legacy defaults
   const defaultSettings = [
     ['shift_start', '08:00', 'Standard shift start time (HH:MM)'],
     ['shift_end', '16:30', 'Standard shift end time (HH:MM)'],
     ['grace_slab_minutes', '30', 'Late arrival grace slab size in minutes'],
-    ['leisure_mins_allowed', '2', 'Leisure grace minutes allowed (e.g. 2 min)'],
+    ['leisure_mins_allowed', '5', 'Leisure grace minutes allowed (Default: 5 min)'],
     ['leisure_days_allowed', '2', 'Maximum days per month eligible for leisure time forgiveness (Default: 2)'],
     ['ot_multiplier', '1.5', 'Overtime pay multiplier'],
     ['ot_rounding', '30min_block', 'OT rounding mode: "30min_block" or "minutes"'],
@@ -228,12 +231,13 @@ async function initDatabase() {
     );
   }
 
-  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, or forfeiture_absent_threshold 2/5
+  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, or leisure_mins_allowed 2
   try {
     await execute(`UPDATE settings SET value = '08:00' WHERE key = 'shift_start' AND value = '08:30'`);
     await execute(`UPDATE settings SET value = '30' WHERE key = 'lunch_deduction_mins' AND value = '0'`);
     await execute(`UPDATE settings SET value = '3' WHERE key = 'forfeiture_absent_threshold' AND (value = '2' OR value IS NULL)`);
     await execute(`UPDATE settings SET value = '4' WHERE key = 'monthly_absent_forfeiture_threshold' AND (value = '5' OR value IS NULL)`);
+    await execute(`UPDATE settings SET value = '5' WHERE key = 'leisure_mins_allowed' AND (value = '2' OR value IS NULL)`);
   } catch (e) {}
 
   // Insert default Rule Profile if rule_profiles table is empty
