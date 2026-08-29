@@ -1130,11 +1130,17 @@ app.post('/api/attendance/edit', async (req, res) => {
       [staff_no, date, oldRec.weekday || '', effectiveSwipes]
     );
 
+    // Identify which tokens are manually added
+    const oldTokens = new Set((oldRec.raw_swipes || '').split(/\s+/).filter(Boolean));
+    const newTokens = effectiveSwipes.split(/\s+/).filter(Boolean);
+    const addedTokens = newTokens.filter(t => !oldTokens.has(t));
+    const manualPunchesStr = addedTokens.length > 0 ? addedTokens.join(' ') : (oldRec.manual_punches || effectiveSwipes);
+
     // Update Daily Attendance
     await execute(
       `UPDATE daily_attendance SET
          raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
-         late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?
+         late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?, manual_punches = ?
        WHERE staff_no = ? AND date = ?`,
       [
         effectiveSwipes,
@@ -1148,6 +1154,7 @@ app.post('/api/attendance/edit', async (req, res) => {
         finalStatus,
         computed.shift || '08:00',
         reason || 'Manual correction',
+        manualPunchesStr,
         staff_no,
         date,
       ]
@@ -1336,10 +1343,16 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
         [staff_no, date, oldRec.weekday || '', effectiveSwipes]
       );
 
+      // Identify which tokens are manually added
+      const oldTokens = new Set((oldRec.raw_swipes || '').split(/\s+/).filter(Boolean));
+      const newTokens = effectiveSwipes.split(/\s+/).filter(Boolean);
+      const addedTokens = newTokens.filter(t => !oldTokens.has(t));
+      const manualPunchesStr = addedTokens.length > 0 ? addedTokens.join(' ') : (oldRec.manual_punches || effectiveSwipes);
+
       await execute(
         `UPDATE daily_attendance SET
            raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
-           late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?
+           late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?, manual_punches = ?
          WHERE staff_no = ? AND date = ?`,
         [
           effectiveSwipes,
@@ -1352,7 +1365,8 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
           lateMinutes,
           finalStatus,
           computed.shift || '08:00',
-          reason || 'Fast-Fix Resolution',
+          item.reason || reason || 'Fast-Fix Resolution',
+          manualPunchesStr,
           staff_no,
           date,
         ]

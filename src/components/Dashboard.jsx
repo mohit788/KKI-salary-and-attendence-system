@@ -653,16 +653,46 @@ export default function Dashboard({
                             </div>
                           </td>
                           <td className="py-3 px-4 font-mono text-slate-200">
-                            {r.punchPairsFormatted ? (
-                              <span className="bg-slate-950 px-2.5 py-1 rounded border border-slate-700 text-xs font-bold text-cyan-300">
-                                {r.punchPairsFormatted}
-                              </span>
-                            ) : r.raw_swipes ? (
-                              <span className="bg-slate-950 px-2 py-1 rounded border border-slate-700 text-xs">
-                                {r.raw_swipes}
-                              </span>
+                            {r.raw_swipes ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {(() => {
+                                  const currentTokens = (r.raw_swipes || '').split(/\s+/).filter(Boolean);
+                                  const manualTokens = new Set((r.manual_punches || '').split(/\s+/).filter(Boolean));
+                                  const origTokens = new Set((r.original_raw_swipes || '').split(/\s+/).filter(Boolean));
+                                  
+                                  return currentTokens.map((token, tokenIdx) => {
+                                    let isAddedTiming = false;
+                                    if (isManual) {
+                                      if (manualTokens.has(token)) {
+                                        isAddedTiming = true;
+                                      } else if (r.original_raw_swipes && r.original_raw_swipes !== r.raw_swipes && !origTokens.has(token)) {
+                                        isAddedTiming = true;
+                                      } else if (manualTokens.size === 0 && currentTokens.length > 1 && tokenIdx === currentTokens.length - 1) {
+                                        isAddedTiming = true;
+                                      }
+                                    }
+
+                                    return (
+                                      <span
+                                        key={tokenIdx}
+                                        className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono transition-all inline-flex items-center gap-1.5 ${
+                                          isAddedTiming
+                                            ? 'bg-amber-400 text-slate-950 border-2 border-amber-300 shadow-lg shadow-amber-500/40 ring-2 ring-amber-400/80 font-black'
+                                            : isManual
+                                              ? 'bg-violet-950/80 text-violet-200 border border-violet-600'
+                                              : 'bg-slate-950 text-cyan-300 border border-slate-700'
+                                        }`}
+                                        title={isAddedTiming ? `✨ Manually Added Punch Timing: ${token}` : `Biometric Punch: ${token}`}
+                                      >
+                                        {isAddedTiming && <Sparkles className="w-3 h-3 text-slate-950 shrink-0" />}
+                                        <span>{token}</span>
+                                      </span>
+                                    );
+                                  });
+                                })()}
+                              </div>
                             ) : (
-                              <span className="text-slate-500 italic">No Swipes</span>
+                              <span className="text-slate-500 italic text-xs">No Swipes</span>
                             )}
                           </td>
                           <td className="py-3 px-3 font-mono text-center whitespace-nowrap">

@@ -468,24 +468,34 @@ export default function WorkerDetail({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {(() => {
                             const currentTokens = (r.raw_swipes || '').split(/\s+/).filter(Boolean);
+                            const manualTokens = new Set((r.manual_punches || '').split(/\s+/).filter(Boolean));
                             const origTokens = new Set((r.original_raw_swipes || '').split(/\s+/).filter(Boolean));
                             
                             return currentTokens.map((token, idx) => {
-                              const isAddedTiming = isManual && (r.original_raw_swipes ? !origTokens.has(token) : (currentTokens.length > 1 && idx === currentTokens.length - 1));
+                              let isAddedTiming = false;
+                              if (isManual) {
+                                if (manualTokens.has(token)) {
+                                  isAddedTiming = true;
+                                } else if (r.original_raw_swipes && r.original_raw_swipes !== r.raw_swipes && !origTokens.has(token)) {
+                                  isAddedTiming = true;
+                                } else if (manualTokens.size === 0 && currentTokens.length > 1 && idx === currentTokens.length - 1) {
+                                  isAddedTiming = true;
+                                }
+                              }
 
                               return (
                                 <span
                                   key={idx}
-                                  className={`px-2 py-0.5 rounded-lg text-xs font-bold font-mono transition-all inline-flex items-center gap-1 ${
+                                  className={`px-2.5 py-1 rounded-xl text-xs font-black font-mono transition-all inline-flex items-center gap-1.5 ${
                                     isAddedTiming
-                                      ? 'bg-amber-500/25 text-amber-300 border-2 border-amber-400 shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
+                                      ? 'bg-amber-400 text-slate-950 border-2 border-amber-300 shadow-lg shadow-amber-500/40 ring-2 ring-amber-400/80 font-black'
                                       : isManual
                                         ? 'bg-violet-950/80 text-violet-200 border border-violet-600'
                                         : 'bg-slate-950 text-cyan-300 border border-slate-700'
                                   }`}
-                                  title={isAddedTiming ? `✨ Manually Added Timing: ${token}` : `Biometric Punch: ${token}`}
+                                  title={isAddedTiming ? `✨ Manually Added Punch Timing: ${token}` : `Biometric Punch: ${token}`}
                                 >
-                                  {isAddedTiming && <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
+                                  {isAddedTiming && <Sparkles className="w-3 h-3 text-slate-950 shrink-0" />}
                                   <span>{token}</span>
                                 </span>
                               );

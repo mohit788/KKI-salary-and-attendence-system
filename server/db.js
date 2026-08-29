@@ -198,9 +198,30 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE workers ADD COLUMN assigned_shift TEXT DEFAULT 'auto'`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN shift TEXT DEFAULT '08:00'`); } catch (e) {}
+  try { await execute(`ALTER TABLE daily_attendance ADD COLUMN manual_punches TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN exemption_type TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_salary_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
+
+  // Backfill manual_punches for existing manual records from audit_logs
+  try {
+    const logs = await execute(`SELECT staff_no, date, old_value, new_value FROM audit_logs ORDER BY id ASC`);
+    for (const log of logs.rows) {
+      const oldMatch = (log.old_value || '').match(/Swipes:\s*([^,]*)/);
+      const newMatch = (log.new_value || '').match(/Swipes:\s*([^,]*)/);
+      if (oldMatch && newMatch) {
+        const oldTokens = new Set((oldMatch[1] || '').trim().split(/\s+/).filter(Boolean));
+        const newTokens = (newMatch[1] || '').trim().split(/\s+/).filter(Boolean);
+        const added = newTokens.filter(t => !oldTokens.has(t));
+        if (added.length > 0) {
+          await execute(
+            `UPDATE daily_attendance SET manual_punches = ? WHERE staff_no = ? AND date = ? AND is_manual_override = 1 AND (manual_punches IS NULL OR manual_punches = '')`,
+            [added.join(' '), log.staff_no, log.date]
+          );
+        }
+      }
+    }
+  } catch (e) {}
 
   // Insert default settings if empty or update legacy defaults
   const defaultSettings = [
