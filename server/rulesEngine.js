@@ -293,6 +293,30 @@ function cleanAndDebouncePunches(timestamps = [], debounceMins = 5) {
 }
 
 /**
+ * Resolves odd punch counts when multiple punches occur at morning arrival or evening departure.
+ * E.g. ['07:55', '18:36', '19:00'] -> ['07:55', '19:00']
+ */
+function resolvePunchesForDuty(cleanedPunches, shiftStart = '08:00', shiftEnd = '16:30') {
+  if (!cleanedPunches || cleanedPunches.length <= 1) return cleanedPunches;
+  if (cleanedPunches.length % 2 === 0) return cleanedPunches;
+
+  const shiftEndMins = timeToMins(shiftEnd);
+  const morningPunches = cleanedPunches.filter(p => timeToMins(p) < 720);
+  const eveningPunches = cleanedPunches.filter(p => timeToMins(p) >= shiftEndMins);
+
+  if (morningPunches.length === 1 && eveningPunches.length >= 2 && (morningPunches.length + eveningPunches.length === cleanedPunches.length)) {
+    const latestEvening = eveningPunches[eveningPunches.length - 1];
+    return [morningPunches[0], latestEvening];
+  }
+
+  if (morningPunches.length >= 2 && eveningPunches.length === 1 && (morningPunches.length + eveningPunches.length === cleanedPunches.length)) {
+    return [morningPunches[0], eveningPunches[0]];
+  }
+
+  return cleanedPunches;
+}
+
+/**
  * Compute daily attendance, regular hours (8h duty), OT hours (after completing 8h work + lunch), and status
  * @param {Array<string>} timestamps - array of HH:MM timestamps ["07:54", "16:30"] or ["08:31", "18:30"]
  * @param {Object} settings - rule parameters
@@ -313,8 +337,9 @@ function computeDailyAttendance(
   holidayName = '',
   isLeisureForgiven = false
 ) {
-  const cleanedPunches = cleanAndDebouncePunches(timestamps, 5);
-  const firstIn = cleanedPunches && cleanedPunches.length > 0 ? cleanedPunches[0] : '';
+  const rawCleaned = cleanAndDebouncePunches(timestamps, 5);
+  const shiftEnd = settings.shift_end || '16:30';
+  const firstIn = rawCleaned && rawCleaned.length > 0 ? rawCleaned[0] : '';
 
   // Determine individual worker shift start:
   let shiftStart = '08:00';
@@ -329,9 +354,10 @@ function computeDailyAttendance(
     shiftStart = settings.shift_start || '08:00';
   }
 
+  const cleanedPunches = resolvePunchesForDuty(rawCleaned, shiftStart, shiftEnd);
+
   const isGraceExempt = Array.isArray(customRules) && customRules.some(r => r && r.is_active && (r.exemption_type === 'grace_slab_exempt' || r.rule_type === 'grace_slab_exempt'));
   const slabMinutes = isGraceExempt ? 0 : parseInt(settings.grace_slab_minutes || 30, 10);
-  const shiftEnd = settings.shift_end || '16:30';
   const otRounding = settings.ot_rounding || '30min_block';
   const shortThreshold = parseFloat(settings.short_hours_threshold || 4.0);
   const weeklyOffDay = settings.weekly_off_day || 'Sun';
