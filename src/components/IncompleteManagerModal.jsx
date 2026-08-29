@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   RefreshCw,
   Check,
-  CornerDownLeft
+  CornerDownLeft,
+  Filter
 } from 'lucide-react';
 import { normalizeTimeInput, normalizeSingleTimeToken } from '../utils/formatters';
 
@@ -41,6 +42,11 @@ export default function IncompleteManagerModal({
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [rowEdits, setRowEdits] = useState({});     // key: `${staff_no}_${date}` -> { raw_swipes, status, missing_input }
   const [globalSuccessMsg, setGlobalSuccessMsg] = useState('');
+  const [staffFilter, setStaffFilter] = useState(initialStaffNo);
+
+  useEffect(() => {
+    setStaffFilter(initialStaffNo);
+  }, [initialStaffNo, isOpen]);
 
   // Fetch incomplete records from server
   const fetchIncomplete = async () => {
@@ -62,7 +68,7 @@ export default function IncompleteManagerModal({
         });
         setRowEdits(initialEdits);
 
-        // Keep parent dashboard metrics in sync
+        // Keep parent dashboard metrics in sync immediately
         if (onRefreshData) {
           onRefreshData();
         }
@@ -79,7 +85,7 @@ export default function IncompleteManagerModal({
   }, [isOpen]);
 
   const filteredRecords = records.filter(r => {
-    if (initialStaffNo && (typeof initialStaffNo === 'string' || typeof initialStaffNo === 'number') && String(r.staff_no) !== String(initialStaffNo)) return false;
+    if (staffFilter && (typeof staffFilter === 'string' || typeof staffFilter === 'number') && String(r.staff_no) !== String(staffFilter)) return false;
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
     return (
@@ -335,6 +341,11 @@ export default function IncompleteManagerModal({
     }
   };
 
+  const handleCloseAndSync = () => {
+    if (onRefreshData) onRefreshData();
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
       <div className="glass-modal w-full max-w-7xl max-h-[94vh] flex flex-col rounded-3xl p-5 sm:p-6 shadow-2xl border-2 border-amber-500/50 bg-slate-900 overflow-hidden">
@@ -346,18 +357,33 @@ export default function IncompleteManagerModal({
               <Sparkles className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <h2 className="text-xl font-black text-white font-display tracking-tight">
                   Incomplete Records Fast-Fix Center
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-300 text-xs font-bold font-mono border border-amber-500">
                   {records.length} Pending Resolution
                 </span>
+
+                {staffFilter && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-950 text-cyan-300 border border-blue-600 text-xs font-bold font-mono">
+                    <Filter className="w-3 h-3 text-cyan-400" />
+                    <span>Staff #{staffFilter}</span>
+                    <button
+                      onClick={() => setStaffFilter(null)}
+                      className="text-slate-400 hover:text-white ml-1 p-0.5 hover:bg-blue-900 rounded cursor-pointer"
+                      title="Clear staff filter and show all"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+
                 <button
                   onClick={fetchIncomplete}
                   disabled={loading}
                   className="px-2.5 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 flex items-center space-x-1 transition-all cursor-pointer"
-                  title="Reload Incomplete Records"
+                  title="Reload Incomplete Records from Database"
                 >
                   <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
@@ -370,8 +396,9 @@ export default function IncompleteManagerModal({
           </div>
 
           <button 
-            onClick={onClose}
+            onClick={handleCloseAndSync}
             className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-all cursor-pointer"
+            title="Close modal and refresh parent data"
           >
             <X className="w-6 h-6" />
           </button>
@@ -469,17 +496,42 @@ export default function IncompleteManagerModal({
           {loading ? (
             <div className="py-20 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
               <RefreshCw className="w-8 h-8 text-amber-400 animate-spin" />
-              <p className="text-sm font-bold">Loading incomplete punch records...</p>
+              <p className="text-sm font-bold">Loading incomplete punch records from database...</p>
+            </div>
+          ) : records.length > 0 && filteredRecords.length === 0 ? (
+            <div className="py-20 text-center text-slate-300 flex flex-col items-center justify-center gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-blue-950 text-cyan-400 border-2 border-blue-500 flex items-center justify-center shadow-lg">
+                <Search className="w-7 h-7" />
+              </div>
+              <h4 className="text-lg font-bold text-white">
+                {staffFilter ? `Staff #${staffFilter} Has No Incomplete Records` : 'No Records Match Search'}
+              </h4>
+              <p className="text-xs text-slate-400 max-w-sm">
+                There are {records.length} pending incomplete records across all workers.
+              </p>
+              <button
+                onClick={() => { setStaffFilter(null); setSearchTerm(''); }}
+                className="mt-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md cursor-pointer transition-all"
+              >
+                View All {records.length} Pending Records
+              </button>
             </div>
           ) : filteredRecords.length === 0 ? (
             <div className="py-20 text-center text-slate-300 flex flex-col items-center justify-center gap-3">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-950 text-emerald-400 border-2 border-emerald-500 flex items-center justify-center shadow-lg">
-                <CheckCircle2 className="w-7 h-7" />
+              <div className="w-16 h-16 rounded-3xl bg-emerald-950 text-emerald-400 border-2 border-emerald-500 flex items-center justify-center shadow-xl shadow-emerald-950/50">
+                <CheckCircle2 className="w-8 h-8" />
               </div>
-              <h4 className="text-lg font-bold text-white">All Records Are 100% Complete!</h4>
-              <p className="text-xs text-slate-400 max-w-sm">
-                There are no pending incomplete swipes. All worker salaries and overtime duty calculations are unlocked and up to date.
+              <h4 className="text-xl font-extrabold text-white">All Records Are 100% Complete!</h4>
+              <p className="text-xs sm:text-sm text-slate-300 max-w-md text-center leading-relaxed">
+                All punch swipes have been resolved. Worker attendance, regular hours, and overtime calculations are active.
               </p>
+              <button
+                onClick={handleCloseAndSync}
+                className="mt-3 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center space-x-2 border border-emerald-400 transition-all cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Done — Back to All Workers</span>
+              </button>
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
@@ -725,7 +777,7 @@ export default function IncompleteManagerModal({
 
           <div className="flex items-center space-x-3">
             <button
-              onClick={onClose}
+              onClick={handleCloseAndSync}
               disabled={saving}
               className="px-4 py-2 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all cursor-pointer"
             >

@@ -79,14 +79,21 @@ async function getTrueIncompleteCount() {
 
   const allRecords = await execute(`
     SELECT * FROM daily_attendance 
-    WHERE status = 'Incomplete' OR status LIKE '%Incomplete%'
+    WHERE status = 'Incomplete' 
+       OR status LIKE '%Incomplete%'
+       OR (raw_swipes != '' AND raw_swipes IS NOT NULL AND is_manual_override = 0)
   `);
 
   let count = 0;
+  const seen = new Set();
   for (const r of allRecords.rows) {
     if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
       continue;
     }
+
+    const key = `${r.staff_no}_${r.date}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
 
     const { timestamps } = parseSwipeRecord(r.raw_swipes);
     const cleaned = cleanAndDebouncePunches(timestamps, 5);
@@ -1173,16 +1180,23 @@ app.get('/api/attendance/incomplete', async (req, res) => {
         w.department 
       FROM daily_attendance d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
-      WHERE d.status = 'Incomplete' OR d.status LIKE '%Incomplete%'
+      WHERE d.status = 'Incomplete' 
+         OR d.status LIKE '%Incomplete%'
+         OR (d.raw_swipes != '' AND d.raw_swipes IS NOT NULL AND d.is_manual_override = 0)
       ORDER BY d.date ASC, CAST(d.staff_no AS INTEGER) ASC
     `);
 
     const trueIncomplete = [];
+    const seenKeys = new Set();
 
     for (const r of allRecords.rows) {
       if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
         continue;
       }
+
+      const rowKey = `${r.staff_no}_${r.date}`;
+      if (seenKeys.has(rowKey)) continue;
+      seenKeys.add(rowKey);
 
       const { timestamps } = parseSwipeRecord(r.raw_swipes);
       const cleaned = cleanAndDebouncePunches(timestamps, 5);
