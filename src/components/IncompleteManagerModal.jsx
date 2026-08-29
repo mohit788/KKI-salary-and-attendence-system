@@ -29,18 +29,110 @@ export default function IncompleteManagerModal({
   isOpen, 
   onClose, 
   onRefreshData,
+  workers = [],
+  allAttendance = [],
   initialStaffNo = null 
 }) {
   if (!isOpen) return null;
+
+  // High-performance client-side extractor from memory (0ms instant hydration)
+  const extractIncompleteFromMemory = () => {
+    const map = new Map();
+
+    (workers || []).forEach(w => {
+      (w.dailyRecords || []).forEach(r => {
+        const raw = (r.raw_swipes || '').trim();
+        const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
+        const isOdd = punches.length > 0 && punches.length % 2 !== 0;
+        const isIncomplete = (r.status || '').includes('Incomplete') || isOdd;
+
+        if (isIncomplete && (r.is_manual_override !== 1 || (r.status || '').includes('Incomplete'))) {
+          const singlePunch = punches.length === 1 ? punches[0] : '';
+          let missingType = 'OUT';
+          if (singlePunch) {
+            const parts = singlePunch.split(':');
+            const mins = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+            missingType = mins > 750 ? 'IN' : 'OUT';
+          }
+          const key = `${w.staff_no}_${r.date}`;
+          map.set(key, {
+            staff_no: w.staff_no,
+            staff_name: w.staff_name || 'WORKER',
+            department: w.department || 'WORKER',
+            date: r.date,
+            weekday: r.weekday || '',
+            raw_swipes: r.raw_swipes || '',
+            status: r.status || 'Incomplete',
+            effective_in: r.effective_in || '',
+            effective_out: r.effective_out || '',
+            shift: r.shift || '08:00',
+            missing_type: missingType,
+            existing_punch: singlePunch,
+            cleaned_punches: punches,
+          });
+        }
+      });
+    });
+
+    (allAttendance || []).forEach(r => {
+      const raw = (r.raw_swipes || '').trim();
+      const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
+      const isOdd = punches.length > 0 && punches.length % 2 !== 0;
+      const isIncomplete = (r.status || '').includes('Incomplete') || isOdd;
+
+      if (isIncomplete && (r.is_manual_override !== 1 || (r.status || '').includes('Incomplete'))) {
+        const key = `${r.staff_no}_${r.date}`;
+        if (!map.has(key)) {
+          const singlePunch = punches.length === 1 ? punches[0] : '';
+          let missingType = 'OUT';
+          if (singlePunch) {
+            const parts = singlePunch.split(':');
+            const mins = (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
+            missingType = mins > 750 ? 'IN' : 'OUT';
+          }
+          map.set(key, {
+            staff_no: r.staff_no,
+            staff_name: r.staff_name || 'WORKER',
+            department: r.department || 'WORKER',
+            date: r.date,
+            weekday: r.weekday || '',
+            raw_swipes: r.raw_swipes || '',
+            status: r.status || 'Incomplete',
+            effective_in: r.effective_in || '',
+            effective_out: r.effective_out || '',
+            shift: r.shift || '08:00',
+            missing_type: missingType,
+            existing_punch: singlePunch,
+            cleaned_punches: punches,
+          });
+        }
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.staff_no).localeCompare(String(b.staff_no)));
+  };
+
+  const initialMemoryRecords = extractIncompleteFromMemory();
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingRows, setSavingRows] = useState({}); // key -> boolean
   const [savedRows, setSavedRows] = useState({});   // key -> boolean
-  const [records, setRecords] = useState([]);
+  const [records, setRecords] = useState(initialMemoryRecords);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [rowEdits, setRowEdits] = useState({});     // key: `${staff_no}_${date}` -> { raw_swipes, status, missing_input }
+  const [rowEdits, setRowEdits] = useState(() => {
+    const edits = {};
+    initialMemoryRecords.forEach(r => {
+      const key = `${r.staff_no}_${r.date}`;
+      edits[key] = {
+        raw_swipes: r.raw_swipes || '',
+        status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
+        missing_input: ''
+      };
+    });
+    return edits;
+  });
   const [globalSuccessMsg, setGlobalSuccessMsg] = useState('');
   const [staffFilter, setStaffFilter] = useState(initialStaffNo);
 
@@ -48,27 +140,54 @@ export default function IncompleteManagerModal({
     setStaffFilter(initialStaffNo);
   }, [initialStaffNo, isOpen]);
 
-  // Fetch incomplete records from server
+  // Sync memory on workers/allAttendance changes
+  useEffect(() => {
+    const mem = extractIncompleteFromMemory();
+    if (mem.length > 0 && records.length === 0) {
+      setRecords(mem);
+      setRowEdits(prev => {
+        const next = { ...prev };
+        mem.forEach(r => {
+          const key = `${r.staff_no}_${r.date}`;
+          if (!next[key]) {
+            next[key] = {
+              raw_swipes: r.raw_swipes || '',
+              status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
+              missing_input: ''
+            };
+          }
+        });
+        return next;
+      });
+    }
+  }, [workers, allAttendance]);
+
+  // Fetch incomplete records from server in background
   const fetchIncomplete = async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/attendance/incomplete').then(r => r.json());
       if (res.success) {
-        const incRecords = res.incompleteRecords || [];
-        setRecords(incRecords);
-        // Initialize editable state
-        const initialEdits = {};
-        incRecords.forEach(r => {
-          const key = `${r.staff_no}_${r.date}`;
-          initialEdits[key] = {
-            raw_swipes: r.raw_swipes || '',
-            status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
-            missing_input: ''
-          };
-        });
-        setRowEdits(initialEdits);
+        const incRecords = res.incompleteRecords && res.incompleteRecords.length > 0 
+          ? res.incompleteRecords 
+          : extractIncompleteFromMemory();
 
-        // Keep parent dashboard metrics in sync immediately
+        setRecords(incRecords);
+        setRowEdits(prev => {
+          const next = { ...prev };
+          incRecords.forEach(r => {
+            const key = `${r.staff_no}_${r.date}`;
+            if (!next[key]) {
+              next[key] = {
+                raw_swipes: r.raw_swipes || '',
+                status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
+                missing_input: ''
+              };
+            }
+          });
+          return next;
+        });
+
         if (onRefreshData) {
           onRefreshData();
         }
@@ -129,7 +248,6 @@ export default function IncompleteManagerModal({
     if (punches.length === 1) {
       const punch = punches[0];
       const mins = parseMins(punch);
-      // > 12:30 PM (750 mins) -> Afternoon/Evening OUT punch -> Missing IN in morning!
       const isMissingIn = mins > 750;
       return { hasSingle: true, punch, isMissingIn };
     }
@@ -144,10 +262,8 @@ export default function IncompleteManagerModal({
     let updatedSwipes = '';
     if (hasSingle) {
       if (isMissingIn) {
-        // Prepend morning IN before evening punch (e.g. "08:00 18:38")
         updatedSwipes = `${normPunch} ${punch}`;
       } else {
-        // Append evening OUT after morning punch (e.g. "08:00 18:30")
         updatedSwipes = `${punch} ${normPunch}`;
       }
     } else {
@@ -493,7 +609,7 @@ export default function IncompleteManagerModal({
 
         {/* Scrollable Records Table */}
         <div className="flex-1 overflow-y-auto rounded-2xl border-2 border-slate-800 bg-slate-950 min-h-[300px]">
-          {loading ? (
+          {loading && records.length === 0 ? (
             <div className="py-20 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
               <RefreshCw className="w-8 h-8 text-amber-400 animate-spin" />
               <p className="text-sm font-bold">Loading incomplete punch records from database...</p>

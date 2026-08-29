@@ -7,16 +7,16 @@ const fs = require('fs');
 const { execute, batch, initDatabase } = require('./db');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
-const { 
-  computeDailyAttendance, 
-  applyWeeklyOffForfeiture, 
+const {
+  computeDailyAttendance,
+  applyWeeklyOffForfeiture,
   applyMonthlyLeisureGrace,
   applyPaidHolidayForfeiture,
-  formatHours, 
-  detectWorkerShiftAnchor, 
-  detectDailyFactoryShift, 
-  buildDailyShiftMap, 
-  cleanAndDebouncePunches 
+  formatHours,
+  detectWorkerShiftAnchor,
+  detectDailyFactoryShift,
+  buildDailyShiftMap,
+  cleanAndDebouncePunches
 } = require('./rulesEngine');
 const { calculateWorkerPayroll } = require('./payrollEngine');
 const { parseNaturalLanguageRule } = require('./aiRuleEngine');

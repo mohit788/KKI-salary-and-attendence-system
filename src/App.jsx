@@ -430,6 +430,8 @@ export default function App() {
       {/* MODAL: INCOMPLETE RECORDS FAST-FIX MANAGER */}
       <IncompleteManagerModal
         isOpen={showIncompleteModal}
+        workers={workers}
+        allAttendance={allAttendance}
         onClose={() => {
           setShowIncompleteModal(false);
           refreshData();
