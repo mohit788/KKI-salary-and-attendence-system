@@ -77,13 +77,17 @@ async function initDatabase() {
       date TEXT NOT NULL, -- YYYY-MM-DD
       weekday TEXT,
       raw_swipes TEXT,
+      original_raw_swipes TEXT DEFAULT '',
+      manual_punches TEXT DEFAULT '',
       effective_in TEXT,
       effective_out TEXT,
       regular_hours REAL DEFAULT 0,
       ot_hours REAL DEFAULT 0,
+      sunday_ot_hours REAL DEFAULT 0,
       total_hours REAL DEFAULT 0,
       late_minutes INTEGER DEFAULT 0,
       status TEXT NOT NULL, -- 'Present (Full)', 'Present (Short)', 'Absent', 'Weekly Off (Paid)', 'Weekly Off (Forfeited)', 'Incomplete'
+      shift TEXT DEFAULT '08:00',
       is_manual_override INTEGER DEFAULT 0,
       override_reason TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -196,12 +200,14 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE workers ADD COLUMN food_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE workers ADD COLUMN other_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE workers ADD COLUMN assigned_shift TEXT DEFAULT 'auto'`); } catch (e) {}
+  try { await execute(`ALTER TABLE daily_attendance ADD COLUMN original_raw_swipes TEXT DEFAULT ''`); } catch (e) {}
+  try { await execute(`ALTER TABLE daily_attendance ADD COLUMN manual_punches TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN shift TEXT DEFAULT '08:00'`); } catch (e) {}
-  try { await execute(`ALTER TABLE daily_attendance ADD COLUMN manual_punches TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN exemption_type TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_salary_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
+  try { await execute(`UPDATE daily_attendance SET original_raw_swipes = raw_swipes WHERE original_raw_swipes IS NULL OR original_raw_swipes = ''`); } catch (e) {}
 
   // Backfill manual_punches for existing manual records from audit_logs
   try {
