@@ -760,9 +760,7 @@ export default function WorkerDetail({
                               if (isManual) {
                                 if (manualTokens.has(token)) {
                                   isAddedTiming = true;
-                                } else if (r.original_raw_swipes && r.original_raw_swipes !== r.raw_swipes && !origTokens.has(token)) {
-                                  isAddedTiming = true;
-                                } else if (manualTokens.size === 0 && currentTokens.length > 1 && idx === currentTokens.length - 1) {
+                                } else if (origTokens.size > 0 && !origTokens.has(token)) {
                                   isAddedTiming = true;
                                 }
                               }

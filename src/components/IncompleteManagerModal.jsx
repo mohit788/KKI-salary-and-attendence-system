@@ -45,8 +45,7 @@ export default function IncompleteManagerModal({
       (w.dailyRecords || []).forEach(r => {
         const raw = (r.raw_swipes || '').trim();
         const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
-        const isOdd = punches.length > 0 && punches.length % 2 !== 0;
-        const isIncomplete = (r.status || '').includes('Incomplete') || isOdd;
+        const isIncomplete = (r.status || '').includes('Incomplete') || (punches.length === 1 && !r.status?.includes('Present'));
 
         if (isIncomplete && (r.is_manual_override !== 1 || (r.status || '').includes('Incomplete'))) {
           const singlePunch = punches.length === 1 ? punches[0] : '';
@@ -79,8 +78,7 @@ export default function IncompleteManagerModal({
     (allAttendance || []).forEach(r => {
       const raw = (r.raw_swipes || '').trim();
       const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
-      const isOdd = punches.length > 0 && punches.length % 2 !== 0;
-      const isIncomplete = (r.status || '').includes('Incomplete') || isOdd;
+      const isIncomplete = (r.status || '').includes('Incomplete') || (punches.length === 1 && !r.status?.includes('Present'));
 
       if (isIncomplete && (r.is_manual_override !== 1 || (r.status || '').includes('Incomplete'))) {
         const key = `${r.staff_no}_${r.date}`;

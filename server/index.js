@@ -155,7 +155,7 @@ async function recomputeAllAttendance() {
       const { timestamps } = parseSwipeRecord(r.raw_swipes);
       const isHoliday = !!paidHolidaysMap[r.date];
       const holidayName = paidHolidaysMap[r.date] || '';
-      
+
       const workerCustomRules = customRules.filter(cr => !cr.target_staff_no || cr.target_staff_no === 'all' || cr.target_staff_no === r.staff_no);
 
       const computed = computeDailyAttendance(
@@ -1180,19 +1180,22 @@ app.post('/api/attendance/edit', async (req, res) => {
     );
 
     // Identify which tokens are manually added
-    const oldTokens = new Set((oldRec.raw_swipes || '').split(/\s+/).filter(Boolean));
+    const originalSwipesStr = oldRec.original_raw_swipes || oldRec.raw_swipes || '';
+    const originalTokens = new Set(originalSwipesStr.split(/\s+/).filter(Boolean));
     const newTokens = effectiveSwipes.split(/\s+/).filter(Boolean);
-    const addedTokens = newTokens.filter(t => !oldTokens.has(t));
-    const manualPunchesStr = addedTokens.length > 0 ? addedTokens.join(' ') : (oldRec.manual_punches || effectiveSwipes);
+    const addedTokens = newTokens.filter(t => !originalTokens.has(t));
+    const manualPunchesStr = addedTokens.join(' ');
+    const finalOrigSwipes = oldRec.original_raw_swipes || oldRec.raw_swipes || effectiveSwipes;
 
     // Update Daily Attendance
     await execute(
       `UPDATE daily_attendance SET
-         raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
+         raw_swipes = ?, original_raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
          late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?, manual_punches = ?
        WHERE staff_no = ? AND date = ?`,
       [
         effectiveSwipes,
+        finalOrigSwipes,
         effectiveIn,
         effectiveOut,
         regularHours,
@@ -1393,18 +1396,21 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       );
 
       // Identify which tokens are manually added
-      const oldTokens = new Set((oldRec.raw_swipes || '').split(/\s+/).filter(Boolean));
+      const originalSwipesStr = oldRec.original_raw_swipes || oldRec.raw_swipes || '';
+      const originalTokens = new Set(originalSwipesStr.split(/\s+/).filter(Boolean));
       const newTokens = effectiveSwipes.split(/\s+/).filter(Boolean);
-      const addedTokens = newTokens.filter(t => !oldTokens.has(t));
-      const manualPunchesStr = addedTokens.length > 0 ? addedTokens.join(' ') : (oldRec.manual_punches || effectiveSwipes);
+      const addedTokens = newTokens.filter(t => !originalTokens.has(t));
+      const manualPunchesStr = addedTokens.join(' ');
+      const finalOrigSwipes = oldRec.original_raw_swipes || oldRec.raw_swipes || effectiveSwipes;
 
       await execute(
         `UPDATE daily_attendance SET
-           raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
+           raw_swipes = ?, original_raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
            late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?, manual_punches = ?
          WHERE staff_no = ? AND date = ?`,
         [
           effectiveSwipes,
+          finalOrigSwipes,
           effectiveIn,
           effectiveOut,
           regularHours,
