@@ -413,15 +413,6 @@ function computeDailyAttendance(
   let maxMidDayExitMins = 0;
   const punchPairStrings = [];
 
-  // 4-Hour Morning Session Rule: If a worker left in morning after working < 4 hours (240 mins) and returned later,
-  // that morning session is forfeited/deducted (time from arrival to return is cut).
-  const hasMultipleSessions = cleanedPunches.length >= 4;
-  const rawFirstOut = cleanedPunches[1];
-  const firstOutMins = timeToMins(rawFirstOut);
-  const firstSessionWorkedMins = Math.max(0, firstOutMins - effectiveInMins);
-  const morningSessionThresholdMins = Math.round(shortThreshold * 60); // default 4.0h = 240 mins
-  const isMorningSessionForfeited = hasMultipleSessions && (firstSessionWorkedMins < morningSessionThresholdMins);
-
   for (let i = 0; i < cleanedPunches.length; i += 2) {
     const rawIn = cleanedPunches[i];
     const rawOut = cleanedPunches[i + 1];
@@ -431,11 +422,6 @@ function computeDailyAttendance(
 
     if (i === 0) {
       sessionInMins = effectiveInMins;
-    }
-
-    if (i === 0 && isMorningSessionForfeited) {
-      punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut} (⚠️ Morning <4h Cut)`);
-      continue;
     }
 
     let sessionWorkedMins = Math.max(0, sessionOutMins - sessionInMins);

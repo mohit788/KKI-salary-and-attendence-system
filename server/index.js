@@ -862,20 +862,22 @@ app.get('/api/workers', async (req, res) => {
   try {
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
-    const { month } = req.query;
-
-    let attQuery = `SELECT * FROM daily_attendance`;
+    let attQuery = `
+      SELECT d.*, r.swipe_record as original_raw_swipes 
+      FROM daily_attendance d 
+      LEFT JOIN raw_punches r ON d.staff_no = r.staff_no AND d.date = r.date
+    `;
     let advQuery = `SELECT * FROM advances`;
     const attParams = [];
     const advParams = [];
 
     if (month && month !== 'all') {
-      attQuery += ` WHERE date LIKE ?`;
+      attQuery += ` WHERE d.date LIKE ?`;
       attParams.push(`${month}%`);
       advQuery += ` WHERE date LIKE ?`;
       advParams.push(`${month}%`);
     }
-    attQuery += ` ORDER BY staff_no, date ASC`;
+    attQuery += ` ORDER BY d.staff_no, d.date ASC`;
     advQuery += ` ORDER BY staff_no, date DESC`;
 
     // Batch fetch all data in parallel
@@ -959,7 +961,11 @@ app.get('/api/workers/:staff_no', async (req, res) => {
     const worker = workerRes.rows[0];
 
     const attRes = await execute(
-      `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+      `SELECT d.*, r.swipe_record as original_raw_swipes 
+       FROM daily_attendance d
+       LEFT JOIN raw_punches r ON d.staff_no = r.staff_no AND d.date = r.date
+       WHERE d.staff_no = ? 
+       ORDER BY d.date ASC`,
       [staff_no]
     );
 

@@ -462,20 +462,38 @@ export default function WorkerDetail({
                       </div>
                     </td>
 
-                    {/* Raw Swipes - VISUALLY HIGHLIGHTED FOR MANUAL EDITS */}
+                    {/* Raw Swipes - VISUALLY HIGHLIGHTED PER TOKEN FOR MANUAL EDITS */}
                     <td className="px-4 py-3 font-mono text-slate-200">
                       {r.raw_swipes ? (
-                        <span className={`px-2.5 py-1 rounded border text-xs font-bold font-mono transition-all inline-block ${
-                          isManual 
-                            ? 'bg-violet-950 text-violet-200 border-violet-400 shadow-md shadow-violet-950/50 ring-1 ring-violet-500' 
-                            : 'bg-slate-950 text-cyan-300 border-slate-700'
-                        }`}
-                        title={isManual ? `Manually adjusted punch: ${r.override_reason || 'Admin Correction'}` : 'Biometric Machine Punch'}
-                        >
-                          {r.raw_swipes}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {(() => {
+                            const currentTokens = (r.raw_swipes || '').split(/\s+/).filter(Boolean);
+                            const origTokens = new Set((r.original_raw_swipes || '').split(/\s+/).filter(Boolean));
+                            
+                            return currentTokens.map((token, idx) => {
+                              const isAddedTiming = isManual && (r.original_raw_swipes ? !origTokens.has(token) : (currentTokens.length > 1 && idx === currentTokens.length - 1));
+
+                              return (
+                                <span
+                                  key={idx}
+                                  className={`px-2 py-0.5 rounded-lg text-xs font-bold font-mono transition-all inline-flex items-center gap-1 ${
+                                    isAddedTiming
+                                      ? 'bg-amber-500/25 text-amber-300 border-2 border-amber-400 shadow-md shadow-amber-500/20 ring-1 ring-amber-400'
+                                      : isManual
+                                        ? 'bg-violet-950/80 text-violet-200 border border-violet-600'
+                                        : 'bg-slate-950 text-cyan-300 border border-slate-700'
+                                  }`}
+                                  title={isAddedTiming ? `✨ Manually Added Timing: ${token}` : `Biometric Punch: ${token}`}
+                                >
+                                  {isAddedTiming && <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
+                                  <span>{token}</span>
+                                </span>
+                              );
+                            });
+                          })()}
+                        </div>
                       ) : (
-                        <span className="text-slate-500 italic">No Swipe</span>
+                        <span className="text-slate-500 italic text-xs">No Swipe</span>
                       )}
                     </td>
 
