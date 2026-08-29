@@ -232,25 +232,25 @@ export default function AllWorkersTable({
         </div>
 
         {/* Action Buttons & Enlarged Prominent Search Input */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-between xl:justify-end">
+        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-between xl:justify-end">
           
           {/* BIGGER, PROMINENT SEARCH BAR */}
-          <div className="relative flex-1 sm:w-80 lg:w-96 min-w-[240px]">
-            <Search className="w-4 h-4 text-blue-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <div className="relative w-full sm:w-96 md:w-[480px] lg:w-[560px]">
+            <Search className="w-5 h-5 text-cyan-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Search Worker by Name, ID (#341), Dept..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-slate-950 border-2 border-slate-700 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-10 pr-9 py-2 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none w-full font-medium shadow-inner transition-all"
+              className="bg-slate-950/90 border-2 border-slate-600 hover:border-slate-500 focus:border-cyan-400 rounded-2xl pl-12 pr-10 py-3 text-sm sm:text-base text-white placeholder-slate-400 focus:outline-none w-full font-semibold shadow-xl shadow-cyan-950/20 transition-all"
             />
             {searchTerm && (
               <button
                 onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 rounded-full hover:bg-slate-800"
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-800"
                 title="Clear Search"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>

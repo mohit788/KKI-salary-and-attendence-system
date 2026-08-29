@@ -142,6 +142,55 @@ async function getTrueIncompleteCount() {
   return count;
 }
 
+// Helper: Recompute all attendance records with active rules and settings
+async function recomputeAllAttendance() {
+  try {
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+    const paidHolidaysMap = await getPaidHolidaysMap();
+
+    const allRecords = await execute(`SELECT * FROM daily_attendance WHERE is_manual_override = 0`);
+    for (const r of allRecords.rows) {
+      if (!r.raw_swipes) continue;
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
+      const isHoliday = !!paidHolidaysMap[r.date];
+      const holidayName = paidHolidaysMap[r.date] || '';
+      
+      const workerCustomRules = customRules.filter(cr => !cr.target_staff_no || cr.target_staff_no === 'all' || cr.target_staff_no === r.staff_no);
+
+      const computed = computeDailyAttendance(
+        timestamps,
+        settings,
+        r.weekday,
+        workerCustomRules,
+        r.shift || '08:00',
+        isHoliday,
+        holidayName
+      );
+
+      await execute(
+        `UPDATE daily_attendance SET
+           effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
+         WHERE id = ?`,
+        [
+          computed.effectiveIn || '',
+          computed.effectiveOut || '',
+          computed.regularHours || 0,
+          computed.otHours || 0,
+          computed.sundayOtHours || 0,
+          computed.totalHours || 0,
+          computed.lateMinutes || 0,
+          computed.status,
+          computed.shift || '08:00',
+          r.id
+        ]
+      );
+    }
+  } catch (err) {
+    console.error('Error in recomputeAllAttendance:', err);
+  }
+}
+
 // -------------------------------------------------------------
 // REST API ROUTES
 // -------------------------------------------------------------

@@ -402,6 +402,7 @@ export default function App() {
             onAddAdvance={(staffNo) => setAdvanceStaffNo(staffNo)}
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
+            onRefreshData={refreshData}
           />
         )}
 
@@ -422,6 +423,7 @@ export default function App() {
             settingsList={settingsList}
             onSaveSettings={handleSaveSettings}
             onSettingsUpdated={refreshData}
+            workers={workers}
             loading={loading}
           />
         )}

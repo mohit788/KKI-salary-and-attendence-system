@@ -29,10 +29,124 @@ export default function WorkerDetail({
   onEditRecord, 
   onAddAdvance,
   isPayrollUnlocked = false,
-  onOpenUnlockModal
+  onOpenUnlockModal,
+  onRefreshData
 }) {
   const [workerSearchTerm, setWorkerSearchTerm] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+
+  // Special Rules Form State
+  const [showSpecialRulesModal, setShowSpecialRulesModal] = useState(false);
+  const [specialShift, setSpecialShift] = useState('auto');
+  const [specialGraceExempt, setSpecialGraceExempt] = useState(false);
+  const [specialBonusAmount, setSpecialBonusAmount] = useState('');
+  const [specialBonusName, setSpecialBonusName] = useState('');
+  const [specialDeductionAmount, setSpecialDeductionAmount] = useState('');
+  const [specialDeductionName, setSpecialDeductionName] = useState('');
+  const [savingSpecialRule, setSavingSpecialRule] = useState(false);
+  const [workerRulesList, setWorkerRulesList] = useState([]);
+
+  const fetchWorkerRules = async () => {
+    try {
+      const [crRes, srRes] = await Promise.all([
+        fetch('/api/custom-rules').then(r => r.json()),
+        fetch('/api/salary-rules').then(r => r.json())
+      ]);
+      const myTimingRules = (crRes?.rules || []).filter(r => String(r.target_staff_no) === String(staffNo));
+      const mySalaryRules = (srRes?.rules || []).filter(r => String(r.target_staff_no) === String(staffNo));
+      setWorkerRulesList([...myTimingRules, ...mySalaryRules]);
+    } catch (e) {
+      console.error('Error fetching worker rules:', e);
+    }
+  };
+
+  const handleSaveWorkerSpecialRules = async (e) => {
+    e.preventDefault();
+    setSavingSpecialRule(true);
+    try {
+      // 1. Update Shift Assignment
+      await fetch(`/api/workers/${staffNo}/profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          staff_name: workerData?.worker?.staff_name,
+          department: workerData?.worker?.department,
+          assigned_shift: specialShift
+        })
+      });
+
+      // 2. Grace Slab Exemption
+      if (specialGraceExempt) {
+        await fetch('/api/custom-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rule_name: `Grace Exemption for #${staffNo} (${workerData?.worker?.staff_name || ''})`,
+            rule_type: 'grace_slab_exempt',
+            target_staff_no: String(staffNo),
+            exemption_type: 'grace_slab_exempt'
+          })
+        });
+      }
+
+      // 3. Special Bonus
+      if (parseFloat(specialBonusAmount) > 0) {
+        await fetch('/api/salary-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rule_name: specialBonusName.trim() || `Special Bonus for #${staffNo}`,
+            rule_type: 'bonus',
+            target_staff_no: String(staffNo),
+            condition_type: 'always',
+            condition_value: '0',
+            action_type: 'add_fixed',
+            action_value: parseFloat(specialBonusAmount),
+            description: `Worker #${staffNo} special bonus`,
+            source: 'manual'
+          })
+        });
+      }
+
+      // 4. Special Deduction
+      if (parseFloat(specialDeductionAmount) > 0) {
+        await fetch('/api/salary-rules', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rule_name: specialDeductionName.trim() || `Special Deduction for #${staffNo}`,
+            rule_type: 'deduction',
+            target_staff_no: String(staffNo),
+            condition_type: 'always',
+            condition_value: '0',
+            action_type: 'deduct_fixed',
+            action_value: parseFloat(specialDeductionAmount),
+            description: `Worker #${staffNo} special deduction`,
+            source: 'manual'
+          })
+        });
+      }
+
+      setShowSpecialRulesModal(false);
+      if (onRefreshData) onRefreshData();
+    } catch (err) {
+      alert('Error saving special rules: ' + err.message);
+    } finally {
+      setSavingSpecialRule(false);
+    }
+  };
+
+  const handleDeleteWorkerRule = async (rule) => {
+    if (!confirm(`Delete rule "${rule.rule_name}"?`)) return;
+    try {
+      const endpoint = rule.action_type ? `/api/salary-rules/${rule.id}` : `/api/custom-rules/${rule.id}`;
+      await fetch(endpoint, { method: 'DELETE' });
+      fetchWorkerRules();
+      if (onRefreshData) onRefreshData();
+    } catch (e) {
+      console.error('Delete rule error:', e);
+    }
+  };
 
   if (!workerData) {
     return (
@@ -107,7 +221,7 @@ export default function WorkerDetail({
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
       
-      {/* Top Action Bar with Quick Worker Searcher & Prev/Next Switcher */}
+      {/* Top Action Bar with Prominent Worker Searcher & Prev/Next Switcher */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 no-print">
         
         {/* Left: Back button + Prev/Next Worker Controls */}
@@ -149,24 +263,32 @@ export default function WorkerDetail({
           )}
         </div>
 
-        {/* Center/Right: Quick Search Switcher Dropdown & Action Buttons */}
-        <div className="flex items-center space-x-2.5 flex-wrap gap-y-2 justify-between lg:justify-end">
+        {/* Center/Right: Large Quick Search Switcher Dropdown & Action Buttons */}
+        <div className="flex items-center space-x-2.5 flex-wrap gap-y-2 justify-between lg:justify-end flex-1">
           
-          {/* Quick Worker Search Bar */}
+          {/* Large, Prominent Worker Search Bar */}
           {onSelectWorker && workers.length > 0 && (
-            <div className="relative flex-1 sm:w-64">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="relative flex-1 sm:w-80 md:w-96 lg:w-[480px]">
+              <Search className="w-4 h-4 text-cyan-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Switch worker (Name / ID)..."
+                placeholder="Search Worker by Name, ID (#341), Dept..."
                 value={workerSearchTerm}
                 onChange={(e) => {
                   setWorkerSearchTerm(e.target.value);
                   setShowSearchDropdown(true);
                 }}
                 onFocus={() => setShowSearchDropdown(true)}
-                className="w-full bg-slate-950 border-2 border-slate-700 hover:border-slate-600 focus:border-blue-500 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner"
+                className="w-full bg-slate-950 border-2 border-slate-700 hover:border-cyan-500/60 focus:border-cyan-400 rounded-xl pl-10 pr-8 py-2 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none transition-all shadow-inner font-medium"
               />
+              {workerSearchTerm && (
+                <button
+                  onClick={() => { setWorkerSearchTerm(''); setShowSearchDropdown(false); }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               {showSearchDropdown && workerSearchTerm.trim() && (
                 <>
@@ -174,11 +296,11 @@ export default function WorkerDetail({
                     className="fixed inset-0 z-30" 
                     onClick={() => setShowSearchDropdown(false)}
                   />
-                  <div className="absolute left-0 top-full mt-1.5 w-72 max-h-60 overflow-y-auto bg-slate-900 border-2 border-slate-700 rounded-2xl shadow-2xl z-40 p-1.5 divide-y divide-slate-800">
+                  <div className="absolute left-0 top-full mt-1.5 w-full min-w-[320px] max-h-72 overflow-y-auto bg-slate-900 border-2 border-slate-700 rounded-2xl shadow-2xl z-40 p-2 divide-y divide-slate-800 backdrop-blur-md">
                     {filteredWorkersList.length === 0 ? (
-                      <div className="py-3 text-center text-xs text-slate-400">No worker matched</div>
+                      <div className="py-4 text-center text-xs text-slate-400 font-medium">No worker matched "{workerSearchTerm}"</div>
                     ) : (
-                      filteredWorkersList.slice(0, 10).map(w => (
+                      filteredWorkersList.slice(0, 12).map(w => (
                         <button
                           key={w.staff_no}
                           onClick={() => {
@@ -186,15 +308,15 @@ export default function WorkerDetail({
                             setWorkerSearchTerm('');
                             setShowSearchDropdown(false);
                           }}
-                          className={`w-full text-left px-3 py-2 rounded-xl text-xs hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer ${
-                            String(w.staff_no) === String(staffNo) ? 'bg-blue-950/70 border border-blue-600 text-cyan-300 font-bold' : 'text-slate-200'
+                          className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer ${
+                            String(w.staff_no) === String(staffNo) ? 'bg-blue-950/80 border border-blue-500 text-cyan-300 font-bold' : 'text-slate-200'
                           }`}
                         >
-                          <div className="flex items-center space-x-2">
-                            <span className="font-mono text-cyan-400 font-bold">#{w.staff_no}</span>
-                            <span className="font-bold text-white">{w.staff_name}</span>
+                          <div className="flex items-center space-x-3">
+                            <span className="font-mono text-xs px-2 py-0.5 rounded-lg bg-blue-950 text-cyan-300 font-bold border border-blue-700">#{w.staff_no}</span>
+                            <span className="font-bold text-sm text-white">{w.staff_name}</span>
                           </div>
-                          <span className="text-[10px] text-slate-400">{w.department || 'WORKER'}</span>
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase border border-slate-700">{w.department || 'WORKER'}</span>
                         </button>
                       ))
                     )}
@@ -203,6 +325,20 @@ export default function WorkerDetail({
               )}
             </div>
           )}
+
+          {/* Worker Special Rules Button */}
+          <button
+            onClick={() => {
+              setSpecialShift(worker?.assigned_shift || 'auto');
+              fetchWorkerRules();
+              setShowSpecialRulesModal(true);
+            }}
+            className="flex items-center space-x-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 transition-all cursor-pointer shadow-sm"
+            title="Configure Special Rules for this Worker"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span>Special Rules</span>
+          </button>
 
           {isPayrollUnlocked && (
             <button
@@ -223,6 +359,154 @@ export default function WorkerDetail({
           </button>
         </div>
       </div>
+
+      {/* MODAL: WORKER SPECIAL RULES CONFIGURATION */}
+      {showSpecialRulesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in">
+          <div className="glass-modal w-full max-w-xl rounded-2xl p-6 shadow-2xl border-2 border-amber-500/60 bg-slate-900 flex flex-col space-y-4">
+            
+            <div className="flex items-center justify-between border-b border-slate-700 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Special Rules for #{staffNo} {worker?.staff_name}
+                  </h3>
+                  <p className="text-xs text-slate-300">Set individual shift, grace exemption, allowances or deductions</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSpecialRulesModal(false)} className="text-slate-400 hover:text-white p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveWorkerSpecialRules} className="space-y-4">
+              
+              {/* 1. Custom Shift Start */}
+              <div>
+                <label className="block text-xs font-bold text-slate-200 mb-1.5">
+                  1. Assigned Shift Timing (Shift Start Anchor)
+                </label>
+                <select
+                  value={specialShift}
+                  onChange={(e) => setSpecialShift(e.target.value)}
+                  className="w-full bg-slate-950 border-2 border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:border-amber-500 font-medium"
+                >
+                  <option value="auto">⚡ Auto-Detect (Based on Arrival: 07:00 / 08:00 / 08:30 / 09:00)</option>
+                  <option value="07:00">07:00 AM (Early Factory Shift - 07:00 to 15:30)</option>
+                  <option value="08:00">08:00 AM (Standard Factory Shift - 08:00 to 16:30)</option>
+                  <option value="08:30">08:30 AM (Regular Shift - 08:30 to 17:00)</option>
+                  <option value="09:00">09:00 AM (General Shift - 09:00 to 17:30)</option>
+                </select>
+              </div>
+
+              {/* 2. Grace Exemption */}
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white">Grace Slab Exemption</h4>
+                  <p className="text-[11px] text-slate-400">Do not apply 30-minute late penalty slab to this worker</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={specialGraceExempt}
+                  onChange={(e) => setSpecialGraceExempt(e.target.checked)}
+                  className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
+                />
+              </div>
+
+              {/* 3. Special Monthly Bonus */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-200 mb-1">Add Worker Bonus (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 1000"
+                    value={specialBonusAmount}
+                    onChange={(e) => setSpecialBonusAmount(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-200 mb-1">Bonus Reason / Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Attendance Bonus"
+                    value={specialBonusName}
+                    onChange={(e) => setSpecialBonusName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              {/* 4. Special Monthly Deduction */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-200 mb-1">Add Worker Deduction (₹)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 500"
+                    value={specialDeductionAmount}
+                    onChange={(e) => setSpecialDeductionAmount(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-200 mb-1">Deduction Reason</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Uniform / Loan"
+                    value={specialDeductionName}
+                    onChange={(e) => setSpecialDeductionName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Active Rules for this Worker */}
+              {workerRulesList.length > 0 && (
+                <div className="pt-2 border-t border-slate-800">
+                  <h4 className="text-xs font-bold text-slate-300 mb-2">Existing Special Rules on this Worker:</h4>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {workerRulesList.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs">
+                        <span className="font-medium text-amber-200">{r.rule_name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWorkerRule(r)}
+                          className="text-rose-400 hover:text-rose-300 px-1.5 py-0.5 rounded bg-rose-500/10 text-[10px]"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowSpecialRulesModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSpecialRule}
+                  className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center space-x-1.5"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{savingSpecialRule ? 'Saving & Applying...' : 'Save & Apply Rule'}</span>
+                </button>
+              </div>
+            </form>
+
+          </div>
+        </div>
+      )}
 
       {/* CALCULATION LOCKED WARNING BANNER */}
       {payroll?.hasIncompleteEntries && (

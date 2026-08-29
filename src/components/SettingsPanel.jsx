@@ -37,6 +37,7 @@ export default function SettingsPanel({
   settingsList = [],
   onSaveSettings,
   onSettingsUpdated,
+  workers = [],
   loading
 }) {
   const [form, setForm] = useState({
@@ -68,6 +69,7 @@ export default function SettingsPanel({
   // Custom Rule Form State (timing-based)
   const [ruleName, setRuleName] = useState('');
   const [ruleType, setRuleType] = useState('midday_exit');
+  const [targetStaffNo, setTargetStaffNo] = useState('all');
   const [startTime, setStartTime] = useState('13:00');
   const [endTime, setEndTime] = useState('15:00');
   const [thresholdMins, setThresholdMins] = useState('30');
@@ -76,6 +78,7 @@ export default function SettingsPanel({
   // Salary Rule Form State
   const [salaryRuleName, setSalaryRuleName] = useState('');
   const [salaryRuleType, setSalaryRuleType] = useState('bonus');
+  const [salaryTargetStaffNo, setSalaryTargetStaffNo] = useState('all');
   const [conditionType, setConditionType] = useState('always');
   const [conditionValue, setConditionValue] = useState('0');
   const [actionType, setActionType] = useState('add_fixed');
@@ -267,6 +270,7 @@ export default function SettingsPanel({
         body: JSON.stringify({
           rule_name: ruleName.trim(),
           rule_type: ruleType,
+          target_staff_no: targetStaffNo || 'all',
           start_time: startTime,
           end_time: endTime,
           threshold_mins: parseInt(thresholdMins, 10) || 0,
@@ -278,6 +282,7 @@ export default function SettingsPanel({
         setToast(`Custom restriction rule "${ruleName}" created & applied!`);
         setTimeout(() => setToast(''), 4000);
         setRuleName('');
+        setTargetStaffNo('all');
         setShowCreateRuleModal(false);
         fetchCustomRules();
       } else {
@@ -331,6 +336,7 @@ export default function SettingsPanel({
         body: JSON.stringify({
           rule_name: salaryRuleName.trim(),
           rule_type: salaryRuleType,
+          target_staff_no: salaryTargetStaffNo || 'all',
           condition_type: conditionType,
           condition_value: conditionValue,
           action_type: actionType,
@@ -837,11 +843,20 @@ export default function SettingsPanel({
             {customRules.map(r => (
               <div key={r.id} className="p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-4">
                 <div className="space-y-1">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                     <span className="text-sm font-bold text-white">{r.rule_name}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold uppercase">
                       {r.rule_type === 'midday_exit' ? 'Mid-Day Exit Penalty' : 'Late Arrival Deduction'}
                     </span>
+                    {r.target_staff_no && r.target_staff_no !== 'all' ? (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40 font-mono">
+                        👤 #{r.target_staff_no}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px]">
+                        🌐 Factory-Wide
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 font-mono">
                     If condition threshold &gt; {r.threshold_mins}m ➔ Deduct {r.deduction_mins} mins from working hours
@@ -900,6 +915,22 @@ export default function SettingsPanel({
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
                 required
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Target Worker / Scope</label>
+              <select
+                value={targetStaffNo}
+                onChange={(e) => setTargetStaffNo(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 font-medium"
+              >
+                <option value="all">🌐 All Workers (Factory-Wide)</option>
+                {workers.map(w => (
+                  <option key={w.staff_no} value={w.staff_no}>
+                    👤 #{w.staff_no} - {w.staff_name} ({w.department || 'WORKER'})
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
