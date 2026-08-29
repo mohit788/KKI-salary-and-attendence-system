@@ -72,74 +72,20 @@ async function getPaidHolidaysMap() {
   }
 }
 
-// Helper: Get true incomplete count by verifying actual punch records in database
-async function getTrueIncompleteCount() {
-  const settings = await getSettingsMap();
-  const customRules = await getCustomRules();
-
-  const allRecords = await execute(`
-    SELECT * FROM daily_attendance 
-    WHERE status = 'Incomplete' 
-       OR status LIKE '%Incomplete%'
-       OR (raw_swipes != '' AND raw_swipes IS NOT NULL AND is_manual_override = 0)
-  `);
-
-  let count = 0;
-  const seen = new Set();
-  for (const r of allRecords.rows) {
-    if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
-      continue;
+// Helper: Get true incomplete count by querying records with Incomplete status (supporting optional month)
+async function getTrueIncompleteCount(month = null) {
+  try {
+    let sql = `SELECT count(*) as cnt FROM daily_attendance WHERE status = 'Incomplete' OR status LIKE '%Incomplete%'`;
+    const params = [];
+    if (month && month !== 'all') {
+      sql += ` AND date LIKE ?`;
+      params.push(`${month}%`);
     }
-
-    const key = `${r.staff_no}_${r.date}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    const { timestamps } = parseSwipeRecord(r.raw_swipes);
-    const cleaned = cleanAndDebouncePunches(timestamps, 5);
-
-    // If 0 punches: Auto-heal to Absent
-    if (cleaned.length === 0) {
-      if (r.status.includes('Incomplete') && r.is_manual_override === 0) {
-        await execute(
-          `UPDATE daily_attendance SET status = 'Absent', regular_hours = 0, ot_hours = 0, total_hours = 0 WHERE staff_no = ? AND date = ?`,
-          [r.staff_no, r.date]
-        );
-      }
-      continue;
-    }
-
-    // If punches are even (>= 2): Auto-heal to Present!
-    if (cleaned.length % 2 === 0) {
-      if (r.is_manual_override === 0 || r.status.includes('Incomplete')) {
-        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
-        await execute(
-          `UPDATE daily_attendance SET
-             effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
-           WHERE staff_no = ? AND date = ?`,
-          [
-            computed.effectiveIn || '',
-            computed.effectiveOut || '',
-            computed.regularHours || 0,
-            computed.otHours || 0,
-            computed.sundayOtHours || 0,
-            computed.totalHours || 0,
-            computed.lateMinutes || 0,
-            computed.status,
-            computed.shift || '08:00',
-            r.staff_no,
-            r.date
-          ]
-        );
-      }
-      continue;
-    }
-
-    // Odd punch count (1, 3): True missing punch!
-    count++;
+    const res = await execute(sql, params);
+    return parseInt(res.rows[0]?.cnt, 10) || 0;
+  } catch (e) {
+    return 0;
   }
-
-  return count;
 }
 
 // Helper: Recompute all attendance records with active rules and settings
@@ -1590,7 +1536,7 @@ app.get('/api/dashboard', async (req, res) => {
     const activeMonth = detectActiveMonthDetails(minDate, maxDate);
 
     // Calculate verified true incomplete count
-    const incompleteCount = await getTrueIncompleteCount();
+    const incompleteCount = await getTrueIncompleteCount(month);
 
     const statusBreakdown = {};
     statusCountsRes.rows.forEach(r => { statusBreakdown[r.status] = r.cnt; });
