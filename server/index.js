@@ -860,6 +860,7 @@ app.get('/api/attendance/all', async (req, res) => {
 // 5. GET All Workers & Payroll Summary (OPTIMIZED - Single Query Batch, optional ?month=YYYY-MM filter)
 app.get('/api/workers', async (req, res) => {
   try {
+    const { month } = req.query;
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
     let attQuery = `
