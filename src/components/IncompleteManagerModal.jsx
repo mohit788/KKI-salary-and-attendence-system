@@ -15,7 +15,9 @@ import {
   RefreshCw,
   Check,
   CornerDownLeft,
-  Filter
+  Filter,
+  Zap,
+  Edit3
 } from 'lucide-react';
 import { normalizeTimeInput, normalizeSingleTimeToken } from '../utils/formatters';
 
@@ -121,18 +123,22 @@ export default function IncompleteManagerModal({
   const [records, setRecords] = useState(initialMemoryRecords);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
+  
+  // Clean row state: missing_input is empty by default so user ONLY enters the missing punch!
   const [rowEdits, setRowEdits] = useState(() => {
     const edits = {};
     initialMemoryRecords.forEach(r => {
       const key = `${r.staff_no}_${r.date}`;
       edits[key] = {
+        missing_input: '',
         raw_swipes: r.raw_swipes || '',
         status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
-        missing_input: ''
+        is_manual_mode: false
       };
     });
     return edits;
   });
+
   const [globalSuccessMsg, setGlobalSuccessMsg] = useState('');
   const [staffFilter, setStaffFilter] = useState(initialStaffNo);
 
@@ -151,9 +157,10 @@ export default function IncompleteManagerModal({
           const key = `${r.staff_no}_${r.date}`;
           if (!next[key]) {
             next[key] = {
+              missing_input: '',
               raw_swipes: r.raw_swipes || '',
               status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
-              missing_input: ''
+              is_manual_mode: false
             };
           }
         });
@@ -179,9 +186,10 @@ export default function IncompleteManagerModal({
             const key = `${r.staff_no}_${r.date}`;
             if (!next[key]) {
               next[key] = {
+                missing_input: '',
                 raw_swipes: r.raw_swipes || '',
                 status: r.status && !r.status.includes('Incomplete') ? r.status : 'Present (Full)',
-                missing_input: ''
+                is_manual_mode: false
               };
             }
           });
@@ -231,82 +239,85 @@ export default function IncompleteManagerModal({
     setSelectedIds(newSelected);
   };
 
-  const handleInputChange = (key, field, val) => {
-    setRowEdits(prev => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        [field]: val
-      }
-    }));
-  };
-
-  // Helper to extract clean single punch
+  // Helper to extract clean single punch info
   const getSinglePunchInfo = (record) => {
     const raw = (record.raw_swipes || '').trim();
     const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
     if (punches.length === 1) {
       const punch = punches[0];
       const mins = parseMins(punch);
-      const isMissingIn = mins > 750;
-      return { hasSingle: true, punch, isMissingIn };
+      const isMissingIn = mins > 750; // > 12:30 PM is evening punch -> Missing Morning IN
+      return { hasSingle: true, punch, isMissingIn, punchCount: 1 };
     }
-    return { hasSingle: false, punch: '', isMissingIn: false };
+    const isOdd = punches.length > 0 && punches.length % 2 !== 0;
+    return { hasSingle: false, punch: punches.join(' '), isMissingIn: false, punchCount: punches.length, isOdd };
   };
 
-  // Apply quick punch (Prepend if Missing IN, Append if Missing OUT)
-  const handleQuickFill = (key, record, punchTime) => {
-    const normPunch = normalizeSingleTimeToken(punchTime);
+  // Compute final punch sequence based on missing_input and existing punches
+  const computeResolvedSwipes = (record, missingVal) => {
+    const cleanMissing = (missingVal || '').trim();
+    if (!cleanMissing) return record.raw_swipes || '';
+
+    const normInput = normalizeTimeInput(cleanMissing);
     const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(record);
 
-    let updatedSwipes = '';
     if (hasSingle) {
       if (isMissingIn) {
-        updatedSwipes = `${normPunch} ${punch}`;
+        return `${normInput} ${punch}`;
       } else {
-        updatedSwipes = `${punch} ${normPunch}`;
+        return `${punch} ${normInput}`;
       }
     } else {
-      const current = (rowEdits[key]?.raw_swipes || record.raw_swipes || '').trim();
-      updatedSwipes = current ? `${current} ${normPunch}` : `08:00 ${normPunch}`;
+      const raw = (record.raw_swipes || '').trim();
+      return raw ? `${raw} ${normInput}` : normInput;
     }
+  };
+
+  // Handle typing inside the clean "Enter Missing Punch" input field
+  const handleMissingInputChange = (key, record, val) => {
+    const computed = computeResolvedSwipes(record, val);
+    setRowEdits(prev => ({
+      ...prev,
+      [key]: {
+        ...prev[key],
+        missing_input: val,
+        raw_swipes: computed,
+        status: val.trim() ? 'Present (Full)' : (prev[key]?.status || 'Incomplete')
+      }
+    }));
+  };
+
+  // On blur of missing input, auto-normalize shorthands (e.g. 901 -> 09:01)
+  const handleMissingInputBlur = (key, record) => {
+    const edit = rowEdits[key];
+    const val = (edit?.missing_input || '').trim();
+    if (!val) return;
+
+    const norm = normalizeSingleTimeToken(val);
+    const computed = computeResolvedSwipes(record, norm);
 
     setRowEdits(prev => ({
       ...prev,
       [key]: {
         ...prev[key],
-        raw_swipes: updatedSwipes,
+        missing_input: norm,
+        raw_swipes: computed,
         status: 'Present (Full)'
       }
     }));
   };
 
-  // Apply typed missing time (supports short formats: 901 -> 09:01, 1838 -> 18:38)
-  const handleApplyMissingInput = (key, record) => {
-    const edit = rowEdits[key];
-    const inputVal = (edit?.missing_input || '').trim();
-    if (!inputVal) return;
-
-    const normInput = normalizeTimeInput(inputVal);
-    const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(record);
-
-    let updatedSwipes = '';
-    if (hasSingle) {
-      if (isMissingIn) {
-        updatedSwipes = `${normInput} ${punch}`;
-      } else {
-        updatedSwipes = `${punch} ${normInput}`;
-      }
-    } else {
-      updatedSwipes = normInput;
-    }
+  // Apply 1-click quick punch (Sets missing input & computes resulting sequence)
+  const handleQuickFill = (key, record, punchTime) => {
+    const norm = normalizeSingleTimeToken(punchTime);
+    const computed = computeResolvedSwipes(record, norm);
 
     setRowEdits(prev => ({
       ...prev,
       [key]: {
         ...prev[key],
-        raw_swipes: updatedSwipes,
-        missing_input: '',
+        missing_input: norm,
+        raw_swipes: computed,
         status: 'Present (Full)'
       }
     }));
@@ -315,30 +326,19 @@ export default function IncompleteManagerModal({
   // Batch actions
   const handleBatchFill = (punchTime) => {
     if (selectedIds.size === 0) return;
-    const normPunch = normalizeSingleTimeToken(punchTime);
+    const norm = normalizeSingleTimeToken(punchTime);
 
     setRowEdits(prev => {
       const next = { ...prev };
       selectedIds.forEach(key => {
         const record = records.find(r => `${r.staff_no}_${r.date}` === key);
         if (!record) return;
-        const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(record);
-
-        let updatedSwipes = '';
-        if (hasSingle) {
-          if (isMissingIn) {
-            updatedSwipes = `${normPunch} ${punch}`;
-          } else {
-            updatedSwipes = `${punch} ${normPunch}`;
-          }
-        } else {
-          const cur = (next[key]?.raw_swipes || record.raw_swipes || '').trim();
-          updatedSwipes = cur ? `${cur} ${normPunch}` : `08:00 ${normPunch}`;
-        }
+        const computed = computeResolvedSwipes(record, norm);
 
         next[key] = {
           ...next[key],
-          raw_swipes: updatedSwipes,
+          missing_input: norm,
+          raw_swipes: computed,
           status: 'Present (Full)'
         };
       });
@@ -353,6 +353,7 @@ export default function IncompleteManagerModal({
       selectedIds.forEach(key => {
         next[key] = {
           ...next[key],
+          missing_input: 'Absent',
           raw_swipes: next[key]?.raw_swipes || '',
           status: 'Absent'
         };
@@ -506,7 +507,7 @@ export default function IncompleteManagerModal({
                 </button>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Smart IN/OUT missing detection • Quick short-typing (e.g. <span className="text-amber-300 font-mono font-bold">901</span> $\rightarrow$ <span className="text-emerald-300 font-mono font-bold">09:01</span>) • Instant row-by-row saving.
+                Type ONLY the missing punch (e.g. <span className="text-amber-300 font-mono font-bold">901</span> $\rightarrow$ <span className="text-emerald-300 font-mono font-bold">09:01</span>) or click 1-Click Fix. No pre-filled text to delete!
               </p>
             </div>
           </div>
@@ -532,11 +533,11 @@ export default function IncompleteManagerModal({
               <div className="flex items-center space-x-2">
                 <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
-                  <strong>Calculation Notice:</strong> Missing punches put salary on hold. Save each row individually or resolve all at once.
+                  <strong>Clean Entry Mode:</strong> Input box is clean & empty. Type only the missing punch or click a button to auto-fill.
                 </span>
               </div>
               <span className="text-[11px] font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-600">
-                Short Format: 901 $\rightarrow$ 09:01 | 1838 $\rightarrow$ 18:38
+                Short Format: 901 $\rightarrow$ 09:01 | 830 $\rightarrow$ 08:30 | 1838 $\rightarrow$ 18:38
               </span>
             </div>
           )
@@ -578,7 +579,7 @@ export default function IncompleteManagerModal({
               className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-emerald-900/60 text-emerald-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
               title="Apply 08:00 to selected (Smart IN/OUT)"
             >
-              + 08:00
+              + 08:00 IN
             </button>
             <button
               onClick={() => handleBatchFill('16:30')}
@@ -586,7 +587,7 @@ export default function IncompleteManagerModal({
               className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-900/60 text-cyan-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
               title="Apply 16:30 to selected"
             >
-              + 16:30
+              + 16:30 OUT
             </button>
             <button
               onClick={() => handleBatchFill('18:30')}
@@ -594,7 +595,7 @@ export default function IncompleteManagerModal({
               className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-900/60 text-amber-300 text-xs font-bold border border-slate-700 disabled:opacity-40 transition-all cursor-pointer"
               title="Apply 18:30 to selected"
             >
-              + 18:30
+              + 18:30 OUT
             </button>
             <button
               onClick={handleBatchMarkAbsent}
@@ -657,9 +658,9 @@ export default function IncompleteManagerModal({
                   <th className="py-3 px-3 bg-slate-950">Employee</th>
                   <th className="py-3 px-3 bg-slate-950">Date</th>
                   <th className="py-3 px-3 bg-slate-950">Detected State</th>
-                  <th className="py-3 px-3 text-center bg-slate-950">Quick One-Click Fix</th>
-                  <th className="py-3 px-3 bg-slate-950">Type Missing Punch</th>
-                  <th className="py-3 px-3 bg-slate-950">Punch Sequence</th>
+                  <th className="py-3 px-3 text-center bg-slate-950">1-Click Quick Fix</th>
+                  <th className="py-3 px-3 bg-slate-950">Type Missing Time</th>
+                  <th className="py-3 px-3 bg-slate-950">Resulting Punch Preview</th>
                   <th className="py-3 px-2 text-center bg-slate-950 w-24">Save Row</th>
                 </tr>
               </thead>
@@ -669,8 +670,9 @@ export default function IncompleteManagerModal({
                   const isSelected = selectedIds.has(key);
                   const isRowSaving = savingRows[key];
                   const isRowSaved = savedRows[key];
-                  const editData = rowEdits[key] || { raw_swipes: r.raw_swipes || '', status: r.status, missing_input: '' };
+                  const editData = rowEdits[key] || { missing_input: '', raw_swipes: r.raw_swipes || '', status: r.status };
                   const { hasSingle, punch, isMissingIn } = getSinglePunchInfo(r);
+                  const isResolved = editData.raw_swipes && editData.raw_swipes !== r.raw_swipes;
 
                   return (
                     <tr 
@@ -725,7 +727,7 @@ export default function IncompleteManagerModal({
                                 <span>Missing IN (Morning)</span>
                               </span>
                               <span className="text-[10px] text-slate-300">
-                                OUT Punch: <strong className="text-cyan-300 font-bold">{punch}</strong>
+                                Machine OUT: <strong className="text-cyan-300 font-bold font-mono">{punch}</strong>
                               </span>
                             </div>
                           ) : (
@@ -735,13 +737,13 @@ export default function IncompleteManagerModal({
                                 <span>Missing OUT (Evening)</span>
                               </span>
                               <span className="text-[10px] text-slate-300">
-                                IN Punch: <strong className="text-emerald-300 font-bold">{punch}</strong>
+                                Machine IN: <strong className="text-emerald-300 font-bold font-mono">{punch}</strong>
                               </span>
                             </div>
                           )
                         ) : r.raw_swipes ? (
                           <span className="px-2 py-0.5 rounded bg-orange-950 text-orange-300 border border-orange-600/70 text-[11px] font-bold inline-block">
-                            {r.raw_swipes} (Odd Punches)
+                            {r.raw_swipes} (Odd)
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[11px] font-bold inline-block">
@@ -750,7 +752,7 @@ export default function IncompleteManagerModal({
                         )}
                       </td>
 
-                      {/* Smart Quick Fix Buttons tailored to Missing IN vs Missing OUT */}
+                      {/* 1-Click Quick Fix Buttons */}
                       <td className="py-2.5 px-2.5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center space-x-1">
                           {hasSingle && isMissingIn ? (
@@ -758,21 +760,21 @@ export default function IncompleteManagerModal({
                               <button
                                 onClick={() => handleQuickFill(key, r, '08:00')}
                                 className="px-2 py-1 rounded-lg bg-emerald-950 hover:bg-emerald-900 text-emerald-300 font-mono font-bold text-[11px] border border-emerald-700 transition-all shadow-sm cursor-pointer"
-                                title="Add 08:00 morning IN punch"
+                                title="Set missing morning IN punch to 08:00"
                               >
                                 + 08:00 IN
                               </button>
                               <button
                                 onClick={() => handleQuickFill(key, r, '08:30')}
                                 className="px-2 py-1 rounded-lg bg-teal-950 hover:bg-teal-900 text-teal-300 font-mono font-bold text-[11px] border border-teal-700 transition-all shadow-sm cursor-pointer"
-                                title="Add 08:30 morning IN punch"
+                                title="Set missing morning IN punch to 08:30"
                               >
                                 + 08:30 IN
                               </button>
                               <button
                                 onClick={() => handleQuickFill(key, r, '09:00')}
                                 className="px-2 py-1 rounded-lg bg-blue-950 hover:bg-blue-900 text-cyan-300 font-mono font-bold text-[11px] border border-blue-700 transition-all shadow-sm cursor-pointer"
-                                title="Add 09:00 morning IN punch"
+                                title="Set missing morning IN punch to 09:00"
                               >
                                 + 09:00 IN
                               </button>
@@ -782,21 +784,21 @@ export default function IncompleteManagerModal({
                               <button
                                 onClick={() => handleQuickFill(key, r, '16:30')}
                                 className="px-2 py-1 rounded-lg bg-blue-950 hover:bg-blue-900 text-cyan-300 font-mono font-bold text-[11px] border border-blue-700 transition-all shadow-sm cursor-pointer"
-                                title="Add 16:30 OUT punch"
+                                title="Set missing evening OUT punch to 16:30"
                               >
                                 + 16:30 OUT
                               </button>
                               <button
                                 onClick={() => handleQuickFill(key, r, '18:30')}
                                 className="px-2 py-1 rounded-lg bg-amber-950 hover:bg-amber-900 text-amber-300 font-mono font-bold text-[11px] border border-amber-700 transition-all shadow-sm cursor-pointer"
-                                title="Add 18:30 OUT punch"
+                                title="Set missing evening OUT punch to 18:30"
                               >
                                 + 18:30 OUT
                               </button>
                               <button
                                 onClick={() => handleQuickFill(key, r, '19:30')}
                                 className="px-2 py-1 rounded-lg bg-purple-950 hover:bg-purple-900 text-purple-300 font-mono font-bold text-[11px] border border-purple-700 transition-all shadow-sm cursor-pointer"
-                                title="Add 19:30 OUT punch"
+                                title="Set missing evening OUT punch to 19:30"
                               >
                                 + 19:30 OUT
                               </button>
@@ -805,47 +807,41 @@ export default function IncompleteManagerModal({
                         </div>
                       </td>
 
-                      {/* Direct Missing Punch Fast-Typing (e.g. 901 -> 09:01) */}
+                      {/* TYPE MISSING TIME ONLY (Clean, empty input field) */}
                       <td className="py-2.5 px-2.5 whitespace-nowrap">
                         <div className="flex items-center space-x-1">
                           <input
                             type="text"
                             value={editData.missing_input || ''}
-                            onChange={(e) => handleInputChange(key, 'missing_input', e.target.value)}
+                            onChange={(e) => handleMissingInputChange(key, r, e.target.value)}
+                            onBlur={() => handleMissingInputBlur(key, r)}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
-                                handleApplyMissingInput(key, r);
+                                handleMissingInputBlur(key, r);
+                                handleSaveSingleRow(r);
                               }
                             }}
-                            placeholder={hasSingle ? (isMissingIn ? 'e.g. 901 / 830' : 'e.g. 1838 / 1700') : 'e.g. 901'}
-                            className="w-28 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 font-mono text-white text-xs placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                            placeholder={hasSingle ? (isMissingIn ? 'Type IN (e.g. 901)' : 'Type OUT (e.g. 1838)') : 'e.g. 901'}
+                            className="w-36 bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-2.5 py-1.5 font-mono text-white text-xs placeholder-slate-600 focus:outline-none font-bold"
                           />
-                          <button
-                            onClick={() => handleApplyMissingInput(key, r)}
-                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 transition-all cursor-pointer"
-                            title="Apply typed time"
-                          >
-                            <CornerDownLeft className="w-3.5 h-3.5" />
-                          </button>
                         </div>
                       </td>
 
-                      {/* Editable Swipes Input */}
-                      <td className="py-2.5 px-3">
-                        <input
-                          type="text"
-                          value={editData.raw_swipes}
-                          onChange={(e) => handleInputChange(key, 'raw_swipes', e.target.value)}
-                          onBlur={() => {
-                            if (editData.raw_swipes) {
-                              const norm = normalizeTimeInput(editData.raw_swipes);
-                              handleInputChange(key, 'raw_swipes', norm);
-                            }
-                          }}
-                          placeholder="e.g. 08:00 18:38"
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 font-mono text-white text-xs placeholder-slate-600 focus:outline-none focus:border-amber-500 font-bold"
-                        />
+                      {/* RESULTING PUNCH PREVIEW (Clean Badge Preview) */}
+                      <td className="py-2.5 px-3 whitespace-nowrap font-mono">
+                        {isResolved ? (
+                          <div className="flex items-center space-x-1.5">
+                            <span className="px-2.5 py-1 rounded-xl bg-emerald-950 text-emerald-300 border border-emerald-500/80 font-bold text-xs shadow-sm">
+                              {editData.raw_swipes}
+                            </span>
+                            <span className="text-[10px] text-emerald-400 font-bold">✓ Ready</span>
+                          </div>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[11px] font-mono border border-slate-700">
+                            {hasSingle ? (isMissingIn ? `Pending IN + ${punch}` : `${punch} + Pending OUT`) : (r.raw_swipes || 'Pending')}
+                          </span>
+                        )}
                       </td>
 
                       {/* INLINE ROW SAVE BUTTON */}
@@ -856,7 +852,9 @@ export default function IncompleteManagerModal({
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center space-x-1 w-full cursor-pointer ${
                             isRowSaved 
                               ? 'bg-emerald-700 text-white border border-emerald-400' 
-                              : 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400'
+                              : isResolved
+                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 animate-pulse'
+                                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600'
                           }`}
                           title="Save this single row immediately"
                         >
