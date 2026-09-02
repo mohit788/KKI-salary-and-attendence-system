@@ -88,7 +88,7 @@ export default function App() {
       if (monthsRes && monthsRes.success) setAvailableMonths(monthsRes.months || []);
 
       if (selectedStaffNo) {
-        fetchWorkerDetail(selectedStaffNo);
+        fetchWorkerDetail(selectedStaffNo, activeM);
       }
     } catch (err) {
       console.error('Error refreshing data:', err);
@@ -96,8 +96,9 @@ export default function App() {
   };
 
   const handleSelectMonth = (newMonth) => {
-    setSelectedMonth(newMonth);
-    refreshData(newMonth);
+    const validMonth = newMonth || 'all';
+    setSelectedMonth(validMonth);
+    refreshData(validMonth);
   };
 
   useEffect(() => {
@@ -456,11 +457,13 @@ export default function App() {
         isOpen={showIncompleteModal}
         workers={workers}
         allAttendance={allAttendance}
+        selectedMonth={selectedMonth}
+        availableMonths={availableMonths}
         onClose={() => {
           setShowIncompleteModal(false);
-          refreshData();
+          refreshData(selectedMonth);
         }}
-        onRefreshData={refreshData}
+        onRefreshData={() => refreshData(selectedMonth)}
         initialStaffNo={incompleteStaffFilter}
       />
 

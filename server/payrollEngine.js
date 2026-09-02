@@ -101,9 +101,28 @@ function calculateWorkerPayroll({
 
   // Short days count as 0.5 day (or prorated worked hours / 8)
   const proratedShortDays = +(shortDays * 0.5).toFixed(2);
-  const payableDays = +(fullPresentDays + proratedShortDays + paidWeeklyOffs + paidHolidays).toFixed(2);
+  const totalUnpaidLeaves = absentDays + forfeitedWeeklyOffs + forfeitedHolidays;
 
-  const basePay = +(payableDays * perDayRate).toFixed(2);
+  let payableDays = 0;
+  let basePay = 0;
+
+  if (standardDaysType === '26') {
+    // 26 working days standard: 0 absents = 26 payable days = full salary. Each absent deducts 1 day rate.
+    payableDays = Math.max(0, +(26 - totalUnpaidLeaves - (shortDays * 0.5)).toFixed(2));
+    basePay = totalUnpaidLeaves === 0 && shortDays === 0
+      ? monthlySalary
+      : Math.min(monthlySalary, +(payableDays * perDayRate).toFixed(2));
+  } else {
+    // Calendar days or 30 days standard:
+    const rawPayable = +(fullPresentDays + proratedShortDays + paidWeeklyOffs + paidHolidays).toFixed(2);
+    payableDays = rawPayable;
+    if (totalUnpaidLeaves === 0 && shortDays === 0) {
+      basePay = monthlySalary;
+    } else {
+      basePay = Math.min(monthlySalary, +(payableDays * perDayRate).toFixed(2));
+    }
+  }
+
   const otPay = +(totalOtHours * hourlyOtRate).toFixed(2);
   const sundayOtPay = +(totalSundayOtHours * hourlySundayOtRate).toFixed(2);
 

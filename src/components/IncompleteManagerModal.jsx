@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  AlertTriangle, 
-  CheckCircle2, 
-  X, 
-  Search, 
-  Sparkles, 
-  Save, 
-  Clock, 
-  UserCheck, 
-  CheckSquare, 
+import {
+  AlertTriangle,
+  CheckCircle2,
+  X,
+  Search,
+  Sparkles,
+  Save,
+  Clock,
+  UserCheck,
+  CheckSquare,
   Square,
   ArrowRight,
   ShieldCheck,
@@ -27,13 +27,13 @@ function parseMins(timeStr) {
   return (parseInt(parts[0], 10) || 0) * 60 + (parseInt(parts[1], 10) || 0);
 }
 
-export default function IncompleteManagerModal({ 
-  isOpen, 
-  onClose, 
+export default function IncompleteManagerModal({
+  isOpen,
+  onClose,
   onRefreshData,
   workers = [],
   allAttendance = [],
-  initialStaffNo = null 
+  initialStaffNo = null
 }) {
   if (!isOpen) return null;
 
@@ -121,7 +121,7 @@ export default function IncompleteManagerModal({
   const [records, setRecords] = useState(initialMemoryRecords);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState(new Set());
-  
+
   // Clean row state: missing_input is empty by default so user ONLY enters the missing punch!
   const [rowEdits, setRowEdits] = useState(() => {
     const edits = {};
@@ -173,8 +173,8 @@ export default function IncompleteManagerModal({
     try {
       const res = await fetch('/api/attendance/incomplete').then(r => r.json());
       if (res.success) {
-        const incRecords = res.incompleteRecords && res.incompleteRecords.length > 0 
-          ? res.incompleteRecords 
+        const incRecords = res.incompleteRecords && res.incompleteRecords.length > 0
+          ? res.incompleteRecords
           : extractIncompleteFromMemory();
 
         setRecords(incRecords);
@@ -464,7 +464,7 @@ export default function IncompleteManagerModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
       <div className="glass-modal w-full max-w-7xl max-h-[94vh] flex flex-col rounded-3xl p-5 sm:p-6 shadow-2xl border-2 border-amber-500/50 bg-slate-900 overflow-hidden">
-        
+
         {/* Header Bar */}
         <div className="flex items-center justify-between border-b-2 border-slate-800 pb-4 mb-3.5 shrink-0">
           <div className="flex items-center space-x-3.5">
@@ -495,7 +495,7 @@ export default function IncompleteManagerModal({
                 )}
 
                 <button
-                  onClick={fetchIncomplete}
+                  onClick={() => fetchIncomplete(modalMonth)}
                   disabled={loading}
                   className="px-2.5 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold border border-slate-700 flex items-center space-x-1 transition-all cursor-pointer"
                   title="Reload Incomplete Records from Database"
@@ -504,13 +504,55 @@ export default function IncompleteManagerModal({
                   <span>Refresh</span>
                 </button>
               </div>
-              <p className="text-xs text-slate-300 mt-0.5">
+
+              {/* Month Selector Tabs */}
+              {availableMonths && availableMonths.length > 0 && (
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  <span className="text-[11px] font-bold text-slate-400 mr-1">Scope Month:</span>
+                  {availableMonths.map(m => {
+                    const key = m.monthKey || m.month_key;
+                    const label = m.label || m.month_label || key;
+                    const isActive = modalMonth === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          setModalMonth(key);
+                          fetchIncomplete(key);
+                        }}
+                        className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-amber-500 text-slate-950 font-extrabold shadow-sm'
+                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => {
+                      setModalMonth('all');
+                      fetchIncomplete('all');
+                    }}
+                    className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      modalMonth === 'all'
+                        ? 'bg-amber-500 text-slate-950 font-extrabold shadow-sm'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                    }`}
+                  >
+                    All Months
+                  </button>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-300 mt-1">
                 Type ONLY the missing punch (e.g. <span className="text-amber-300 font-mono font-bold">901</span> $\rightarrow$ <span className="text-emerald-300 font-mono font-bold">09:01</span>) or click 1-Click Fix. No pre-filled text to delete!
               </p>
             </div>
           </div>
 
-          <button 
+          <button
             onClick={handleCloseAndSync}
             className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition-all cursor-pointer"
             title="Close modal and refresh parent data"
@@ -673,19 +715,18 @@ export default function IncompleteManagerModal({
                   const isResolved = editData.raw_swipes && editData.raw_swipes !== r.raw_swipes;
 
                   return (
-                    <tr 
-                      key={key} 
-                      className={`hover:bg-slate-800/90 transition-colors divide-x divide-slate-800/80 ${
-                        isRowSaved 
-                          ? 'bg-emerald-950/20 border-l-4 border-l-emerald-500' 
-                          : isSelected 
-                            ? 'bg-amber-950/30' 
-                            : 'even:bg-slate-950/40 odd:bg-slate-900/60'
-                      }`}
+                    <tr
+                      key={key}
+                      className={`hover:bg-slate-800/90 transition-colors divide-x divide-slate-800/80 ${isRowSaved
+                        ? 'bg-emerald-950/20 border-l-4 border-l-emerald-500'
+                        : isSelected
+                          ? 'bg-amber-950/30'
+                          : 'even:bg-slate-950/40 odd:bg-slate-900/60'
+                        }`}
                     >
                       {/* Checkbox */}
                       <td className="py-2.5 px-2.5 text-center">
-                        <button 
+                        <button
                           onClick={() => handleToggleSelect(key)}
                           className="text-slate-400 hover:text-amber-400 transition-colors cursor-pointer"
                         >
@@ -847,13 +888,12 @@ export default function IncompleteManagerModal({
                         <button
                           onClick={() => handleSaveSingleRow(r)}
                           disabled={isRowSaving}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center space-x-1 w-full cursor-pointer ${
-                            isRowSaved 
-                              ? 'bg-emerald-700 text-white border border-emerald-400' 
-                              : isResolved
-                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 animate-pulse'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600'
-                          }`}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center space-x-1 w-full cursor-pointer ${isRowSaved
+                            ? 'bg-emerald-700 text-white border border-emerald-400'
+                            : isResolved
+                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 animate-pulse'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600'
+                            }`}
                           title="Save this single row immediately"
                         >
                           {isRowSaving ? (
@@ -883,7 +923,7 @@ export default function IncompleteManagerModal({
         {/* Footer Actions */}
         <div className="flex items-center justify-between border-t-2 border-slate-800 pt-3.5 mt-3.5 shrink-0">
           <div className="text-xs text-slate-400 font-medium">
-            Showing <strong className="text-white">{filteredRecords.length}</strong> incomplete records 
+            Showing <strong className="text-white">{filteredRecords.length}</strong> incomplete records
             {selectedIds.size > 0 && <span> • <strong className="text-amber-400">{selectedIds.size}</strong> selected for batch action</span>}
           </div>
 

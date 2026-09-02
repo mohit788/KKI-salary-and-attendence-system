@@ -800,9 +800,12 @@ app.get('/api/months', async (req, res) => {
       const year = parts[0];
       const mNum = parseInt(parts[1], 10);
       const name = (mNum >= 1 && mNum <= 12) ? MONTH_NAMES[mNum - 1] : r.month_key;
+      const label = `${name} ${year}`;
       return {
         monthKey: r.month_key,
-        label: `${name} ${year}`,
+        month_key: r.month_key,
+        label,
+        month_label: label,
         year,
         monthName: name,
       };

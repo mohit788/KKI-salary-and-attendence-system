@@ -116,19 +116,23 @@ export default function Dashboard({
               {availableMonths && availableMonths.length > 1 && onSelectMonth && (
                 <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                   <span className="text-[11px] font-bold text-slate-400 mr-1">Switch Month:</span>
-                  {availableMonths.map(m => (
-                    <button
-                      key={m.month_key}
-                      onClick={() => onSelectMonth(m.month_key)}
-                      className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        selectedMonth === m.month_key
-                          ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
-                          : 'bg-slate-800/90 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
-                      }`}
-                    >
-                      {m.month_label}
-                    </button>
-                  ))}
+                  {availableMonths.map(m => {
+                    const key = m.monthKey || m.month_key;
+                    const label = m.label || m.month_label || key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => onSelectMonth(key)}
+                        className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          selectedMonth === key
+                            ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                            : 'bg-slate-800/90 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                   <button
                     onClick={() => onSelectMonth('all')}
                     className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
