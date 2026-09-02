@@ -2722,6 +2722,8 @@ app.post('/api/ai-assistant/generate-report', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
 // ==========================================
 // 14. AI COPILOT & HYBRID RAG INTELLIGENCE API
 // ==========================================
