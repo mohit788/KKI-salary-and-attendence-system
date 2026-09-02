@@ -25,7 +25,8 @@ export default function Navbar({
   selectedMonth,
   availableMonths = [],
   onSelectMonth,
-  onOpenHolidaysModal
+  onOpenHolidaysModal,
+  onOpenAICopilot
 }) {
   const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresPayroll: false },
@@ -92,6 +93,19 @@ export default function Navbar({
                 </select>
               </div>
             )}
+
+            {/* AI Copilot Trigger Button */}
+            <button
+              onClick={onOpenAICopilot}
+              className="flex items-center space-x-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-gradient-to-r from-amber-500/20 to-amber-400/10 hover:from-amber-500/30 hover:to-amber-400/20 text-amber-300 hover:text-amber-200 border border-amber-500/40 shadow-sm transition-all whitespace-nowrap cursor-pointer group"
+              title="Open Factory AI Copilot (Ctrl + K)"
+            >
+              <Sparkles className="w-4 h-4 text-amber-400 group-hover:rotate-12 transition-transform" />
+              <span>⚡ AI Copilot</span>
+              <kbd className="hidden lg:inline-block ml-1 px-1.5 py-0.2 bg-slate-900/80 rounded text-[10px] text-slate-400 border border-slate-700 font-mono">
+                Ctrl+K
+              </kbd>
+            </button>
 
             {/* Paid Holidays Manager Button */}
             <button

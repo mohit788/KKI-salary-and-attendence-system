@@ -21,6 +21,7 @@ const {
 const { calculateWorkerPayroll } = require('./payrollEngine');
 const { parseNaturalLanguageRule } = require('./aiRuleEngine');
 const { processUniversalAssistantPrompt } = require('./aiAssistantEngine');
+const { queryFactoryIntelligence, generateSmartSuggestions, rebuildKnowledgeIndex } = require('./ragEngine');
 
 const app = express();
 app.use(cors());
@@ -2721,7 +2722,51 @@ app.post('/api/ai-assistant/generate-report', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+// ==========================================
+// 14. AI COPILOT & HYBRID RAG INTELLIGENCE API
+// ==========================================
+
+// POST Natural Language AI Query with Hybrid Semantic & SQL Search
+app.post('/api/ai/query', async (req, res) => {
+  try {
+    const { query, month, conversationHistory } = req.body;
+    if (!query || !query.trim()) {
+      return res.status(400).json({ success: false, error: 'Query cannot be empty' });
+    }
+    const result = await queryFactoryIntelligence(query, { month, conversationHistory });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
+
+// GET Smart Suggested Prompts for Active Month
+app.get('/api/ai/suggestions', async (req, res) => {
+  try {
+    const { month } = req.query;
+    const suggestions = await generateSmartSuggestions(month || '2026-07');
+    res.json({ success: true, suggestions });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET Knowledge Base Status
+app.get('/api/ai/status', async (req, res) => {
+  try {
+    const index = await rebuildKnowledgeIndex();
+    res.json({
+      success: true,
+      indexed: true,
+      docCount: index.documents.length,
+      workerCount: index.workerLookup.size,
+      lastUpdated: index.lastUpdated
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 404 handler for unmatched API routes
 app.all('/api/*', (req, res) => {
   res.status(404).json({ success: false, error: `API endpoint ${req.method} ${req.originalUrl} not found` });
@@ -2751,7 +2796,8 @@ const PORT = process.env.PORT || 5000;
 initDatabase().then(async () => {
   try {
     await recomputeAllAttendance();
-    console.log('✅ Startup Attendance Integrity Check: All attendance and OT verified with factory rules.');
+    await rebuildKnowledgeIndex();
+    console.log('✅ Startup Attendance & AI RAG Knowledge Base Initialized.');
   } catch (err) {
     console.warn('⚠️ Startup recompute warning:', err.message);
   }

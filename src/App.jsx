@@ -13,6 +13,7 @@ import AuditLogsModal from './components/AuditLogsModal';
 import AiAssistantBar from './components/AiAssistantBar';
 import IncompleteManagerModal from './components/IncompleteManagerModal';
 import HolidaysManagerModal from './components/HolidaysManagerModal';
+import AICopilotDrawer from './components/AICopilotDrawer';
 import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
 
 export default function App() {
@@ -23,6 +24,9 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [allAttendance, setAllAttendance] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // AI Copilot RAG Drawer State
+  const [showAICopilotModal, setShowAICopilotModal] = useState(false);
 
   // Month Selection State
   const [selectedMonth, setSelectedMonth] = useState('all');
@@ -103,6 +107,18 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
+  }, []);
+
+  // Global Keyboard Shortcut: Ctrl + K (or Cmd + K) for AI Copilot
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowAICopilotModal(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Verify Password & Unlock Payroll
@@ -364,6 +380,7 @@ export default function App() {
         availableMonths={availableMonths}
         onSelectMonth={handleSelectMonth}
         onOpenHolidaysModal={() => setShowHolidaysModal(true)}
+        onOpenAICopilot={() => setShowAICopilotModal(true)}
       />
 
       <AiAssistantBar onRefreshData={refreshData} />
@@ -475,6 +492,17 @@ export default function App() {
           refreshData();
         }}
         onRefreshData={refreshData}
+      />
+
+      {/* DRAWER: FACTORY AI COPILOT & HYBRID RAG INTELLIGENCE */}
+      <AICopilotDrawer
+        isOpen={showAICopilotModal}
+        onClose={() => setShowAICopilotModal(false)}
+        selectedMonth={selectedMonth}
+        onSelectWorker={(staffNo) => {
+          fetchWorkerDetail(staffNo, selectedMonth);
+          setActiveTab('workers');
+        }}
       />
 
       {/* MODAL: UNLOCK PAYROLL & SALARY MODE */}
