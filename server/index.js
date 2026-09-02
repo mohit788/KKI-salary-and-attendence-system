@@ -72,21 +72,6 @@ async function getPaidHolidaysMap() {
   }
 }
 
-// Helper: Get true incomplete count by querying records with Incomplete status (supporting optional month)
-async function getTrueIncompleteCount(month = null) {
-  try {
-    let sql = `SELECT count(*) as cnt FROM daily_attendance WHERE status = 'Incomplete' OR status LIKE '%Incomplete%'`;
-    const params = [];
-    if (month && month !== 'all') {
-      sql += ` AND date LIKE ?`;
-      params.push(`${month}%`);
-    }
-    const res = await execute(sql, params);
-    return parseInt(res.rows[0]?.cnt, 10) || 0;
-  } catch (e) {
-    return 0;
-  }
-}
 
 // Helper: Recompute all attendance records with active rules and settings
 async function recomputeAllAttendance() {
@@ -1294,30 +1279,32 @@ app.get('/api/attendance/incomplete', async (req, res) => {
         continue;
       }
 
-      // If punch count is even (>= 2, like 07:55 17:34): Auto-heal to Present!
-      if (cleaned.length % 2 === 0) {
-        if (r.is_manual_override === 0 || r.status.includes('Incomplete')) {
-          const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
-          await execute(
-            `UPDATE daily_attendance SET
-               effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
-             WHERE staff_no = ? AND date = ?`,
-            [
-              computed.effectiveIn || '',
-              computed.effectiveOut || '',
-              computed.regularHours || 0,
-              computed.otHours || 0,
-              computed.sundayOtHours || 0,
-              computed.totalHours || 0,
-              computed.lateMinutes || 0,
-              computed.status,
-              computed.shift || '08:00',
-              r.staff_no,
-              r.date
-            ]
-          );
+      // If punch count >= 2: Try auto-healing with rules if duty resolved
+      if (cleaned.length >= 2) {
+        const computed = computeDailyAttendance(timestamps, settings, r.weekday, customRules);
+        if (!computed.status.includes('Incomplete')) {
+          if (r.is_manual_override === 0 || r.status.includes('Incomplete')) {
+            await execute(
+              `UPDATE daily_attendance SET
+                 effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
+               WHERE staff_no = ? AND date = ?`,
+              [
+                computed.effectiveIn || '',
+                computed.effectiveOut || '',
+                computed.regularHours || 0,
+                computed.otHours || 0,
+                computed.sundayOtHours || 0,
+                computed.totalHours || 0,
+                computed.lateMinutes || 0,
+                computed.status,
+                computed.shift || '08:00',
+                r.staff_no,
+                r.date
+              ]
+            );
+          }
+          continue;
         }
-        continue;
       }
 
       // Annotate smart detection: is single punch an evening punch (Missing IN) or morning punch (Missing OUT)?
@@ -1510,40 +1497,45 @@ app.get('/api/audit-logs', async (req, res) => {
 });
 // Helper: Verified true incomplete count (optional ?month=YYYY-MM)
 async function getTrueIncompleteCount(month) {
-  let query = `
-    SELECT d.staff_no, d.date, d.raw_swipes, d.status, d.is_manual_override
-    FROM daily_attendance d
-    WHERE (d.status = 'Incomplete' 
-       OR d.status LIKE '%Incomplete%'
-       OR (d.raw_swipes != '' AND d.raw_swipes IS NOT NULL AND d.is_manual_override = 0))
-  `;
-  const params = [];
-  if (month && month !== 'all') {
-    query += ` AND d.date LIKE ? `;
-    params.push(`${month}%`);
-  }
-
-  const allRecords = await execute(query, params);
-  let trueIncomplete = 0;
-  const seenKeys = new Set();
-
-  for (const r of allRecords.rows) {
-    if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
-      continue;
+  try {
+    let query = `
+      SELECT d.staff_no, d.date, d.raw_swipes, d.status, d.is_manual_override
+      FROM daily_attendance d
+      WHERE (d.status = 'Incomplete' 
+         OR d.status LIKE '%Incomplete%'
+         OR (d.raw_swipes != '' AND d.raw_swipes IS NOT NULL AND d.is_manual_override = 0))
+    `;
+    const params = [];
+    if (month && month !== 'all') {
+      query += ` AND d.date LIKE ? `;
+      params.push(`${month}%`);
     }
-    const rowKey = `${r.staff_no}_${r.date}`;
-    if (seenKeys.has(rowKey)) continue;
-    seenKeys.add(rowKey);
 
-    const { timestamps } = parseSwipeRecord(r.raw_swipes);
-    const cleaned = cleanAndDebouncePunches(timestamps, 5);
+    const allRecords = await execute(query, params);
+    let trueIncomplete = 0;
+    const seenKeys = new Set();
 
-    if (cleaned.length % 2 !== 0) {
-      trueIncomplete++;
+    for (const r of allRecords.rows) {
+      if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
+        continue;
+      }
+      const rowKey = `${r.staff_no}_${r.date}`;
+      if (seenKeys.has(rowKey)) continue;
+      seenKeys.add(rowKey);
+
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
+      const cleaned = cleanAndDebouncePunches(timestamps, 5);
+
+      const isIncomplete = (r.status || '').includes('Incomplete') || (cleaned.length === 1 && !(r.status || '').includes('Present'));
+      if (isIncomplete) {
+        trueIncomplete++;
+      }
     }
-  }
 
-  return trueIncomplete;
+    return trueIncomplete;
+  } catch (e) {
+    return 0;
+  }
 }
 
 const MONTH_NAMES = [

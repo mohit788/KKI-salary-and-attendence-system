@@ -33,16 +33,27 @@ export default function IncompleteManagerModal({
   onRefreshData,
   workers = [],
   allAttendance = [],
-  initialStaffNo = null
+  initialStaffNo = null,
+  selectedMonth = 'all',
+  availableMonths = []
 }) {
   if (!isOpen) return null;
 
+  const [modalMonth, setModalMonth] = useState(selectedMonth || 'all');
+
+  useEffect(() => {
+    if (selectedMonth) {
+      setModalMonth(selectedMonth);
+    }
+  }, [selectedMonth, isOpen]);
+
   // High-performance client-side extractor from memory (0ms instant hydration)
-  const extractIncompleteFromMemory = () => {
+  const extractIncompleteFromMemory = (targetMonth = modalMonth) => {
     const map = new Map();
 
     (workers || []).forEach(w => {
       (w.dailyRecords || []).forEach(r => {
+        if (targetMonth && targetMonth !== 'all' && !r.date?.startsWith(targetMonth)) return;
         const raw = (r.raw_swipes || '').trim();
         const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
         const isIncomplete = (r.status || '').includes('Incomplete') || (punches.length === 1 && !r.status?.includes('Present'));
@@ -76,6 +87,7 @@ export default function IncompleteManagerModal({
     });
 
     (allAttendance || []).forEach(r => {
+      if (targetMonth && targetMonth !== 'all' && !r.date?.startsWith(targetMonth)) return;
       const raw = (r.raw_swipes || '').trim();
       const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');
       const isIncomplete = (r.status || '').includes('Incomplete') || (punches.length === 1 && !r.status?.includes('Present'));
@@ -112,7 +124,7 @@ export default function IncompleteManagerModal({
     return Array.from(map.values()).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.staff_no).localeCompare(String(b.staff_no)));
   };
 
-  const initialMemoryRecords = extractIncompleteFromMemory();
+  const initialMemoryRecords = extractIncompleteFromMemory(modalMonth);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,7 +158,7 @@ export default function IncompleteManagerModal({
 
   // Sync memory on workers/allAttendance changes
   useEffect(() => {
-    const mem = extractIncompleteFromMemory();
+    const mem = extractIncompleteFromMemory(modalMonth);
     if (mem.length > 0 && records.length === 0) {
       setRecords(mem);
       setRowEdits(prev => {
@@ -165,17 +177,18 @@ export default function IncompleteManagerModal({
         return next;
       });
     }
-  }, [workers, allAttendance]);
+  }, [workers, allAttendance, modalMonth]);
 
   // Fetch incomplete records from server in background
-  const fetchIncomplete = async () => {
+  const fetchIncomplete = async (targetMonth = modalMonth) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/attendance/incomplete').then(r => r.json());
+      const qMonth = targetMonth && targetMonth !== 'all' ? `?month=${encodeURIComponent(targetMonth)}` : '';
+      const res = await fetch(`/api/attendance/incomplete${qMonth}`).then(r => r.json());
       if (res.success) {
         const incRecords = res.incompleteRecords && res.incompleteRecords.length > 0
           ? res.incompleteRecords
-          : extractIncompleteFromMemory();
+          : extractIncompleteFromMemory(targetMonth);
 
         setRecords(incRecords);
         setRowEdits(prev => {
@@ -206,8 +219,8 @@ export default function IncompleteManagerModal({
   };
 
   useEffect(() => {
-    fetchIncomplete();
-  }, [isOpen]);
+    fetchIncomplete(modalMonth);
+  }, [modalMonth, isOpen]);
 
   const filteredRecords = records.filter(r => {
     if (staffFilter && (typeof staffFilter === 'string' || typeof staffFilter === 'number') && String(r.staff_no) !== String(staffFilter)) return false;
