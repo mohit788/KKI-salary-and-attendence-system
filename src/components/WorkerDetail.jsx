@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ArrowLeft,
   Printer,
+  Download,
   Edit3,
   Clock,
   DollarSign,
