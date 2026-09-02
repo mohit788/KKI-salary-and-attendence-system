@@ -217,11 +217,11 @@ async function initDatabase() {
   for (const [hDate, hName, hRec] of defaultHolidays) {
     try {
       await execute(
-        `INSERT INTO paid_holidays (holiday_date, holiday_name, is_recurring) VALUES (?, ?, ?) ON CONFLICT(holiday_date) DO NOTHING;`,
+        `INSERT OR IGNORE INTO paid_holidays (holiday_date, holiday_name, is_recurring) VALUES (?, ?, ?);`,
         [hDate, hName, hRec]
       );
       await execute(
-        `INSERT INTO factory_calendar (date, day_type, title, is_recurring) VALUES (?, 'holiday', ?, ?) ON CONFLICT(date) DO NOTHING;`,
+        `INSERT OR IGNORE INTO factory_calendar (date, day_type, title, is_recurring) VALUES (?, 'holiday', ?, ?);`,
         [hDate, hName, hRec]
       );
     } catch (e) {}
@@ -230,9 +230,8 @@ async function initDatabase() {
   // Migrate existing paid_holidays into factory_calendar
   try {
     await execute(
-      `INSERT INTO factory_calendar (date, day_type, title, is_recurring)
-       SELECT holiday_date, 'holiday', holiday_name, is_recurring FROM paid_holidays
-       ON CONFLICT(date) DO NOTHING;`
+      `INSERT OR IGNORE INTO factory_calendar (date, day_type, title, is_recurring)
+       SELECT holiday_date, 'holiday', holiday_name, is_recurring FROM paid_holidays;`
     );
   } catch (e) {}
 

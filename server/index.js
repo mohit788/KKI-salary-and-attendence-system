@@ -1698,9 +1698,26 @@ app.get('/api/audit-logs', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-// Helper: Verified true incomplete count (optional ?month=YYYY-MM)
-async function getTrueIncompleteCount(month) {
+// Helper: Verified true incomplete count (optional ?month=YYYY-MM, allowIncomplete boolean)
+async function getTrueIncompleteCount(month, allowIncomplete = false) {
+  if (allowIncomplete) return 0;
   try {
+    // Fetch exempt workers list
+    const exemptWorkersRes = await execute(
+      `SELECT staff_no FROM workers WHERE assigned_shift IN ('exempt', 'flexible', 'exception')`
+    );
+    const exemptStaffSet = new Set(exemptWorkersRes.rows.map(w => String(w.staff_no)));
+
+    // Fetch custom rule exemptions
+    const customRules = await getCustomRules();
+    customRules.forEach(r => {
+      if (r && r.is_active && (r.exemption_type === 'incomplete_exempt' || r.exemption_type === 'forfeiture_exempt' || r.rule_type === 'forfeiture_exempt')) {
+        if (r.target_staff_no && r.target_staff_no !== 'all') {
+          exemptStaffSet.add(String(r.target_staff_no));
+        }
+      }
+    });
+
     let query = `
       SELECT d.staff_no, d.date, d.raw_swipes, d.status, d.is_manual_override
       FROM daily_attendance d
@@ -1719,6 +1736,9 @@ async function getTrueIncompleteCount(month) {
     const seenKeys = new Set();
 
     for (const r of allRecords.rows) {
+      if (exemptStaffSet.has(String(r.staff_no))) {
+        continue; // Exempt worker
+      }
       if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
         continue;
       }
@@ -2072,13 +2092,14 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
   worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(Math.max(w, 13), 45) }));
 }
 
-// 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted, optional ?month=YYYY-MM)
+// 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted, optional ?month=YYYY-MM, ?allow_incomplete=true)
 app.get('/api/export/excel', async (req, res) => {
   try {
-    const { month } = req.query;
-    const incompleteCount = await getTrueIncompleteCount(month);
+    const { month, allow_incomplete, ignore_incomplete } = req.query;
+    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or download as exception.`);
     }
 
     const settings = await getSettingsMap();
@@ -2244,13 +2265,14 @@ app.get('/api/export/excel', async (req, res) => {
   }
 });
 
-// 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet (optional ?month=YYYY-MM)
+// 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet (optional ?month=YYYY-MM, ?allow_incomplete=true)
 app.get('/api/export/excel/timings', async (req, res) => {
   try {
-    const { month } = req.query;
-    const incompleteCount = await getTrueIncompleteCount(month);
+    const { month, allow_incomplete, ignore_incomplete } = req.query;
+    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
     }
 
     const settings = await getSettingsMap();
@@ -2320,13 +2342,14 @@ app.get('/api/export/excel/timings', async (req, res) => {
   }
 });
 
-// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime, optional ?month=YYYY-MM)
+// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime, optional ?month=YYYY-MM, ?allow_incomplete=true)
 app.get('/api/export/excel/summary', async (req, res) => {
   try {
-    const { month } = req.query;
-    const incompleteCount = await getTrueIncompleteCount(month);
+    const { month, allow_incomplete, ignore_incomplete } = req.query;
+    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
     }
 
     const settings = await getSettingsMap();
@@ -2448,6 +2471,553 @@ app.get('/api/export/excel/summary', async (req, res) => {
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Executive_Attendance_and_OT_Summary${fileSuffix}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 12d. GET Export Deducted Holidays & Forfeited Offs Report (with exact reasons, optional ?month=YYYY-MM, ?allow_incomplete=true)
+app.get('/api/export/excel/deducted-holidays-and-offs', async (req, res) => {
+  try {
+    const { month, allow_incomplete, ignore_incomplete } = req.query;
+    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    if (incompleteCount > 0) {
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+    }
+
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+    const factoryCalendarMap = await getFactoryCalendarMap();
+    const paidHolidaysMap = await getPaidHolidaysMap();
+    const isMonthFiltered = month && month !== 'all';
+
+    let attQuery = `SELECT * FROM daily_attendance`;
+    const attParams = [];
+    if (isMonthFiltered) {
+      attQuery += ` WHERE date LIKE ?`;
+      attParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY staff_no, date ASC`;
+
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `;
+
+    const [workersRes, allAttendanceRes] = await Promise.all([
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
+      execute(attQuery, attParams)
+    ]);
+
+    const attendanceMap = new Map();
+    allAttendanceRes.rows.forEach(r => {
+      if (!attendanceMap.has(r.staff_no)) attendanceMap.set(r.staff_no, []);
+      attendanceMap.get(r.staff_no).push(r);
+    });
+
+    const summaryRows = [
+      [
+        'Staff No',
+        'Employee Name',
+        'Department',
+        'Assigned Shift',
+        'Basic Monthly Salary (₹)',
+        'Weekly Offs Granted (Sundays/Subs)',
+        'Paid Holidays Granted (Days)',
+        'Forfeited Sundays / Offs (Deducted)',
+        'Forfeited Holidays (Deducted)',
+        'Total Forfeited / Deducted Days',
+        'Est. Salary Loss from Forfeitures (₹)',
+        'Net Payable Days',
+        'Exemption / Status'
+      ]
+    ];
+
+    const forfeitedRows = [
+      [
+        'Staff No',
+        'Employee Name',
+        'Department',
+        'Date',
+        'Day Name',
+        'Category',
+        'Holiday / Event Name',
+        'Attendance Status',
+        'Forfeiture Reason & Rule Explanation',
+        'Raw Swipes',
+        'Financial Deduction',
+        'Notes'
+      ]
+    ];
+
+    const grantedOffsRows = [
+      [
+        'Staff No',
+        'Employee Name',
+        'Department',
+        'Date',
+        'Day Name',
+        'Off Type',
+        'Title / Reason',
+        'Attendance Status',
+        'Paid Day Credited (1.0 Day)',
+        'Notes'
+      ]
+    ];
+
+    for (const w of workersRes.rows) {
+      const dailyRecords = attendanceMap.get(w.staff_no) || [];
+      const salary = parseFloat(w.monthly_salary || 15000);
+      const dayRate = +(salary / (settings.payroll_month_days === 'calendar' ? 30 : 26)).toFixed(2);
+
+      let grantedOffs = 0;
+      let grantedHolidays = 0;
+      let forfeitedOffs = 0;
+      let forfeitedHolidays = 0;
+      let payableDaysCount = 0;
+
+      dailyRecords.forEach(r => {
+        const calOverride = factoryCalendarMap[r.date] || null;
+        const st = r.status || '';
+
+        // Check if day is a granted weekly off
+        if (st === 'Weekly Off (Paid)') {
+          grantedOffs++;
+          payableDaysCount += 1;
+          const offType = calOverride?.day_type === 'off_day'
+            ? `Substitute Factory Paid Off`
+            : `Default Weekly Off (Sunday)`;
+          const reasonTitle = calOverride?.title || 'Weekly Off (Sunday)';
+
+          grantedOffsRows.push([
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.date,
+            r.weekday || '',
+            offType,
+            reasonTitle,
+            st,
+            1.0,
+            calOverride ? `Custom schedule override: ${calOverride.notes || ''}` : 'Standard weekly rest'
+          ]);
+        } else if (st === 'Weekly Off (Worked OT)') {
+          grantedOffs++;
+          payableDaysCount += 1;
+          grantedOffsRows.push([
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.date,
+            r.weekday || '',
+            'Weekly Off (Worked OT)',
+            calOverride?.title || 'Sunday Duty',
+            st,
+            1.0,
+            `Worker attended on off-day and earned ${r.sunday_ot_hours || 0}h Special OT`
+          ]);
+        } else if (st === 'Holiday (Paid)' || st === 'Holiday (Worked OT)') {
+          grantedHolidays++;
+          payableDaysCount += 1;
+          const holName = calOverride?.title || paidHolidaysMap[r.date] || 'National Holiday';
+          grantedOffsRows.push([
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.date,
+            r.weekday || '',
+            'Declared Paid Holiday',
+            holName,
+            st,
+            1.0,
+            st === 'Holiday (Worked OT)' ? `Worked on festival: earned ${r.sunday_ot_hours || 0}h Special OT` : 'Paid holiday benefit'
+          ]);
+        } else if (st === 'Holiday (Forfeited)') {
+          forfeitedHolidays++;
+          const holName = calOverride?.title || paidHolidaysMap[r.date] || 'National Holiday';
+          forfeitedRows.push([
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.date,
+            r.weekday || '',
+            'Declared Paid Holiday',
+            holName,
+            st,
+            'Forfeited: Absent on adjacent working day(s) directly before or after holiday (Sandwich Rule)',
+            r.raw_swipes || 'No punch',
+            `-${dayRate} (1 Day Pay Loss)`,
+            'Holiday pay forfeited due to unapproved absence'
+          ]);
+        } else if (st === 'Weekly Off (Forfeited)') {
+          forfeitedOffs++;
+          forfeitedRows.push([
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.date,
+            r.weekday || '',
+            'Sunday Weekly Off',
+            'Sunday Weekly Off',
+            st,
+            'Forfeited: 4+ unapproved absences during preceding Mon–Sat or monthly absence limit reached',
+            r.raw_swipes || 'No punch',
+            `-${dayRate} (1 Day Pay Loss)`,
+            'Sunday pay forfeited due to frequent absences'
+          ]);
+        } else if (st.includes('Present')) {
+          payableDaysCount += 1;
+        } else if (st.includes('Half Day')) {
+          payableDaysCount += 0.5;
+        }
+      });
+
+      const totalForfeitedDays = forfeitedOffs + forfeitedHolidays;
+      const salaryLoss = +(totalForfeitedDays * dayRate).toFixed(2);
+      const isExempt = w.assigned_shift === 'exempt' || w.assigned_shift === 'flexible';
+
+      summaryRows.push([
+        w.staff_no,
+        w.staff_name,
+        w.department || 'WORKER',
+        w.assigned_shift || 'auto',
+        salary,
+        grantedOffs,
+        grantedHolidays,
+        forfeitedOffs,
+        forfeitedHolidays,
+        totalForfeitedDays,
+        salaryLoss,
+        +payableDaysCount.toFixed(1),
+        isExempt ? 'Exception Worker (Flexible/Exempt)' : totalForfeitedDays > 0 ? `${totalForfeitedDays} Day(s) Deducted` : 'All Offs & Holidays Valid'
+      ]);
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+    formatAndAutoFitWorksheet(wsSummary, summaryRows);
+
+    const wsForfeited = XLSX.utils.aoa_to_sheet(forfeitedRows);
+    formatAndAutoFitWorksheet(wsForfeited, forfeitedRows);
+
+    const wsGranted = XLSX.utils.aoa_to_sheet(grantedOffsRows);
+    formatAndAutoFitWorksheet(wsGranted, grantedOffsRows);
+
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Worker Summary');
+    XLSX.utils.book_append_sheet(wb, wsForfeited, 'Deducted & Forfeited Log');
+    XLSX.utils.book_append_sheet(wb, wsGranted, 'Granted Offs & Reasons');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileSuffix = isMonthFiltered ? `_${month}` : '';
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Deducted_Holidays_And_Offs_Report${fileSuffix}.xlsx"`);
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 12e. GET Export Paid Holidays & Off-Days Worked Report (with descriptions & special OT, optional ?month=YYYY-MM, ?allow_incomplete=true)
+app.get('/api/export/excel/paid-holidays-and-off-duty', async (req, res) => {
+  try {
+    const { month, allow_incomplete, ignore_incomplete } = req.query;
+    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    if (incompleteCount > 0) {
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+    }
+
+    const settings = await getSettingsMap();
+    const customRules = await getCustomRules();
+    const factoryCalendarMap = await getFactoryCalendarMap();
+    const paidHolidaysMap = await getPaidHolidaysMap();
+    const isMonthFiltered = month && month !== 'all';
+
+    let attQuery = `SELECT * FROM daily_attendance`;
+    const attParams = [];
+    if (isMonthFiltered) {
+      attQuery += ` WHERE date LIKE ?`;
+      attParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY staff_no, date ASC`;
+
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `;
+
+    const [workersRes, allAttendanceRes] = await Promise.all([
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
+      execute(attQuery, attParams)
+    ]);
+
+    const attendanceMap = new Map();
+    allAttendanceRes.rows.forEach(r => {
+      if (!attendanceMap.has(r.staff_no)) attendanceMap.set(r.staff_no, []);
+      attendanceMap.get(r.staff_no).push(r);
+    });
+
+    const summaryRows = [
+      [
+        'Staff No',
+        'Employee Name',
+        'Department',
+        'Assigned Shift',
+        'Basic Monthly Salary (₹)',
+        'Paid Holidays Credited (Days)',
+        'Holidays Worked on Duty',
+        'Sundays / Weekly Offs Worked on Duty',
+        'Total Off-Days Worked on Duty',
+        'Total Special OT Hours (Hrs)',
+        'Base Hourly Rate (₹)',
+        'Special OT Pay Earned (₹)'
+      ]
+    ];
+
+    const holidayDetailRows = [
+      [
+        'Date',
+        'Day Name',
+        'Holiday Name / Occasion',
+        'Staff No',
+        'Employee Name',
+        'Department',
+        'Attendance Status',
+        'Raw Punches',
+        'Effective IN',
+        'Effective OUT',
+        'Worked Hours',
+        'Special OT Hours',
+        'Paid Holiday Benefit',
+        'Notes'
+      ]
+    ];
+
+    const offDutyRows = [
+      [
+        'Date',
+        'Day Name',
+        'Off-Day Category',
+        'Staff No',
+        'Employee Name',
+        'Department',
+        'Raw Punches',
+        'Effective IN',
+        'Effective OUT',
+        'Total Worked Hours',
+        'Special OT Hours Earned',
+        'Duty Description / Shift Title',
+        'OT Multiplier / Rate'
+      ]
+    ];
+
+    for (const w of workersRes.rows) {
+      const dailyRecords = attendanceMap.get(w.staff_no) || [];
+      const salary = parseFloat(w.monthly_salary || 15000);
+      const hourlyRate = +(salary / (settings.payroll_month_days === 'calendar' ? 30 : 26) / 8).toFixed(2);
+
+      let creditedHolidays = 0;
+      let holidaysWorkedCount = 0;
+      let sundaysWorkedCount = 0;
+      let totalSpecialOtHours = 0;
+
+      dailyRecords.forEach(r => {
+        const calOverride = factoryCalendarMap[r.date] || null;
+        const st = r.status || '';
+        const sunOt = parseFloat(r.sunday_ot_hours || 0);
+        const workedHrs = parseFloat(r.total_hours || 0);
+
+        const isHolidayDate = !!paidHolidaysMap[r.date] || calOverride?.day_type === 'holiday';
+        const isSundayDate = (r.weekday || '').startsWith('Sun') && calOverride?.day_type !== 'working_day';
+        const isSubstituteOffDate = calOverride?.day_type === 'off_day';
+        const isMandatorySundayWork = (r.weekday || '').startsWith('Sun') && calOverride?.day_type === 'working_day';
+
+        // 1. Check Holiday status
+        if (isHolidayDate) {
+          const holName = calOverride?.title || paidHolidaysMap[r.date] || 'Declared Holiday';
+          let benefitText = '1.0 Full Paid Day';
+          if (st === 'Holiday (Worked OT)') {
+            creditedHolidays += 1;
+            holidaysWorkedCount += 1;
+            totalSpecialOtHours += sunOt;
+            benefitText = '1.0 Paid Day + Special OT';
+          } else if (st === 'Holiday (Paid)') {
+            creditedHolidays += 1;
+            benefitText = '1.0 Full Paid Day';
+          } else if (st === 'Holiday (Forfeited)') {
+            benefitText = '0.0 Forfeited (Adjacent Absent)';
+          }
+
+          holidayDetailRows.push([
+            r.date,
+            r.weekday || '',
+            holName,
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            st,
+            r.raw_swipes || 'No punch',
+            r.effective_in || '—',
+            r.effective_out || '—',
+            workedHrs,
+            sunOt,
+            benefitText,
+            st === 'Holiday (Worked OT)' ? `Special Holiday OT: ${sunOt}h` : st === 'Holiday (Forfeited)' ? 'Deducted due to sandwich rule' : 'Paid national holiday'
+          ]);
+        }
+
+        // 2. Check Off-Day Worked Duties
+        if (st === 'Holiday (Worked OT)') {
+          const holName = calOverride?.title || paidHolidaysMap[r.date] || 'National Holiday';
+          offDutyRows.push([
+            r.date,
+            r.weekday || '',
+            'Declared Paid Holiday',
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.raw_swipes || '',
+            r.effective_in || '—',
+            r.effective_out || '—',
+            workedHrs,
+            sunOt,
+            `Worked on Festival / Holiday: ${holName}`,
+            '2.0x Special Holiday OT'
+          ]);
+        } else if (st === 'Weekly Off (Worked OT)' || ((isSundayDate || isSubstituteOffDate) && workedHrs > 0)) {
+          sundaysWorkedCount += 1;
+          totalSpecialOtHours += sunOt;
+          const category = isSubstituteOffDate ? 'Substitute Paid Off' : 'Sunday Weekly Off';
+          const title = calOverride?.title || (isSubstituteOffDate ? 'Substitute Factory Off' : 'Sunday Factory Production Duty');
+
+          offDutyRows.push([
+            r.date,
+            r.weekday || '',
+            category,
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.raw_swipes || '',
+            r.effective_in || '—',
+            r.effective_out || '—',
+            workedHrs,
+            sunOt,
+            `Worked on Off-Day: ${title}`,
+            '2.0x Special Sunday/Off OT'
+          ]);
+        } else if (isMandatorySundayWork && workedHrs > 0) {
+          // Mandatory working Sunday
+          offDutyRows.push([
+            r.date,
+            r.weekday || '',
+            'Mandatory Working Sunday',
+            w.staff_no,
+            w.staff_name,
+            w.department || 'WORKER',
+            r.raw_swipes || '',
+            r.effective_in || '—',
+            r.effective_out || '—',
+            workedHrs,
+            parseFloat(r.ot_hours || 0),
+            `Compensatory Sunday Working Day: ${calOverride?.title || 'Factory Production'} (In lieu of substitute off)`,
+            '1.0x Regular Duty (8h) + Standard OT'
+          ]);
+        }
+      });
+
+      const totalOffDaysWorked = holidaysWorkedCount + sundaysWorkedCount;
+      const approxSpecialOtPay = +(totalSpecialOtHours * hourlyRate * 2.0).toFixed(2);
+
+      summaryRows.push([
+        w.staff_no,
+        w.staff_name,
+        w.department || 'WORKER',
+        w.assigned_shift || 'auto',
+        salary,
+        creditedHolidays,
+        holidaysWorkedCount,
+        sundaysWorkedCount,
+        totalOffDaysWorked,
+        +totalSpecialOtHours.toFixed(2),
+        hourlyRate,
+        approxSpecialOtPay
+      ]);
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+    formatAndAutoFitWorksheet(wsSummary, summaryRows);
+
+    const wsHolidays = XLSX.utils.aoa_to_sheet(holidayDetailRows);
+    formatAndAutoFitWorksheet(wsHolidays, holidayDetailRows);
+
+    const wsOffDuty = XLSX.utils.aoa_to_sheet(offDutyRows);
+    formatAndAutoFitWorksheet(wsOffDuty, offDutyRows);
+
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Worker Summary');
+    XLSX.utils.book_append_sheet(wb, wsHolidays, 'Paid Holidays Detail');
+    XLSX.utils.book_append_sheet(wb, wsOffDuty, 'Off-Days Worked Log');
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileSuffix = isMonthFiltered ? `_${month}` : '';
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Paid_Holidays_And_Off_Duty_Report${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -266,6 +266,7 @@ export default function AllWorkersTable({
             </button>
           ) : (
             <>
+              {/* 5-Col Summary */}
               <a
                 href={`/api/export/excel/summary${monthQueryParam}`}
                 target="_blank"
@@ -274,9 +275,34 @@ export default function AllWorkersTable({
                 title="Download Concise 5-Column Summary (Worker ID, Name, Payable Days, Absents, Overtime)"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-teal-200" />
-                <span>5-Col Summary (.xlsx)</span>
+                <span>5-Col (.xlsx)</span>
               </a>
 
+              {/* Deducted Holidays & Forfeited Offs Report */}
+              <a
+                href={`/api/export/excel/deducted-holidays-and-offs${monthQueryParam}${workers.some(w => (w.payroll?.incompleteDays || 0) > 0) ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-rose-900/90 hover:bg-rose-800 text-rose-100 rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-rose-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
+                title="Download Deducted Holidays & Forfeited Sundays Report with detailed reasons"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-rose-300" />
+                <span>Deducted Offs (.xlsx)</span>
+              </a>
+
+              {/* Paid Holidays & Off-Days Duty Report */}
+              <a
+                href={`/api/export/excel/paid-holidays-and-off-duty${monthQueryParam}${workers.some(w => (w.payroll?.incompleteDays || 0) > 0) ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-indigo-800 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-indigo-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
+                title="Download Paid Holidays breakdown and off-days worked with duty descriptions"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-300" />
+                <span>Holiday & Off Duty (.xlsx)</span>
+              </a>
+
+              {/* Timings */}
               <a
                 href={`/api/export/excel/timings${monthQueryParam}`}
                 target="_blank"
