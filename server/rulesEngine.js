@@ -317,6 +317,7 @@ function resolvePunchesForDuty(cleanedPunches, shiftStart = '08:00', shiftEnd = 
 }
 
 /**
+/**
  * Compute daily attendance, regular hours (8h duty), OT hours (after completing 8h work + lunch), and status
  * @param {Array<string>} timestamps - array of HH:MM timestamps ["07:54", "16:30"] or ["08:31", "18:30"]
  * @param {Object} settings - rule parameters
@@ -326,6 +327,7 @@ function resolvePunchesForDuty(cleanedPunches, shiftStart = '08:00', shiftEnd = 
  * @param {boolean} isPaidHoliday - true if date is a declared paid national/factory holiday
  * @param {string} holidayName - Name of the holiday (e.g. 'Independence Day')
  * @param {boolean} isLeisureForgiven - true if 2-minute leisure time is approved
+ * @param {Object|string|null} calendarOverride - Optional factory calendar override { day_type: 'working_day' | 'off_day' | 'holiday', title, notes }
  */
 function computeDailyAttendance(
   timestamps,
@@ -335,7 +337,8 @@ function computeDailyAttendance(
   dynamicShiftStart = '',
   isPaidHoliday = false,
   holidayName = '',
-  isLeisureForgiven = false
+  isLeisureForgiven = false,
+  calendarOverride = null
 ) {
   const rawCleaned = cleanAndDebouncePunches(timestamps, 5);
   const shiftEnd = settings.shift_end || '16:30';
@@ -365,22 +368,77 @@ function computeDailyAttendance(
   const lunchDeductionMins = parseInt(settings.lunch_deduction_mins !== undefined ? settings.lunch_deduction_mins : 30, 10);
   const latePenaltyThresholdMins = parseInt(settings.late_penalty_threshold_mins || 120, 10);
 
-  // 1. No punches -> Absent / Weekly Off / Paid Holiday
+  // 0. Calendar Override Resolution
+  let effectiveDayType = 'default'; // 'default' | 'working_day' | 'off_day' | 'holiday'
+  let overrideTitle = '';
+  if (calendarOverride) {
+    if (typeof calendarOverride === 'object') {
+      effectiveDayType = calendarOverride.day_type || calendarOverride.dayType || 'default';
+      overrideTitle = calendarOverride.title || calendarOverride.holiday_name || '';
+    } else if (typeof calendarOverride === 'string') {
+      effectiveDayType = calendarOverride;
+    }
+  }
+
+  if (effectiveDayType === 'default' && isPaidHoliday) {
+    effectiveDayType = 'holiday';
+    overrideTitle = holidayName || 'Paid Holiday';
+  }
+
+  const isMandatoryWorkDay = (effectiveDayType === 'working_day');
+  const isDeclaredOffDay = (effectiveDayType === 'off_day');
+  const isDeclaredHoliday = (effectiveDayType === 'holiday');
+  const isDefaultWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
+
+  // Effective Weekly Off / Holiday Resolution:
+  const isEffectiveHoliday = isDeclaredHoliday;
+  const isEffectiveWeeklyOff = isMandatoryWorkDay ? false : (isDeclaredOffDay ? true : (!isDeclaredHoliday && isDefaultWeeklyOff));
+  const displayHolidayTitle = overrideTitle || holidayName || '';
+
+  // 1. No punches -> Absent / Weekly Off / Paid Holiday / Substitute Off
   if (!cleanedPunches || cleanedPunches.length === 0) {
-    const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
-    
-    if (isPaidHoliday) {
+    if (isEffectiveHoliday) {
       return {
         shift: shiftStart,
         effectiveIn: shiftStart,
         effectiveOut: shiftEnd,
-        punchPairsFormatted: holidayName ? `[${holidayName}]` : '[Paid Holiday]',
+        punchPairsFormatted: displayHolidayTitle ? `[${displayHolidayTitle}]` : '[Paid Holiday]',
         regularHours: 8.0,
         otHours: 0,
         sundayOtHours: 0,
         totalHours: 8.0,
         lateMinutes: 0,
         status: 'Holiday (Paid)',
+      };
+    }
+
+    if (isDeclaredOffDay) {
+      return {
+        shift: shiftStart,
+        effectiveIn: '',
+        effectiveOut: '',
+        punchPairsFormatted: displayHolidayTitle ? `[${displayHolidayTitle}]` : '[Substitute Off]',
+        regularHours: 0,
+        otHours: 0,
+        sundayOtHours: 0,
+        totalHours: 0,
+        lateMinutes: 0,
+        status: 'Weekly Off (Paid)',
+      };
+    }
+
+    if (isMandatoryWorkDay) {
+      return {
+        shift: shiftStart,
+        effectiveIn: '',
+        effectiveOut: '',
+        punchPairsFormatted: displayHolidayTitle ? `[${displayHolidayTitle} - Absent]` : '',
+        regularHours: 0,
+        otHours: 0,
+        sundayOtHours: 0,
+        totalHours: 0,
+        lateMinutes: 0,
+        status: 'Absent',
       };
     }
 
@@ -394,12 +452,11 @@ function computeDailyAttendance(
       sundayOtHours: 0,
       totalHours: 0,
       lateMinutes: 0,
-      status: isWeeklyOff ? 'Weekly Off (Paid)' : 'Absent',
+      status: isEffectiveWeeklyOff ? 'Weekly Off (Paid)' : 'Absent',
     };
   }
 
   // 2. ODD PUNCHES (1, 3, 5 punches -> Unclosed session / Missing final OUT punch)
-  // Flagged as 'Incomplete' until closing punch arrives!
   if (cleanedPunches.length % 2 !== 0) {
     const { effectiveTime: effectiveInTime, lateMins } = getEffectiveFirstIn(firstIn, shiftStart, slabMinutes, isLeisureForgiven);
 
@@ -424,8 +481,6 @@ function computeDailyAttendance(
     };
   }
 
-  const isWeeklyOff = (weekday && weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3)));
-
   // Span 1: apply grace slab to first IN punch (with 2-min leisure forgiveness if approved)
   const { effectiveTime: effectiveInTime, effectiveMins: effectiveInMins, lateMins } = getEffectiveFirstIn(
     firstIn,
@@ -439,8 +494,6 @@ function computeDailyAttendance(
   let maxMidDayExitMins = 0;
   const punchPairStrings = [];
 
-  // 4-Hour Morning Session Rule (Option A): If a worker left in morning after working < 4 hours (240 mins) and returned later,
-  // that morning session is forfeited/cut (time from morning arrival to departure is cut).
   const hasMultipleSessions = cleanedPunches.length >= 4;
   const rawFirstOut = cleanedPunches[1];
   const firstOutMins = timeToMins(rawFirstOut);
@@ -503,16 +556,16 @@ function computeDailyAttendance(
   let sundayOtHours = 0;
   let status = 'Present (Full)';
 
-  if (isPaidHoliday) {
-    // Worker worked on a Paid National / Declared Holiday: In daily breakdown, regular duty is 0, all physical worked time is Sunday/Holiday OT
+  if (isEffectiveHoliday) {
+    // Worker worked on a Paid National / Declared Holiday: all physical worked time is Special Holiday OT
     regularHours = 0;
     let rawMins = finalEffectiveMins;
     sundayOtHours = otRounding === '30min_block'
       ? Math.floor(rawMins / 30) * 0.5
       : +(rawMins / 60).toFixed(2);
     status = 'Holiday (Worked OT)';
-  } else if (isWeeklyOff) {
-    // Sunday work: In daily breakdown, regular duty is 0, all physical worked time is Sunday OT
+  } else if (isEffectiveWeeklyOff) {
+    // Sunday work OR Substitute Off day work: regular duty is 0, all physical worked time is Sunday/Holiday OT
     regularHours = 0;
     let rawMins = finalEffectiveMins;
     sundayOtHours = otRounding === '30min_block'
@@ -520,8 +573,7 @@ function computeDailyAttendance(
       : +(rawMins / 60).toFixed(2);
     status = 'Weekly Off (Worked OT)';
   } else {
-    // Regular weekday work (Mon - Sat)
-    // Full Shift Completion: A worker completing standard shift (e.g. leaving at 16:25-16:30 for 16:30 shift end) gets full 8h regular duty
+    // Regular working day (Mon - Sat OR Sunday declared as Working Day)
     if (finalEffectiveMins >= (regularDutyMins - 15)) {
       regularHours = 8.0;
       let rawOtMins = Math.max(0, finalEffectiveMins - regularDutyMins);
@@ -541,12 +593,10 @@ function computeDailyAttendance(
         ? Math.floor(rawWorkedMins / 30) * 0.5
         : +(rawWorkedMins / 60).toFixed(2);
 
-      // Core Rule: Duty >= 4 hours but < 8 hours is credited as Overtime (OT), with 0 regular hours and Absent (OT Credited) status.
       otHours = workedH;
       regularHours = 0;
       status = 'Absent (OT Credited)';
     } else {
-      // Worked < 4 hours (e.g. 45 mins): 0 OT, 0 Regular Hours, Strictly ABSENT!
       otHours = 0;
       regularHours = 0;
       status = 'Absent';
@@ -578,7 +628,7 @@ function computeDailyAttendance(
  * - 3rd Strike Revocation: If the worker is late 3 or more times (even 1-5 mins),
  *   ALL leisure forgiveness is REVOKED and all late days get full 30-min slab penalty!
  */
-function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules = [], paidHolidaysMap = {}) {
+function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules = [], paidHolidaysMap = {}, factoryCalendarMap = {}) {
   const leisureMinsAllowed = parseInt(settings.leisure_mins_allowed || 5, 10);
   const leisureDaysAllowed = parseInt(settings.leisure_days_allowed || 2, 10);
 
@@ -589,7 +639,6 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
   for (let i = 0; i < dailyRecords.length; i++) {
     const r = dailyRecords[i];
     const swipes = r.raw_swipes || r.swipe_record || '';
-    // Basic helper replacement for parseSwipeRecord
     const timestamps = (String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00' && t !== '0:00');
     const cleaned = cleanAndDebouncePunches(timestamps, 5);
     if (cleaned.length === 0) continue;
@@ -608,10 +657,6 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
     }
   }
 
-  // Revocation Rule: If total late arrivals in month > leisureDaysAllowed (e.g. 3 or more late days in month):
-  // 3rd Strike triggers and ALL leisure forgiveness is revoked.
-  // If worker had <= leisureDaysAllowed late days (e.g. <= 2 total late days in month),
-  // each day with late arrival <= leisureMinsAllowed (up to 2 days) is granted 2-min leisure forgiveness.
   const isRevokedBy3rdStrike = (lateDayIndices.length > leisureDaysAllowed);
 
   const eligibleLeisureIndices = isRevokedBy3rdStrike
@@ -620,13 +665,18 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
 
   const forgivenSet = new Set(eligibleLeisureIndices);
 
-  // Recompute records with leisure status
+  // Recompute records with leisure status and calendar overrides
   return dailyRecords.map((r, idx) => {
     const swipes = r.raw_swipes || r.swipe_record || '';
     const timestamps = (String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00' && t !== '0:00');
     const isLeisure = forgivenSet.has(idx);
-    const isHoliday = !!paidHolidaysMap[r.date];
-    const holidayName = paidHolidaysMap[r.date] || '';
+
+    const calOverride = (factoryCalendarMap && factoryCalendarMap[r.date])
+      ? factoryCalendarMap[r.date]
+      : (paidHolidaysMap && paidHolidaysMap[r.date] ? { day_type: 'holiday', title: paidHolidaysMap[r.date] } : null);
+
+    const isHoliday = !!(paidHolidaysMap && paidHolidaysMap[r.date]) || calOverride?.day_type === 'holiday';
+    const holidayName = calOverride?.title || (paidHolidaysMap ? paidHolidaysMap[r.date] : '') || '';
 
     const computed = computeDailyAttendance(
       timestamps,
@@ -636,7 +686,8 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
       settings.assigned_shift || 'auto',
       isHoliday,
       holidayName,
-      isLeisure
+      isLeisure,
+      calOverride
     );
 
     return {
@@ -668,8 +719,10 @@ function isPureAbsentForForfeiture(rec) {
  * Apply Weekly & Monthly Sunday Forfeiture rules (with cross-month boundary resilience)
  * @param {Array<Object>} dailyRecords - Array of daily attendance objects
  * @param {Object} settings - Configuration map
+ * @param {Array<Object>} customRules - Custom rules
+ * @param {Object} factoryCalendarMap - Factory calendar overrides map
  */
-function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = []) {
+function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [], factoryCalendarMap = {}) {
   // Check if worker has an active forfeiture exemption
   const isForfeitureExempt = Array.isArray(customRules) && customRules.some(r => r && r.is_active && (r.exemption_type === 'forfeiture_exempt' || r.rule_type === 'forfeiture_exempt'));
   if (isForfeitureExempt) {
@@ -681,12 +734,18 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [])
   const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 4, 10);
   const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 4, 10);
 
-  // Step 1: Evaluate Weekly Forfeiture rules for each Sunday across continuous dates
+  // Step 1: Evaluate Weekly Forfeiture rules for each Sunday/Weekly Off across continuous dates
   for (let i = 0; i < dailyRecords.length; i++) {
     const rec = dailyRecords[i];
-    const isWeeklyOff = rec.weekday && rec.weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3));
+    const calOverride = factoryCalendarMap ? factoryCalendarMap[rec.date] : null;
+    const isMandatoryWork = calOverride?.day_type === 'working_day';
+    
+    // If declared as mandatory working day, it is not a weekly off
+    if (isMandatoryWork) continue;
 
-    if (isWeeklyOff && (rec.status || '').includes('Weekly Off')) {
+    const isWeeklyOff = (rec.status || '').includes('Weekly Off');
+
+    if (isWeeklyOff) {
       // Don't forfeit Sunday if worker worked OT that day
       if (rec.status === 'Weekly Off (Worked OT)' || (rec.sundayOtHours && rec.sundayOtHours > 0) || (rec.sunday_ot_hours && rec.sunday_ot_hours > 0)) {
         rec.status = 'Weekly Off (Worked OT)';
@@ -715,7 +774,6 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [])
   }
 
   // Step 2: Monthly Forfeiture Rule (Grouped strictly by calendar month YYYY-MM)
-  // If 4+ absents in a given month, deduct 1 Paid Sunday from earned Sundays in that same month if worker has <= 1 forfeited Sunday in that month
   const recordsByMonth = new Map();
   dailyRecords.forEach((r, idx) => {
     const mKey = (r.date || '').slice(0, 7) || 'general';
@@ -733,8 +791,10 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [])
       let monthForfeitedCount = mGroup.filter(({ record: r }) => r.status === 'Weekly Off (Forfeited)').length;
       if (monthForfeitedCount <= 1) {
         for (const { record: r } of mGroup) {
-          const isWeeklyOff = r.weekday && r.weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3));
-          if (isWeeklyOff && r.status === 'Weekly Off (Paid)') {
+          const calOverride = factoryCalendarMap ? factoryCalendarMap[r.date] : null;
+          if (calOverride?.day_type === 'working_day') continue;
+
+          if (r.status === 'Weekly Off (Paid)') {
             r.status = 'Weekly Off (Forfeited)';
             break; // Forfeit 1 Paid Sunday in this month!
           }

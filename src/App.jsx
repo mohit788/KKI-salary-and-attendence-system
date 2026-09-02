@@ -12,8 +12,7 @@ import SettingsPanel from './components/SettingsPanel';
 import AuditLogsModal from './components/AuditLogsModal';
 import AiAssistantBar from './components/AiAssistantBar';
 import IncompleteManagerModal from './components/IncompleteManagerModal';
-import HolidaysManagerModal from './components/HolidaysManagerModal';
-import AICopilotDrawer from './components/AICopilotDrawer';
+import FactoryCalendarModal from './components/FactoryCalendarModal';
 import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
 
 export default function App() {
@@ -25,15 +24,12 @@ export default function App() {
   const [allAttendance, setAllAttendance] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // AI Copilot RAG Drawer State
-  const [showAICopilotModal, setShowAICopilotModal] = useState(false);
-
   // Month Selection State
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [availableMonths, setAvailableMonths] = useState([]);
 
-  // Paid Holidays Manager State
-  const [showHolidaysModal, setShowHolidaysModal] = useState(false);
+  // Factory Calendar & Holidays Modal State
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
 
   // Payroll Security Mode State (Default Locked)
   const [isPayrollUnlocked, setIsPayrollUnlocked] = useState(
@@ -107,18 +103,6 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
-  }, []);
-
-  // Global Keyboard Shortcut: Ctrl + K (or Cmd + K) for AI Copilot
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setShowAICopilotModal(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Verify Password & Unlock Payroll
@@ -379,8 +363,7 @@ export default function App() {
         selectedMonth={selectedMonth}
         availableMonths={availableMonths}
         onSelectMonth={handleSelectMonth}
-        onOpenHolidaysModal={() => setShowHolidaysModal(true)}
-        onOpenAICopilot={() => setShowAICopilotModal(true)}
+        onOpenCalendarModal={() => setShowCalendarModal(true)}
       />
 
       <AiAssistantBar onRefreshData={refreshData} />
@@ -484,25 +467,15 @@ export default function App() {
         initialStaffNo={incompleteStaffFilter}
       />
 
-      {/* MODAL: PAID HOLIDAYS & NATIONAL OFFS MANAGER */}
-      <HolidaysManagerModal
-        isOpen={showHolidaysModal}
+      {/* MODAL: FACTORY CALENDAR & SHIFT OVERRIDES MANAGER */}
+      <FactoryCalendarModal
+        isOpen={showCalendarModal}
+        initialMonth={selectedMonth && selectedMonth !== 'all' ? selectedMonth : ''}
         onClose={() => {
-          setShowHolidaysModal(false);
-          refreshData();
+          setShowCalendarModal(false);
+          refreshData(selectedMonth);
         }}
-        onRefreshData={refreshData}
-      />
-
-      {/* DRAWER: FACTORY AI COPILOT & HYBRID RAG INTELLIGENCE */}
-      <AICopilotDrawer
-        isOpen={showAICopilotModal}
-        onClose={() => setShowAICopilotModal(false)}
-        selectedMonth={selectedMonth}
-        onSelectWorker={(staffNo) => {
-          fetchWorkerDetail(staffNo, selectedMonth);
-          setActiveTab('workers');
-        }}
+        onRefreshData={() => refreshData(selectedMonth)}
       />
 
       {/* MODAL: UNLOCK PAYROLL & SALARY MODE */}

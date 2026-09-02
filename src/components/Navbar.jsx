@@ -25,8 +25,8 @@ export default function Navbar({
   selectedMonth,
   availableMonths = [],
   onSelectMonth,
-  onOpenHolidaysModal,
-  onOpenAICopilot
+  onOpenCalendarModal,
+  onOpenHolidaysModal
 }) {
   const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresPayroll: false },
@@ -39,6 +39,11 @@ export default function Navbar({
 
   // Filter tabs when payroll is locked
   const visibleTabs = isPayrollUnlocked ? allTabs : allTabs.filter(t => !t.requiresPayroll);
+
+  const handleCalendarClick = () => {
+    if (onOpenCalendarModal) onOpenCalendarModal();
+    else if (onOpenHolidaysModal) onOpenHolidaysModal();
+  };
 
   return (
     <header className="sticky top-0 z-40 bg-[#0b1120] border-b-2 border-slate-700 shadow-lg">
@@ -94,27 +99,14 @@ export default function Navbar({
               </div>
             )}
 
-            {/* AI Copilot Trigger Button */}
+            {/* Factory Calendar & Holidays Button */}
             <button
-              onClick={onOpenAICopilot}
-              className="flex items-center space-x-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-gradient-to-r from-amber-500/20 to-amber-400/10 hover:from-amber-500/30 hover:to-amber-400/20 text-amber-300 hover:text-amber-200 border border-amber-500/40 shadow-sm transition-all whitespace-nowrap cursor-pointer group"
-              title="Open Factory AI Copilot (Ctrl + K)"
+              onClick={handleCalendarClick}
+              className="flex items-center space-x-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 hover:text-indigo-200 border border-indigo-500/50 hover:border-indigo-400 shadow-sm transition-all whitespace-nowrap cursor-pointer group"
+              title="Manage Factory Working Sundays, Substitute Offs & Paid Holidays"
             >
-              <Sparkles className="w-4 h-4 text-amber-400 group-hover:rotate-12 transition-transform" />
-              <span>⚡ AI Copilot</span>
-              <kbd className="hidden lg:inline-block ml-1 px-1.5 py-0.2 bg-slate-900/80 rounded text-[10px] text-slate-400 border border-slate-700 font-mono">
-                Ctrl+K
-              </kbd>
-            </button>
-
-            {/* Paid Holidays Manager Button */}
-            <button
-              onClick={onOpenHolidaysModal}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-emerald-300 hover:text-emerald-200 border border-emerald-500/50 hover:border-emerald-400 shadow-sm transition-all whitespace-nowrap cursor-pointer"
-              title="Manage National & Declared Paid Holidays"
-            >
-              <Calendar className="w-4 h-4 text-emerald-400" />
-              <span>Paid Holidays</span>
+              <Calendar className="w-4 h-4 text-indigo-400 group-hover:scale-110 transition-transform" />
+              <span>📅 Factory Calendar & Holidays</span>
             </button>
 
             {/* Nav Tabs */}

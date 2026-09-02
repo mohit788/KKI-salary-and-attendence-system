@@ -21,7 +21,6 @@ const {
 const { calculateWorkerPayroll } = require('./payrollEngine');
 const { parseNaturalLanguageRule } = require('./aiRuleEngine');
 const { processUniversalAssistantPrompt } = require('./aiAssistantEngine');
-const { queryFactoryIntelligence, generateSmartSuggestions, rebuildKnowledgeIndex } = require('./ragEngine');
 
 const app = express();
 app.use(cors());
@@ -59,13 +58,20 @@ async function getSalaryRules() {
   return res.rows || [];
 }
 
-// Helper: Fetch all configured Paid Holidays map (YYYY-MM-DD -> Holiday Name)
-async function getPaidHolidaysMap() {
+// Helper: Fetch all configured Factory Calendar Overrides (YYYY-MM-DD -> { id, date, day_type, title, notes, is_recurring })
+async function getFactoryCalendarMap() {
   try {
-    const res = await execute(`SELECT holiday_date, holiday_name FROM paid_holidays`);
+    const res = await execute(`SELECT * FROM factory_calendar ORDER BY date ASC`);
     const map = {};
     (res.rows || []).forEach(r => {
-      map[r.holiday_date] = r.holiday_name;
+      map[r.date] = {
+        id: r.id,
+        date: r.date,
+        day_type: r.day_type || 'holiday',
+        title: r.title || 'Special Day',
+        notes: r.notes || '',
+        is_recurring: r.is_recurring ? 1 : 0
+      };
     });
     return map;
   } catch (e) {
@@ -73,53 +79,19 @@ async function getPaidHolidaysMap() {
   }
 }
 
-
-// Helper: Recompute all attendance records with active rules and settings
-async function recomputeAllAttendance() {
+// Helper: Fetch all configured Paid Holidays map (YYYY-MM-DD -> Holiday Name) for backward compatibility
+async function getPaidHolidaysMap() {
   try {
-    const settings = await getSettingsMap();
-    const customRules = await getCustomRules();
-    const paidHolidaysMap = await getPaidHolidaysMap();
-
-    const allRecords = await execute(`SELECT * FROM daily_attendance WHERE is_manual_override = 0`);
-    for (const r of allRecords.rows) {
-      if (!r.raw_swipes) continue;
-      const { timestamps } = parseSwipeRecord(r.raw_swipes);
-      const isHoliday = !!paidHolidaysMap[r.date];
-      const holidayName = paidHolidaysMap[r.date] || '';
-
-      const workerCustomRules = customRules.filter(cr => !cr.target_staff_no || cr.target_staff_no === 'all' || cr.target_staff_no === r.staff_no);
-
-      const computed = computeDailyAttendance(
-        timestamps,
-        settings,
-        r.weekday,
-        workerCustomRules,
-        r.shift || '08:00',
-        isHoliday,
-        holidayName
-      );
-
-      await execute(
-        `UPDATE daily_attendance SET
-           effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?, status = ?, shift = ?
-         WHERE id = ?`,
-        [
-          computed.effectiveIn || '',
-          computed.effectiveOut || '',
-          computed.regularHours || 0,
-          computed.otHours || 0,
-          computed.sundayOtHours || 0,
-          computed.totalHours || 0,
-          computed.lateMinutes || 0,
-          computed.status,
-          computed.shift || '08:00',
-          r.id
-        ]
-      );
-    }
-  } catch (err) {
-    console.error('Error in recomputeAllAttendance:', err);
+    const calMap = await getFactoryCalendarMap();
+    const map = {};
+    Object.values(calMap).forEach(r => {
+      if (r.day_type === 'holiday') {
+        map[r.date] = r.title;
+      }
+    });
+    return map;
+  } catch (e) {
+    return {};
   }
 }
 
@@ -382,6 +354,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const batchId = `BATCH_${Date.now()}`;
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
+    const factoryCalendarMap = await getFactoryCalendarMap();
     const paidHolidaysMap = await getPaidHolidaysMap();
 
     let totalRecords = 0;
@@ -403,9 +376,10 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         totalRecords++;
         if (r.date) datesSet.add(r.date);
         const { timestamps } = parseSwipeRecord(r.swipe_record);
-        const isHoliday = !!paidHolidaysMap[r.date];
-        const holidayName = paidHolidaysMap[r.date] || '';
-        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, 'auto', isHoliday, holidayName);
+        const calOverride = factoryCalendarMap[r.date] || null;
+        const isHoliday = !!paidHolidaysMap[r.date] || calOverride?.day_type === 'holiday';
+        const holidayName = calOverride?.title || paidHolidaysMap[r.date] || '';
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, 'auto', isHoliday, holidayName, false, calOverride);
         if (attendance.status === 'Incomplete') {
           flaggedCount++;
         }
@@ -419,8 +393,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         };
       });
 
-      dailyComputed = applyMonthlyLeisureGrace(dailyComputed, settings, customRules, paidHolidaysMap);
-      dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings);
+      dailyComputed = applyMonthlyLeisureGrace(dailyComputed, settings, customRules, paidHolidaysMap, factoryCalendarMap);
+      dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings, customRules, factoryCalendarMap);
       dailyComputed = applyPaidHolidayForfeiture(dailyComputed, settings);
 
       for (const d of dailyComputed) {
@@ -663,6 +637,7 @@ app.post('/api/attendance/clear-range', async (req, res) => {
 async function recomputeAllAttendance() {
   const settings = await getSettingsMap();
   const customRules = await getCustomRules();
+  const factoryCalendarMap = await getFactoryCalendarMap();
   const paidHolidaysMap = await getPaidHolidaysMap();
 
   const workersRes = await execute(`
@@ -696,8 +671,9 @@ async function recomputeAllAttendance() {
     // 1. Compute daily base attendance for each day
     let dailyComputed = recordsToCompute.map(r => {
       const { timestamps } = parseSwipeRecord(r.raw_swipes);
-      const isHoliday = !!paidHolidaysMap[r.date];
-      const holidayName = paidHolidaysMap[r.date] || '';
+      const calOverride = factoryCalendarMap[r.date] || null;
+      const isHoliday = !!paidHolidaysMap[r.date] || calOverride?.day_type === 'holiday';
+      const holidayName = calOverride?.title || paidHolidaysMap[r.date] || '';
       const attendance = computeDailyAttendance(
         timestamps,
         workerSettings,
@@ -705,7 +681,9 @@ async function recomputeAllAttendance() {
         workerCustomRules,
         workerSettings.assigned_shift || 'auto',
         isHoliday,
-        holidayName
+        holidayName,
+        false,
+        calOverride
       );
       return {
         ...r,
@@ -724,7 +702,7 @@ async function recomputeAllAttendance() {
 
     let leisureProcessed = [];
     for (const [mKey, mRecords] of recordsByMonth.entries()) {
-      let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, workerCustomRules, paidHolidaysMap);
+      let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, workerCustomRules, paidHolidaysMap, factoryCalendarMap);
       leisureProcessed.push(...mComputed);
     }
 
@@ -732,7 +710,7 @@ async function recomputeAllAttendance() {
     leisureProcessed.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
     // 3. Apply Weekly Off Forfeiture with cross-month continuous sequence
-    let weeklyOffProcessed = applyWeeklyOffForfeiture(leisureProcessed, workerSettings, workerCustomRules);
+    let weeklyOffProcessed = applyWeeklyOffForfeiture(leisureProcessed, workerSettings, workerCustomRules, factoryCalendarMap);
 
     // 4. Apply Paid Holiday Forfeiture with continuous sequence
     let finalProcessed = applyPaidHolidayForfeiture(weeklyOffProcessed, workerSettings);
@@ -802,11 +780,212 @@ app.get('/api/months', async (req, res) => {
   }
 });
 
-// 4c. Paid Holidays Management Endpoints
+// 4c. Factory Calendar & Monthly Schedule Overrides Management Endpoints
+app.get('/api/calendar', async (req, res) => {
+  try {
+    const { month } = req.query;
+    const overridesRes = await execute(`SELECT * FROM factory_calendar ORDER BY date ASC`);
+    const overrides = overridesRes.rows || [];
+    const calendarMap = {};
+    overrides.forEach(r => {
+      calendarMap[r.date] = {
+        id: r.id,
+        date: r.date,
+        day_type: r.day_type || 'holiday',
+        title: r.title || 'Special Day',
+        notes: r.notes || '',
+        is_recurring: r.is_recurring ? 1 : 0
+      };
+    });
+
+    let monthSummary = null;
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [yearStr, monthStr] = month.split('-');
+      const y = parseInt(yearStr, 10);
+      const m = parseInt(monthStr, 10);
+      const daysInMonth = new Date(y, m, 0).getDate();
+      
+      let holidaysCount = 0;
+      let workingOverridesCount = 0;
+      let offOverridesCount = 0;
+      let defaultSundaysCount = 0;
+      let defaultWorkingDaysCount = 0;
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dStr = `${yearStr}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dt = new Date(y, m - 1, day);
+        const isSun = dt.getDay() === 0;
+        const override = calendarMap[dStr];
+
+        if (override) {
+          if (override.day_type === 'holiday') holidaysCount++;
+          else if (override.day_type === 'working_day') workingOverridesCount++;
+          else if (override.day_type === 'off_day') offOverridesCount++;
+        } else {
+          if (isSun) defaultSundaysCount++;
+          else defaultWorkingDaysCount++;
+        }
+      }
+
+      monthSummary = {
+        month,
+        daysInMonth,
+        holidaysCount,
+        workingOverridesCount,
+        offOverridesCount,
+        defaultSundaysCount,
+        defaultWorkingDaysCount,
+        totalWorkingDays: defaultWorkingDaysCount + workingOverridesCount,
+        totalOffDays: defaultSundaysCount + offOverridesCount + holidaysCount
+      };
+    }
+
+    res.json({
+      success: true,
+      overrides,
+      calendarMap,
+      monthSummary
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Declare or Update Calendar Day Override
+app.post('/api/calendar/declare', async (req, res) => {
+  try {
+    const { date, day_type, title, notes, is_recurring } = req.body;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ success: false, error: 'Valid date in YYYY-MM-DD format is required.' });
+    }
+
+    const cleanedType = day_type || 'holiday';
+    const cleanedTitle = (title || '').trim() || (cleanedType === 'working_day' ? 'Mandatory Working Day' : (cleanedType === 'off_day' ? 'Substitute Off Day' : 'Declared Paid Holiday'));
+
+    if (cleanedType === 'default') {
+      // Revert date back to default schedule
+      await execute(`DELETE FROM factory_calendar WHERE date = ?`, [date]);
+      await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [date]);
+      await recomputeAllAttendance();
+      return res.json({ success: true, message: `Schedule for ${date} reset to standard factory default.` });
+    }
+
+    // Upsert into factory_calendar
+    await execute(
+      `INSERT INTO factory_calendar (date, day_type, title, notes, is_recurring)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(date) DO UPDATE SET 
+         day_type = excluded.day_type,
+         title = excluded.title,
+         notes = excluded.notes,
+         is_recurring = excluded.is_recurring`,
+      [date, cleanedType, cleanedTitle, notes || '', is_recurring ? 1 : 0]
+    );
+
+    // Sync with paid_holidays
+    if (cleanedType === 'holiday') {
+      await execute(
+        `INSERT INTO paid_holidays (holiday_date, holiday_name, is_recurring)
+         VALUES (?, ?, ?)
+         ON CONFLICT(holiday_date) DO UPDATE SET holiday_name = excluded.holiday_name, is_recurring = excluded.is_recurring`,
+        [date, cleanedTitle, is_recurring ? 1 : 0]
+      );
+    } else {
+      await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [date]);
+    }
+
+    await recomputeAllAttendance();
+    res.json({
+      success: true,
+      message: `🎉 Schedule for ${date} declared as "${cleanedTitle}" (${cleanedType.replace('_', ' ')}). Attendance & Payroll recomputed successfully!`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST 1-Click Sunday <-> Weekday Swap Wizard (Compensatory Working Day + Substitute Off Day)
+app.post('/api/calendar/swap', async (req, res) => {
+  try {
+    const { workDate, offDate, workTitle, offTitle, reason } = req.body;
+    if (!workDate || !offDate) {
+      return res.status(400).json({ success: false, error: 'Both workDate and offDate are required for schedule swap.' });
+    }
+
+    const finalWorkTitle = (workTitle || '').trim() || `Sunday Working (In lieu of ${offDate})`;
+    const finalOffTitle = (offTitle || '').trim() || `Substitute Paid Off (For working on ${workDate})`;
+    const finalReason = (reason || '').trim() || 'Factory Compensatory Shift Swap';
+
+    // 1. Declare workDate as working_day
+    await execute(
+      `INSERT INTO factory_calendar (date, day_type, title, notes, is_recurring)
+       VALUES (?, 'working_day', ?, ?, 0)
+       ON CONFLICT(date) DO UPDATE SET day_type = 'working_day', title = excluded.title, notes = excluded.notes`,
+      [workDate, finalWorkTitle, finalReason]
+    );
+    await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [workDate]);
+
+    // 2. Declare offDate as off_day
+    await execute(
+      `INSERT INTO factory_calendar (date, day_type, title, notes, is_recurring)
+       VALUES (?, 'off_day', ?, ?, 0)
+       ON CONFLICT(date) DO UPDATE SET day_type = 'off_day', title = excluded.title, notes = excluded.notes`,
+      [offDate, finalOffTitle, finalReason]
+    );
+    await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [offDate]);
+
+    await recomputeAllAttendance();
+    res.json({
+      success: true,
+      message: `🔄 Successfully swapped schedule: ${workDate} is now a Working Day and ${offDate} is a Paid Substitute Off Day!`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE Calendar Override by ID
+app.delete('/api/calendar/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const targetRes = await execute(`SELECT date FROM factory_calendar WHERE id = ?`, [id]);
+    const targetDate = targetRes.rows[0]?.date;
+    
+    await execute(`DELETE FROM factory_calendar WHERE id = ?`, [id]);
+    if (targetDate) {
+      await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [targetDate]);
+    }
+    await recomputeAllAttendance();
+    res.json({ success: true, message: 'Schedule override removed & attendance recomputed.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE Calendar Override by Date
+app.delete('/api/calendar/date/:date', async (req, res) => {
+  try {
+    const { date } = req.params;
+    await execute(`DELETE FROM factory_calendar WHERE date = ?`, [date]);
+    await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [date]);
+    await recomputeAllAttendance();
+    res.json({ success: true, message: `Schedule for ${date} reset to standard factory default.` });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Legacy Paid Holidays Management Endpoints (Backward Compatible)
 app.get('/api/holidays', async (req, res) => {
   try {
-    const holidaysRes = await execute(`SELECT * FROM paid_holidays ORDER BY holiday_date ASC`);
-    res.json({ success: true, holidays: holidaysRes.rows || [] });
+    const holidaysRes = await execute(`SELECT * FROM factory_calendar WHERE day_type = 'holiday' ORDER BY date ASC`);
+    const formatted = (holidaysRes.rows || []).map(r => ({
+      id: r.id,
+      holiday_date: r.date,
+      holiday_name: r.title,
+      is_recurring: r.is_recurring
+    }));
+    res.json({ success: true, holidays: formatted });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -818,6 +997,12 @@ app.post('/api/holidays', async (req, res) => {
     if (!holiday_date || !holiday_name) {
       return res.status(400).json({ success: false, error: 'holiday_date and holiday_name are required.' });
     }
+    await execute(
+      `INSERT INTO factory_calendar (date, day_type, title, is_recurring)
+       VALUES (?, 'holiday', ?, ?)
+       ON CONFLICT(date) DO UPDATE SET day_type = 'holiday', title = excluded.title, is_recurring = excluded.is_recurring`,
+      [holiday_date.trim(), holiday_name.trim(), is_recurring ? 1 : 0]
+    );
     await execute(
       `INSERT INTO paid_holidays (holiday_date, holiday_name, is_recurring)
        VALUES (?, ?, ?)
@@ -834,7 +1019,12 @@ app.post('/api/holidays', async (req, res) => {
 app.delete('/api/holidays/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const target = await execute(`SELECT holiday_date FROM paid_holidays WHERE id = ?`, [id]);
+    const hDate = target.rows[0]?.holiday_date;
     await execute(`DELETE FROM paid_holidays WHERE id = ?`, [id]);
+    if (hDate) {
+      await execute(`DELETE FROM factory_calendar WHERE date = ?`, [hDate]);
+    }
     await recomputeAllAttendance();
     res.json({ success: true, message: 'Holiday deleted successfully.' });
   } catch (err) {
@@ -1122,6 +1312,8 @@ app.post('/api/attendance/edit', async (req, res) => {
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
+    const factoryCalendarMap = await getFactoryCalendarMap();
+    const paidHolidaysMap = await getPaidHolidaysMap();
 
     // Parse timestamps from newly provided raw_swipes (or fallback)
     const effectiveSwipes = raw_swipes !== undefined ? raw_swipes : (oldRec.raw_swipes || '');
@@ -1131,7 +1323,11 @@ app.post('/api/attendance/edit', async (req, res) => {
     const workerAssignedShift = workerRes.rows[0]?.assigned_shift || 'auto';
     const workerSettings = { ...settings, assigned_shift: workerAssignedShift };
 
-    const computed = computeDailyAttendance(timestamps, workerSettings, oldRec.weekday, customRules);
+    const calOverride = factoryCalendarMap[date] || null;
+    const isHoliday = !!paidHolidaysMap[date] || calOverride?.day_type === 'holiday';
+    const holidayName = calOverride?.title || paidHolidaysMap[date] || '';
+
+    const computed = computeDailyAttendance(timestamps, workerSettings, oldRec.weekday, customRules, workerAssignedShift, isHoliday, holidayName, false, calOverride);
 
     let regularHours = computed.regularHours;
     let otHours = computed.otHours;
@@ -1342,6 +1538,8 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
+    const factoryCalendarMap = await getFactoryCalendarMap();
+    const paidHolidaysMap = await getPaidHolidaysMap();
     const modifiedStaffSet = new Set();
 
     for (const item of updates) {
@@ -1360,7 +1558,11 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       const workerAssignedShift = workerRes.rows[0]?.assigned_shift || 'auto';
       const workerSettings = { ...settings, assigned_shift: workerAssignedShift };
 
-      const computed = computeDailyAttendance(timestamps, workerSettings, oldRec.weekday, customRules);
+      const calOverride = factoryCalendarMap[date] || null;
+      const isHoliday = !!paidHolidaysMap[date] || calOverride?.day_type === 'holiday';
+      const holidayName = calOverride?.title || paidHolidaysMap[date] || '';
+
+      const computed = computeDailyAttendance(timestamps, workerSettings, oldRec.weekday, customRules, workerAssignedShift, isHoliday, holidayName, false, calOverride);
 
       let regularHours = computed.regularHours;
       let otHours = computed.otHours;
@@ -2724,51 +2926,6 @@ app.post('/api/ai-assistant/generate-report', async (req, res) => {
   }
 });
 
-// ==========================================
-// 14. AI COPILOT & HYBRID RAG INTELLIGENCE API
-// ==========================================
-
-// POST Natural Language AI Query with Hybrid Semantic & SQL Search
-app.post('/api/ai/query', async (req, res) => {
-  try {
-    const { query, month, conversationHistory } = req.body;
-    if (!query || !query.trim()) {
-      return res.status(400).json({ success: false, error: 'Query cannot be empty' });
-    }
-    const result = await queryFactoryIntelligence(query, { month, conversationHistory });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET Smart Suggested Prompts for Active Month
-app.get('/api/ai/suggestions', async (req, res) => {
-  try {
-    const { month } = req.query;
-    const suggestions = await generateSmartSuggestions(month || '2026-07');
-    res.json({ success: true, suggestions });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET Knowledge Base Status
-app.get('/api/ai/status', async (req, res) => {
-  try {
-    const index = await rebuildKnowledgeIndex();
-    res.json({
-      success: true,
-      indexed: true,
-      docCount: index.documents.length,
-      workerCount: index.workerLookup.size,
-      lastUpdated: index.lastUpdated
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // 404 handler for unmatched API routes
 app.all('/api/*', (req, res) => {
   res.status(404).json({ success: false, error: `API endpoint ${req.method} ${req.originalUrl} not found` });
@@ -2798,8 +2955,7 @@ const PORT = process.env.PORT || 5000;
 initDatabase().then(async () => {
   try {
     await recomputeAllAttendance();
-    await rebuildKnowledgeIndex();
-    console.log('✅ Startup Attendance & AI RAG Knowledge Base Initialized.');
+    console.log('✅ Startup Attendance & Factory Calendar Initialized.');
   } catch (err) {
     console.warn('⚠️ Startup recompute warning:', err.message);
   }

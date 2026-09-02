@@ -189,6 +189,17 @@ async function initDatabase() {
       holiday_name TEXT NOT NULL,
       is_recurring INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );`,
+
+    // Factory Calendar Table (Monthly Schedule Overrides: working days, off days, holidays)
+    `CREATE TABLE IF NOT EXISTS factory_calendar (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE,
+      day_type TEXT NOT NULL DEFAULT 'holiday',
+      title TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      is_recurring INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`
   ];
 
@@ -209,8 +220,21 @@ async function initDatabase() {
         `INSERT INTO paid_holidays (holiday_date, holiday_name, is_recurring) VALUES (?, ?, ?) ON CONFLICT(holiday_date) DO NOTHING;`,
         [hDate, hName, hRec]
       );
+      await execute(
+        `INSERT INTO factory_calendar (date, day_type, title, is_recurring) VALUES (?, 'holiday', ?, ?) ON CONFLICT(date) DO NOTHING;`,
+        [hDate, hName, hRec]
+      );
     } catch (e) {}
   }
+
+  // Migrate existing paid_holidays into factory_calendar
+  try {
+    await execute(
+      `INSERT INTO factory_calendar (date, day_type, title, is_recurring)
+       SELECT holiday_date, 'holiday', holiday_name, is_recurring FROM paid_holidays
+       ON CONFLICT(date) DO NOTHING;`
+    );
+  } catch (e) {}
 
   // Migrations for existing database instances
   try { await execute(`ALTER TABLE workers ADD COLUMN housing_allowance REAL DEFAULT 0`); } catch (e) {}
