@@ -1131,7 +1131,9 @@ app.get('/api/workers', async (req, res) => {
           COALESCE(w.housing_allowance, 0) as housing_allowance,
           COALESCE(w.food_allowance, 0) as food_allowance,
           COALESCE(w.other_allowance, 0) as other_allowance,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception,
+          COALESCE(w.exception_reason, '') as exception_reason
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
         ) d
@@ -1147,7 +1149,9 @@ app.get('/api/workers', async (req, res) => {
           COALESCE(w.housing_allowance, 0) as housing_allowance,
           COALESCE(w.food_allowance, 0) as food_allowance,
           COALESCE(w.other_allowance, 0) as other_allowance,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception,
+          COALESCE(w.exception_reason, '') as exception_reason
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance
           UNION
@@ -1300,6 +1304,86 @@ app.post('/api/workers/:staff_no/profile', async (req, res) => {
     await recomputeAllAttendance();
 
     res.json({ success: true, message: 'Worker profile & assigned shift updated.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Toggle Worker Exception Status (Exempt from Missing Punch Locks & Auto-Calculation)
+app.post('/api/workers/:staff_no/toggle-exception', async (req, res) => {
+  try {
+    const { staff_no } = req.params;
+    const { is_exception, reason = 'Management Exception' } = req.body;
+
+    let targetException;
+    if (is_exception !== undefined) {
+      targetException = is_exception ? 1 : 0;
+    } else {
+      const cur = await execute(`SELECT is_exception FROM workers WHERE staff_no = ?`, [staff_no]);
+      targetException = cur.rows[0]?.is_exception === 1 ? 0 : 1;
+    }
+
+    await execute(
+      `UPDATE workers SET is_exception = ?, exception_reason = ? WHERE staff_no = ?`,
+      [targetException, reason, staff_no]
+    );
+
+    await execute(
+      `INSERT INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason)
+       VALUES (?, date('now'), 'Exception Status', ?, ?, 'Admin', ?)`,
+      [staff_no, targetException === 1 ? 'Standard Worker' : 'Exception Worker', targetException === 1 ? 'Exception Worker' : 'Standard Worker', reason]
+    );
+
+    res.json({
+      success: true,
+      staff_no,
+      is_exception: targetException,
+      message: targetException === 1
+        ? `Worker ${staff_no} marked as Exception (Exempt from missing punch locks).`
+        : `Worker ${staff_no} reverted to Standard Worker.`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Batch Mark / Unmark Exception Workers
+app.post('/api/workers/batch-exception', async (req, res) => {
+  try {
+    const { staff_nos = [], is_exception = 1, reason = 'Batch Exception Assignment' } = req.body;
+    if (!Array.isArray(staff_nos) || staff_nos.length === 0) {
+      return res.status(400).json({ success: false, error: 'staff_nos array required.' });
+    }
+
+    const flag = is_exception ? 1 : 0;
+    for (const sNo of staff_nos) {
+      await execute(
+        `UPDATE workers SET is_exception = ?, exception_reason = ? WHERE staff_no = ?`,
+        [flag, reason, String(sNo)]
+      );
+    }
+
+    res.json({
+      success: true,
+      updatedCount: staff_nos.length,
+      is_exception: flag,
+      message: `Successfully updated exception status for ${staff_nos.length} worker(s).`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET list of all Exception Workers
+app.get('/api/exception-workers', async (req, res) => {
+  try {
+    const result = await execute(
+      `SELECT staff_no, staff_name, department, is_exception, exception_reason, assigned_shift 
+       FROM workers 
+       WHERE is_exception = 1 OR assigned_shift IN ('exempt', 'flexible', 'exception')
+       ORDER BY CAST(staff_no AS INTEGER) ASC`
+    );
+    res.json({ success: true, exceptionWorkers: result.rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1739,16 +1823,16 @@ app.get('/api/audit-logs', async (req, res) => {
 async function getTrueIncompleteCount(month, allowIncomplete = false) {
   if (allowIncomplete) return 0;
   try {
-    // Fetch exempt workers list
+    // Fetch exempt and exception workers list
     const exemptWorkersRes = await execute(
-      `SELECT staff_no FROM workers WHERE assigned_shift IN ('exempt', 'flexible', 'exception')`
+      `SELECT staff_no FROM workers WHERE is_exception = 1 OR assigned_shift IN ('exempt', 'flexible', 'exception')`
     );
     const exemptStaffSet = new Set(exemptWorkersRes.rows.map(w => String(w.staff_no)));
 
     // Fetch custom rule exemptions
     const customRules = await getCustomRules();
     customRules.forEach(r => {
-      if (r && r.is_active && (r.exemption_type === 'incomplete_exempt' || r.exemption_type === 'forfeiture_exempt' || r.rule_type === 'forfeiture_exempt')) {
+      if (r && r.is_active && (r.exemption_type === 'incomplete_exempt' || r.exemption_type === 'forfeiture_exempt' || r.rule_type === 'forfeiture_exempt' || r.rule_type === 'grace_slab_exempt')) {
         if (r.target_staff_no && r.target_staff_no !== 'all') {
           exemptStaffSet.add(String(r.target_staff_no));
         }
@@ -2129,14 +2213,14 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
   worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(Math.max(w, 13), 45) }));
 }
 
-// 12. GET Export Full Factory Attendance & Payroll Excel Sheet (Professional Styling, optional ?month=YYYY-MM, ?allow_incomplete=true)
+// 12. GET Export Full Factory Attendance & Payroll Excel Sheet (Professional Styling, optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel', async (req, res) => {
   try {
-    const { month, allow_incomplete, ignore_incomplete } = req.query;
-    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
-    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or download as exception.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} uncompleted punch records in ${month && month !== 'all' ? month : 'this period'}. Please resolve missing punches in Fast-Fix Center or mark those workers as Exception to download reports.`);
     }
 
     const settings = await getSettingsMap();
@@ -2163,12 +2247,12 @@ app.get('/api/export/excel', async (req, res) => {
         SELECT 
           d.staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
           COALESCE(w.monthly_salary, 15000) as monthly_salary,
           COALESCE(w.housing_allowance, 0) as housing_allowance,
           COALESCE(w.food_allowance, 0) as food_allowance,
           COALESCE(w.other_allowance, 0) as other_allowance,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
         ) d
@@ -2179,12 +2263,12 @@ app.get('/api/export/excel', async (req, res) => {
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
           COALESCE(w.monthly_salary, 15000) as monthly_salary,
           COALESCE(w.housing_allowance, 0) as housing_allowance,
           COALESCE(w.food_allowance, 0) as food_allowance,
           COALESCE(w.other_allowance, 0) as other_allowance,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance
           UNION
@@ -2219,26 +2303,28 @@ app.get('/api/export/excel', async (req, res) => {
       advancesMap,
       settings,
       salaryRules,
-      customRules
+      customRules,
+      isPayrollUnlocked
     });
 
     const fileSuffix = isMonthFiltered ? `_${month}` : '';
+    const reportName = isPayrollUnlocked ? 'Factory_Attendance_and_Payroll_Report' : 'Factory_Attendance_and_Overtime_Report';
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Factory_Attendance_and_Payroll_Report${fileSuffix}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${reportName}${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 12b. GET Export Dedicated Daily Biometric Timings Excel Sheet (Professional Styling, optional ?month=YYYY-MM, ?allow_incomplete=true)
+// 12b. GET Export Dedicated Daily Biometric Timings Excel Sheet (optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel/timings', async (req, res) => {
   try {
-    const { month, allow_incomplete, ignore_incomplete } = req.query;
-    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
-    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} uncompleted punch records in ${month && month !== 'all' ? month : 'this period'}. Please resolve missing punches in Fast-Fix Center or mark those workers as Exception.`);
     }
 
     const settings = await getSettingsMap();
@@ -2248,8 +2334,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
     let query = `
       SELECT 
         d.*, 
-        COALESCE(w.staff_name, d.staff_no) as staff_name, 
-        COALESCE(w.department, 'WORKER') as department 
+        COALESCE(w.staff_name, d.staff_no) as staff_name
       FROM daily_attendance d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
     `;
@@ -2266,26 +2351,27 @@ app.get('/api/export/excel/timings', async (req, res) => {
       month,
       records: result.rows,
       settings,
-      customRules
+      customRules,
+      isPayrollUnlocked
     });
 
     const fileSuffix = isMonthFiltered ? `_${month}` : '';
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="All_Employees_Daily_Biometric_Timings${fileSuffix}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Daily_Biometric_Timings${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime, optional ?month=YYYY-MM, ?allow_incomplete=true)
+// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel/summary', async (req, res) => {
   try {
-    const { month, allow_incomplete, ignore_incomplete } = req.query;
-    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
-    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} uncompleted punch records in ${month && month !== 'all' ? month : 'this period'}. Please resolve missing punches in Fast-Fix Center or mark those workers as Exception.`);
     }
 
     const settings = await getSettingsMap();
@@ -2304,8 +2390,8 @@ app.get('/api/export/excel/summary', async (req, res) => {
         SELECT 
           d.staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
-          COALESCE(w.monthly_salary, 15000) as monthly_salary
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
         ) d
@@ -2316,8 +2402,8 @@ app.get('/api/export/excel/summary', async (req, res) => {
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
-          COALESCE(w.monthly_salary, 15000) as monthly_salary
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance
           UNION
@@ -2342,26 +2428,27 @@ app.get('/api/export/excel/summary', async (req, res) => {
       month,
       workers: workersRes.rows,
       attendanceMap,
-      settings
+      settings,
+      isPayrollUnlocked
     });
 
     const fileSuffix = isMonthFiltered ? `_${month}` : '';
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Executive_Attendance_and_OT_Summary${fileSuffix}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Attendance_and_OT_Summary${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 12d. GET Export Deducted Holidays & Forfeited Offs Report (with exact reasons, optional ?month=YYYY-MM, ?allow_incomplete=true)
+// 12d. GET Export Deducted Holidays & Forfeited Offs Report (optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel/deducted-holidays-and-offs', async (req, res) => {
   try {
-    const { month, allow_incomplete, ignore_incomplete } = req.query;
-    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
-    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} uncompleted punch records in ${month && month !== 'all' ? month : 'this period'}. Please resolve missing punches in Fast-Fix Center or mark those workers as Exception.`);
     }
 
     const settings = await getSettingsMap();
@@ -2383,9 +2470,9 @@ app.get('/api/export/excel/deducted-holidays-and-offs', async (req, res) => {
         SELECT 
           d.staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
           COALESCE(w.monthly_salary, 15000) as monthly_salary,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
         ) d
@@ -2396,9 +2483,9 @@ app.get('/api/export/excel/deducted-holidays-and-offs', async (req, res) => {
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
           COALESCE(w.monthly_salary, 15000) as monthly_salary,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance
           UNION
@@ -2425,7 +2512,8 @@ app.get('/api/export/excel/deducted-holidays-and-offs', async (req, res) => {
       attendanceMap,
       settings,
       factoryCalendarMap,
-      paidHolidaysMap
+      paidHolidaysMap,
+      isPayrollUnlocked
     });
 
     const fileSuffix = isMonthFiltered ? `_${month}` : '';
@@ -2437,14 +2525,14 @@ app.get('/api/export/excel/deducted-holidays-and-offs', async (req, res) => {
   }
 });
 
-// 12e. GET Export Paid Holidays & Off-Days Worked Report (with descriptions & special OT, optional ?month=YYYY-MM, ?allow_incomplete=true)
+// 12e. GET Export Paid Holidays & Off-Days Worked Report (optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel/paid-holidays-and-off-duty', async (req, res) => {
   try {
-    const { month, allow_incomplete, ignore_incomplete } = req.query;
-    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
-    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} uncompleted punch records in ${month && month !== 'all' ? month : 'this period'}. Please resolve missing punches in Fast-Fix Center or mark those workers as Exception.`);
     }
 
     const settings = await getSettingsMap();
@@ -2466,9 +2554,9 @@ app.get('/api/export/excel/paid-holidays-and-off-duty', async (req, res) => {
         SELECT 
           d.staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
           COALESCE(w.monthly_salary, 15000) as monthly_salary,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
         ) d
@@ -2479,9 +2567,9 @@ app.get('/api/export/excel/paid-holidays-and-off-duty', async (req, res) => {
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
           COALESCE(w.monthly_salary, 15000) as monthly_salary,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance
           UNION
@@ -2508,7 +2596,8 @@ app.get('/api/export/excel/paid-holidays-and-off-duty', async (req, res) => {
       attendanceMap,
       settings,
       factoryCalendarMap,
-      paidHolidaysMap
+      paidHolidaysMap,
+      isPayrollUnlocked
     });
 
     const fileSuffix = isMonthFiltered ? `_${month}` : '';
@@ -2520,14 +2609,14 @@ app.get('/api/export/excel/paid-holidays-and-off-duty', async (req, res) => {
   }
 });
 
-// 12f. GET Export Dedicated Fixes & Manual Edits Audit Report (Worker ID, Name, Original Swipes vs Fixed Timings, Reason, optional ?month=YYYY-MM, ?allow_incomplete=true)
+// 12f. GET Export Dedicated Fixes & Manual Edits Audit Report (optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel/fixes-audit', async (req, res) => {
   try {
-    const { month, allow_incomplete, ignore_incomplete } = req.query;
-    const allowIncomplete = allow_incomplete === 'true' || allow_incomplete === '1' || ignore_incomplete === 'true';
-    const incompleteCount = await getTrueIncompleteCount(month, allowIncomplete);
+    const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center or pass allow_incomplete=true.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} uncompleted punch records in ${month && month !== 'all' ? month : 'this period'}. Please resolve missing punches in Fast-Fix Center or mark those workers as Exception.`);
     }
 
     const settings = await getSettingsMap();
@@ -2552,8 +2641,8 @@ app.get('/api/export/excel/fixes-audit', async (req, res) => {
         SELECT 
           d.staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
         ) d
@@ -2564,8 +2653,8 @@ app.get('/api/export/excel/fixes-audit', async (req, res) => {
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
-          COALESCE(w.department, 'WORKER') as department,
-          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift,
+          COALESCE(w.is_exception, 0) as is_exception
         FROM (
           SELECT DISTINCT staff_no FROM daily_attendance
           UNION
@@ -2592,23 +2681,25 @@ app.get('/api/export/excel/fixes-audit', async (req, res) => {
       workers: workersRes.rows,
       attendanceMap,
       auditLogs: auditLogsRes.rows,
-      settings
+      settings,
+      isPayrollUnlocked
     });
 
     const fileSuffix = isMonthFiltered ? `_${month}` : '';
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Worker_Attendance_Fixes_And_Manual_Edits_Report${fileSuffix}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Worker_Fixes_And_Manual_Edits_Report${fileSuffix}.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 13. GET Export Single Worker Excel Sheet (optional ?month=YYYY-MM)
+// 13. GET Export Single Worker Excel Sheet (optional ?month=YYYY-MM, ?payroll_unlocked=true)
 app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
   try {
     const { staff_no } = req.params;
     const { month } = req.query;
+    const isPayrollUnlocked = req.query.payroll_unlocked === 'true' || req.query.is_payroll_unlocked === 'true' || req.query.unlocked === 'true';
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
     const isMonthFiltered = month && month !== 'all';
@@ -2617,15 +2708,15 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
       SELECT 
         COALESCE(w.staff_no, ?) as staff_no,
         COALESCE(w.staff_name, ?) as staff_name,
-        COALESCE(w.department, 'WORKER') as department,
         COALESCE(w.monthly_salary, 15000) as monthly_salary,
         COALESCE(w.housing_allowance, 0) as housing_allowance,
         COALESCE(w.food_allowance, 0) as food_allowance,
-        COALESCE(w.other_allowance, 0) as other_allowance
+        COALESCE(w.other_allowance, 0) as other_allowance,
+        COALESCE(w.is_exception, 0) as is_exception
       FROM (SELECT ? as staff_no) d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
     `, [staff_no, staff_no, staff_no]);
-    const w = workerRes.rows[0] || { staff_no, staff_name: staff_no, department: 'WORKER', monthly_salary: 15000 };
+    const w = workerRes.rows[0] || { staff_no, staff_name: staff_no, monthly_salary: 15000 };
 
     let attQuery = `SELECT * FROM daily_attendance WHERE staff_no = ?`;
     let advQuery = `SELECT * FROM advances WHERE staff_no = ?`;
@@ -2657,13 +2748,18 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
       settings,
     });
 
-    const summaryRows = [
-      ['Staff No', 'Employee Name', 'Department', 'Full Present Days', 'Paid Sundays (Offs)', 'Absent Days', 'Payable Days', 'Regular Duty Hours (8h)', 'Weekday OT Hours', 'Sunday OT Hours ☀️', 'Total Overtime Hours 🔥', 'Total Worked Hours'],
-      [w.staff_no, w.staff_name, w.department || 'WORKER', p.fullPresentDays || 0, p.paidWeeklyOffs || 0, p.absentDays || 0, p.payableDays || 0, +(p.totalWorkedHours - p.totalOtHours - p.totalSundayOtHours).toFixed(2), p.totalOtHours || 0, p.totalSundayOtHours || 0, +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2), p.totalWorkedHours || 0]
-    ];
+    const summaryHeaders = ['Worker ID', 'Worker Name', 'Present Days', 'Paid Sundays', 'Absent Days', 'Payable Days', 'Regular Duty (8h)', 'Weekday OT', 'Sunday/Off OT', 'Total OT', 'Total Worked'];
+    const summaryValues = [w.staff_no, w.staff_name, p.fullPresentDays || 0, p.paidWeeklyOffs || 0, p.absentDays || 0, p.payableDays || 0, +(p.totalWorkedHours - p.totalOtHours - p.totalSundayOtHours).toFixed(2), p.totalOtHours || 0, p.totalSundayOtHours || 0, +((p.totalOtHours || 0) + (p.totalSundayOtHours || 0)).toFixed(2), p.totalWorkedHours || 0];
+
+    if (isPayrollUnlocked) {
+      summaryHeaders.push('Base Salary (₹)', 'Earned Basic (₹)', 'OT Pay (₹)', 'Advance (₹)', 'Net Salary (₹)');
+      summaryValues.push(p.monthlySalary || 15000, p.earnedBasic || 0, p.overtimePay || 0, p.advancesTotal || 0, p.netPayable || 0);
+    }
+
+    const summaryRows = [summaryHeaders, summaryValues];
 
     const dailyRows = [
-      ['Date', 'Day', 'Raw Punches', 'Effective IN', 'Effective OUT', 'Regular Duty (8h)', 'Weekday OT (Hrs)', 'Sunday OT (Hrs) ☀️', 'Total OT (Hrs) 🔥', 'Total Worked Hours', 'Late Mins', 'Attendance Status']
+      ['Date', 'Day', 'Punches', 'In Time', 'Out Time', 'Duty (8h)', 'Weekday OT', 'Sunday/Off OT', 'Total OT', 'Total Worked', 'Late (Mins)', 'Status']
     ];
 
     attRes.rows.forEach(r => {

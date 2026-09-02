@@ -1,5 +1,5 @@
 const ExcelJS = require('exceljs');
-const { parseSwipeRecord, computeDailyAttendance } = require('./rulesEngine');
+const { parseSwipeRecord } = require('./rulesEngine');
 const { calculateWorkerPayroll } = require('./payrollEngine');
 
 // 🎨 Professional Theme Palette Configurations
@@ -85,7 +85,7 @@ function createStyledSheet(workbook, sheetName, options = {}) {
   ws.mergeCells(1, 1, 1, totalCols);
   const titleCell = ws.getCell(1, 1);
   titleCell.value = title.toUpperCase();
-  titleCell.font = { name: 'Segoe UI', size: 12.5, bold: true, color: { argb: theme.headerFont } };
+  titleCell.font = { name: 'Segoe UI', size: 12, bold: true, color: { argb: theme.headerFont } };
   titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.primary } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   ws.getRow(1).height = 30;
@@ -251,7 +251,7 @@ function addTotalsRow(sheetConfig, lastRowNum, totalsObj) {
         cell.value = String(val);
       }
     } else if (colIdx === 0) {
-      cell.value = 'TOTAL / SUMMARY';
+      cell.value = 'TOTAL';
     } else {
       cell.value = '';
     }
@@ -276,25 +276,25 @@ function addTotalsRow(sheetConfig, lastRowNum, totalsObj) {
 }
 
 // ==========================================
-// 1. REPORT 1: 5-COLUMN EXECUTIVE SUMMARY
+// 1. REPORT 1: SUMMARY REPORT (NO DEPARTMENT / NO SHIFT)
 // ==========================================
 async function buildExecutiveSummaryReport({ month, workers, attendanceMap, settings }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KKI Attendance & Payroll System';
-  const monthLabel = month && month !== 'all' ? `Month: ${month}` : 'All Months (Cumulative)';
+  const monthLabel = month && month !== 'all' ? `Month: ${month}` : 'All Months';
 
   const columns = [
-    { key: 'staff_no', header: 'WORKER ID', align: 'center', minWidth: 14, bold: true },
-    { key: 'staff_name', header: 'WORKER NAME', align: 'left', minWidth: 26, bold: true, type: 'text_left' },
-    { key: 'payable_days', header: 'PAYABLE DAYS', align: 'right', type: 'number', decimals: 1, minWidth: 16 },
-    { key: 'absent_days', header: 'ABSENT DAYS', align: 'right', type: 'number', decimals: 1, minWidth: 16, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
-    { key: 'sun_hol_worked', header: 'SUN/HOL WORKED (DAYS)', align: 'right', type: 'number', decimals: 0, minWidth: 22 },
-    { key: 'total_ot_hours', header: 'OVERTIME (HOURS)', align: 'right', type: 'number', decimals: 2, minWidth: 18, bold: true }
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 14, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 26, bold: true, type: 'text_left' },
+    { key: 'payable_days', header: 'Payable Days', align: 'right', type: 'number', decimals: 1, minWidth: 16 },
+    { key: 'absent_days', header: 'Absent Days', align: 'right', type: 'number', decimals: 1, minWidth: 16, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
+    { key: 'sun_hol_worked', header: 'Off-Days Worked', align: 'right', type: 'number', decimals: 0, minWidth: 18 },
+    { key: 'total_ot_hours', header: 'OT Hours', align: 'right', type: 'number', decimals: 2, minWidth: 16, bold: true }
   ];
 
-  const sheetConfig = createStyledSheet(wb, 'Executive Attendance Summary', {
+  const sheetConfig = createStyledSheet(wb, 'Attendance Summary', {
     theme: THEMES.TEAL,
-    title: 'Executive Attendance & Overtime Summary Report',
+    title: 'Factory Attendance & Overtime Summary Report',
     subtitle: `KKI Factory Attendance Management — ${monthLabel}`,
     columns
   });
@@ -346,7 +346,7 @@ async function buildExecutiveSummaryReport({ month, workers, attendanceMap, sett
 }
 
 // ==========================================
-// 2. REPORT 2: BIOMETRIC TIMINGS REPORT
+// 2. REPORT 2: BIOMETRIC TIMINGS REPORT (NO DEPARTMENT / NO SHIFT)
 // ==========================================
 async function buildBiometricTimingsReport({ month, records, settings, customRules }) {
   const wb = new ExcelJS.Workbook();
@@ -354,15 +354,14 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
   const monthLabel = month && month !== 'all' ? `Month: ${month}` : 'All Months';
 
   const columns = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 15 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 14 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
-    { key: 'raw_swipes', header: 'Raw Swipes', align: 'left', minWidth: 24, type: 'text_left' },
+    { key: 'raw_swipes', header: 'Punches', align: 'left', minWidth: 24, type: 'text_left' },
     { key: 'effective_in', header: 'In Time', align: 'center', minWidth: 12, bold: true },
     { key: 'effective_out', header: 'Out Time', align: 'center', minWidth: 12, bold: true },
-    { key: 'regular_hours', header: 'Regular (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
+    { key: 'regular_hours', header: 'Duty Hours (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
     { key: 'ot_hours', header: 'Weekday OT', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
     { key: 'sunday_ot_hours', header: 'Sunday/Off OT', align: 'right', type: 'number', decimals: 2, minWidth: 15 },
     { key: 'total_ot', header: 'Total OT (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 14, bold: true },
@@ -370,9 +369,9 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
     { key: 'late_minutes', header: 'Late (Mins)', align: 'right', type: 'number', decimals: 0, minWidth: 13, textColor: (v) => v > 0 ? 'D97706' : '0F172A' },
     {
       key: 'status',
-      header: 'Attendance Status',
+      header: 'Status',
       align: 'center',
-      minWidth: 22,
+      minWidth: 20,
       highlight: (v) => {
         if (v?.includes('Present')) return 'DCFCE7'; // light green
         if (v?.includes('Absent')) return 'FEE2E2';  // light red
@@ -381,12 +380,12 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
         return null;
       }
     },
-    { key: 'punch_type', header: 'Punch Source', align: 'center', minWidth: 20 }
+    { key: 'punch_type', header: 'Punch Type', align: 'center', minWidth: 18 }
   ];
 
   const sheetConfig = createStyledSheet(wb, 'Biometric Daily Timings', {
     theme: THEMES.BLUE,
-    title: 'Daily Biometric Timings & Punch Audit Sheet',
+    title: 'Daily Biometric Timings & Punch Sheet',
     subtitle: `KKI Factory Attendance Management — ${monthLabel}`,
     columns
   });
@@ -406,7 +405,6 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
     rows.push({
       staff_no: r.staff_no,
       staff_name: r.staff_name || r.staff_no,
-      department: r.department || 'WORKER',
       date: r.date,
       weekday: r.weekday || '',
       raw_swipes: r.raw_swipes || '',
@@ -419,14 +417,14 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
       total_hours: parseFloat(r.total_hours || 0),
       late_minutes: parseInt(r.late_minutes || 0, 10),
       status: r.status || 'Absent',
-      punch_type: r.is_manual_override === 1 ? 'Manual Edit / Fixed' : 'Biometric Auto'
+      punch_type: r.is_manual_override === 1 ? 'Manual Fixed' : 'Biometric'
     });
   });
 
   const { lastRowNum } = populateDataRows(sheetConfig, rows);
   addTotalsRow(sheetConfig, lastRowNum, {
     staff_no: 'TOTAL',
-    staff_name: `${records.length} Punch Records`,
+    staff_name: `${records.length} Punches`,
     regular_hours: +totReg.toFixed(2),
     ot_hours: +totWeekdayOt.toFixed(2),
     sunday_ot_hours: +totSunOt.toFixed(2),
@@ -439,19 +437,17 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
 }
 
 // ==========================================
-// 3. REPORT 3: FULL PAYROLL & ATTENDANCE REPORT
+// 3. REPORT 3: FULL PAYROLL / ATTENDANCE REPORT (SALARY SHOWN ONLY IF UNLOCKED)
 // ==========================================
-async function buildFullPayrollReport({ month, workers, attendanceMap, advancesMap, settings, salaryRules }) {
+async function buildFullPayrollReport({ month, workers, attendanceMap, advancesMap, settings, salaryRules, isPayrollUnlocked = false }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KKI Attendance & Payroll System';
   const monthLabel = month && month !== 'all' ? `Month: ${month}` : 'All Months';
 
-  // Sheet 1: Monthly Attendance & Payroll Summary
-  const summaryColumns = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 24, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 15 },
-    { key: 'assigned_shift', header: 'Shift', align: 'center', minWidth: 12 },
+  // Base Attendance Columns (Always Included)
+  const baseColumns = [
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 24, type: 'text_left', bold: true },
     { key: 'full_present_days', header: 'Present Days', align: 'right', type: 'number', decimals: 1, minWidth: 14 },
     { key: 'paid_weekly_offs', header: 'Paid Sundays', align: 'right', type: 'number', decimals: 1, minWidth: 14 },
     { key: 'paid_holidays', header: 'Paid Holidays', align: 'right', type: 'number', decimals: 1, minWidth: 14 },
@@ -462,17 +458,26 @@ async function buildFullPayrollReport({ month, workers, attendanceMap, advancesM
     { key: 'regular_hours', header: 'Regular Duty (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 16 },
     { key: 'weekday_ot_hours', header: 'Weekday OT', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
     { key: 'sunday_ot_hours', header: 'Sunday/Off OT', align: 'right', type: 'number', decimals: 2, minWidth: 15 },
-    { key: 'total_ot_hours', header: 'Total OT Hours', align: 'right', type: 'number', decimals: 2, minWidth: 15, bold: true },
-    { key: 'monthly_salary', header: 'Base Monthly (₹)', align: 'right', type: 'currency', minWidth: 16 },
-    { key: 'earned_wages', header: 'Base Earned (₹)', align: 'right', type: 'currency', minWidth: 16 },
+    { key: 'total_ot_hours', header: 'Total OT Hours', align: 'right', type: 'number', decimals: 2, minWidth: 15, bold: true }
+  ];
+
+  // Financial / Salary Columns (Appended ONLY when Payroll is explicitly unlocked)
+  const salaryColumns = isPayrollUnlocked ? [
+    { key: 'monthly_salary', header: 'Base Salary (₹)', align: 'right', type: 'currency', minWidth: 16 },
+    { key: 'earned_wages', header: 'Earned Basic (₹)', align: 'right', type: 'currency', minWidth: 16 },
     { key: 'overtime_pay', header: 'OT Pay (₹)', align: 'right', type: 'currency', minWidth: 15 },
     { key: 'advances', header: 'Advance Repaid (₹)', align: 'right', type: 'currency', minWidth: 16, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
     { key: 'net_salary', header: 'Net Salary Payable (₹)', align: 'right', type: 'currency', minWidth: 20, bold: true, highlight: () => 'FEF08A' }
-  ];
+  ] : [];
 
-  const summaryConfig = createStyledSheet(wb, 'Monthly Payroll Summary', {
+  const summaryColumns = [...baseColumns, ...salaryColumns];
+
+  const sheetTitle = isPayrollUnlocked ? 'Monthly Factory Attendance & Payroll Report' : 'Monthly Factory Attendance & Overtime Report';
+  const tabName = isPayrollUnlocked ? 'Monthly Payroll Summary' : 'Attendance & OT Summary';
+
+  const summaryConfig = createStyledSheet(wb, tabName, {
     theme: THEMES.NAVY,
-    title: 'Monthly Factory Attendance & Payroll Report',
+    title: sheetTitle,
     subtitle: `KKI Factory Attendance Management — ${monthLabel}`,
     columns: summaryColumns
   });
@@ -507,11 +512,9 @@ async function buildFullPayrollReport({ month, workers, attendanceMap, advancesM
     totAdv += p.advancesTotal || 0;
     totNet += p.netPayable || 0;
 
-    summaryRows.push({
+    const rowObj = {
       staff_no: w.staff_no,
       staff_name: w.staff_name,
-      department: w.department || 'WORKER',
-      assigned_shift: w.assigned_shift || 'auto',
       full_present_days: p.fullPresentDays || 0,
       paid_weekly_offs: p.paidWeeklyOffs || 0,
       paid_holidays: p.paidHolidays || 0,
@@ -522,54 +525,74 @@ async function buildFullPayrollReport({ month, workers, attendanceMap, advancesM
       regular_hours: regHours,
       weekday_ot_hours: p.totalOtHours || 0,
       sunday_ot_hours: p.totalSundayOtHours || 0,
-      total_ot_hours: totalOt,
-      monthly_salary: p.monthlySalary || 15000,
-      earned_wages: p.earnedBasic || 0,
-      overtime_pay: p.overtimePay || 0,
-      advances: p.advancesTotal || 0,
-      net_salary: p.netPayable || 0
-    });
+      total_ot_hours: totalOt
+    };
+
+    if (isPayrollUnlocked) {
+      rowObj.monthly_salary = p.monthlySalary || 15000;
+      rowObj.earned_wages = p.earnedBasic || 0;
+      rowObj.overtime_pay = p.overtimePay || 0;
+      rowObj.advances = p.advancesTotal || 0;
+      rowObj.net_salary = p.netPayable || 0;
+    }
+
+    summaryRows.push(rowObj);
   }
 
   const { lastRowNum } = populateDataRows(summaryConfig, summaryRows);
-  addTotalsRow(summaryConfig, lastRowNum, {
+  const totalsObj = {
     staff_no: 'TOTAL',
     staff_name: `${workers.length} Workers`,
     payable_days: +totPayable.toFixed(1),
-    total_ot_hours: +totOT.toFixed(2),
-    earned_wages: +totEarned.toFixed(2),
-    overtime_pay: +totOtPay.toFixed(2),
-    advances: +totAdv.toFixed(2),
-    net_salary: +totNet.toFixed(2)
-  });
+    total_ot_hours: +totOT.toFixed(2)
+  };
+
+  if (isPayrollUnlocked) {
+    totalsObj.earned_wages = +totEarned.toFixed(2);
+    totalsObj.overtime_pay = +totOtPay.toFixed(2);
+    totalsObj.advances = +totAdv.toFixed(2);
+    totalsObj.net_salary = +totNet.toFixed(2);
+  }
+
+  addTotalsRow(summaryConfig, lastRowNum, totalsObj);
 
   return await wb.xlsx.writeBuffer();
 }
 
 // ==========================================
-// 4. REPORT 4: DEDUCTED HOLIDAYS & OFFS AUDIT
+// 4. REPORT 4: DEDUCTED HOLIDAYS & OFFS AUDIT (NO DEPARTMENT / NO SHIFT)
 // ==========================================
-async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMap, settings, factoryCalendarMap, paidHolidaysMap }) {
+async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMap, settings, factoryCalendarMap, paidHolidaysMap, isPayrollUnlocked = false }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KKI Attendance & Payroll System';
   const monthLabel = month && month !== 'all' ? `Month: ${month}` : 'All Months';
 
   // Sheet 1: Worker Deduction Summary
   const summaryCols = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 24, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 15 },
-    { key: 'assigned_shift', header: 'Shift Type', align: 'center', minWidth: 14 },
-    { key: 'monthly_salary', header: 'Monthly Salary (₹)', align: 'right', type: 'currency', minWidth: 16 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 24, type: 'text_left', bold: true }
+  ];
+
+  if (isPayrollUnlocked) {
+    summaryCols.push({ key: 'monthly_salary', header: 'Salary (₹)', align: 'right', type: 'currency', minWidth: 16 });
+  }
+
+  summaryCols.push(
     { key: 'granted_offs', header: 'Weekly Offs (Granted)', align: 'right', type: 'number', decimals: 1, minWidth: 16 },
     { key: 'granted_holidays', header: 'Paid Holidays (Granted)', align: 'right', type: 'number', decimals: 1, minWidth: 16 },
-    { key: 'forfeited_offs', header: 'Forfeited Sundays (Deducted)', align: 'right', type: 'number', decimals: 1, minWidth: 18, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
-    { key: 'forfeited_holidays', header: 'Forfeited Holidays (Deducted)', align: 'right', type: 'number', decimals: 1, minWidth: 18, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
-    { key: 'total_forfeited_days', header: 'Total Deducted Days', align: 'right', type: 'number', decimals: 1, minWidth: 16, bold: true, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
-    { key: 'salary_loss', header: 'Est. Salary Loss (₹)', align: 'right', type: 'currency', minWidth: 16, bold: true, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
-    { key: 'payable_days', header: 'Net Payable Days', align: 'right', type: 'number', decimals: 1, minWidth: 15, bold: true },
-    { key: 'audit_status', header: 'Audit Status / Rule Notice', align: 'left', minWidth: 28, type: 'text_left' }
-  ];
+    { key: 'forfeited_offs', header: 'Forfeited Sundays', align: 'right', type: 'number', decimals: 1, minWidth: 16, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
+    { key: 'forfeited_holidays', header: 'Forfeited Holidays', align: 'right', type: 'number', decimals: 1, minWidth: 16, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' },
+    { key: 'total_forfeited_days', header: 'Total Deducted Days', align: 'right', type: 'number', decimals: 1, minWidth: 16, bold: true, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' }
+  );
+
+  if (isPayrollUnlocked) {
+    summaryCols.push({ key: 'salary_loss', header: 'Salary Loss (₹)', align: 'right', type: 'currency', minWidth: 16, bold: true, textColor: (v) => v > 0 ? 'DC2626' : '0F172A' });
+  }
+
+  summaryCols.push(
+    { key: 'payable_days', header: 'Payable Days', align: 'right', type: 'number', decimals: 1, minWidth: 15, bold: true },
+    { key: 'audit_status', header: 'Rule Status', align: 'left', minWidth: 28, type: 'text_left' }
+  );
 
   const summaryConfig = createStyledSheet(wb, 'Worker Summary', {
     theme: THEMES.CRIMSON,
@@ -580,44 +603,42 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
 
   // Sheet 2: Deducted Log
   const deductedCols = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 14 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 13 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
-    { key: 'category', header: 'Deducted Item Category', align: 'center', minWidth: 20 },
-    { key: 'title', header: 'Holiday / Event Title', align: 'center', minWidth: 22 },
-    { key: 'status', header: 'Attendance Status', align: 'center', minWidth: 20, highlight: () => 'FEE2E2' },
-    { key: 'reason', header: 'Exact Forfeiture Reason & Factory Rule Explanation', align: 'left', minWidth: 44, type: 'text_left', bold: true },
-    { key: 'raw_swipes', header: 'Raw Swipes', align: 'left', minWidth: 16, type: 'text_left' },
-    { key: 'deduction', header: 'Pay Deduction', align: 'center', minWidth: 18, textColor: () => 'DC2626', bold: true }
+    { key: 'category', header: 'Category', align: 'center', minWidth: 20 },
+    { key: 'title', header: 'Event Title', align: 'center', minWidth: 22 },
+    { key: 'status', header: 'Status', align: 'center', minWidth: 20, highlight: () => 'FEE2E2' },
+    { key: 'reason', header: 'Forfeiture Reason & Rule', align: 'left', minWidth: 44, type: 'text_left', bold: true },
+    { key: 'raw_swipes', header: 'Punches', align: 'left', minWidth: 16, type: 'text_left' },
+    { key: 'deduction', header: isPayrollUnlocked ? 'Pay Deduction' : 'Deduction', align: 'center', minWidth: 18, textColor: () => 'DC2626', bold: true }
   ];
 
   const deductedConfig = createStyledSheet(wb, 'Deducted & Forfeited Log', {
     theme: THEMES.CRIMSON,
-    title: 'Itemized Deduction & Forfeiture Breakdown Log',
-    subtitle: `Detailed Sandwich Rule & Absence Penalties — ${monthLabel}`,
+    title: 'Deduction & Forfeiture Breakdown Log',
+    subtitle: `Sandwich Rule & Absence Deductions — ${monthLabel}`,
     columns: deductedCols
   });
 
   // Sheet 3: Granted Offs
   const grantedCols = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 14 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 13 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
-    { key: 'off_type', header: 'Off Category', align: 'center', minWidth: 22 },
-    { key: 'title', header: 'Occasion / Description', align: 'center', minWidth: 24 },
-    { key: 'status', header: 'Attendance Status', align: 'center', minWidth: 20, highlight: () => 'E0E7FF' },
+    { key: 'off_type', header: 'Off Type', align: 'center', minWidth: 22 },
+    { key: 'title', header: 'Reason / Occasion', align: 'center', minWidth: 24 },
+    { key: 'status', header: 'Status', align: 'center', minWidth: 20, highlight: () => 'E0E7FF' },
     { key: 'paid_credit', header: 'Paid Benefit (Day)', align: 'right', type: 'number', decimals: 1, minWidth: 16 },
-    { key: 'notes', header: 'Notes / Policy Reference', align: 'left', minWidth: 32, type: 'text_left' }
+    { key: 'notes', header: 'Notes', align: 'left', minWidth: 32, type: 'text_left' }
   ];
 
   const grantedConfig = createStyledSheet(wb, 'Granted Offs & Reasons', {
     theme: THEMES.CRIMSON,
-    title: 'Granted Weekly Offs & Paid Festival Holidays Log',
-    subtitle: `All Fully Credited Offs & Paid Holidays — ${monthLabel}`,
+    title: 'Granted Weekly Offs & Paid Holidays Log',
+    subtitle: `Credited Offs & Paid Holidays — ${monthLabel}`,
     columns: grantedCols
   });
 
@@ -639,18 +660,17 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
       if (st === 'Weekly Off (Paid)') {
         grantedOffs++;
         payableDaysCount += 1;
-        const offType = calOverride?.day_type === 'off_day' ? 'Substitute Factory Paid Off' : 'Default Weekly Off (Sunday)';
+        const offType = calOverride?.day_type === 'off_day' ? 'Substitute Paid Off' : 'Weekly Off (Sunday)';
         grantedRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           date: r.date,
           weekday: r.weekday || '',
           off_type: offType,
           title: calOverride?.title || 'Weekly Off (Sunday)',
           status: st,
           paid_credit: 1.0,
-          notes: calOverride ? `Custom schedule override: ${calOverride.notes || ''}` : 'Standard factory weekly rest'
+          notes: calOverride ? `Schedule override: ${calOverride.notes || ''}` : 'Standard weekly off'
         });
       } else if (st === 'Weekly Off (Worked OT)') {
         grantedOffs++;
@@ -658,14 +678,13 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
         grantedRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           date: r.date,
           weekday: r.weekday || '',
           off_type: 'Weekly Off (Worked OT)',
-          title: calOverride?.title || 'Sunday Production Duty',
+          title: calOverride?.title || 'Sunday Duty',
           status: st,
           paid_credit: 1.0,
-          notes: `Worker attended on off-day: earned ${r.sunday_ot_hours || 0}h Special OT`
+          notes: `Attended on off-day: earned ${r.sunday_ot_hours || 0}h Special OT`
         });
       } else if (st === 'Holiday (Paid)' || st === 'Holiday (Worked OT)') {
         grantedHolidays++;
@@ -674,14 +693,13 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
         grantedRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           date: r.date,
           weekday: r.weekday || '',
-          off_type: 'Declared Paid Holiday',
+          off_type: 'Paid Holiday',
           title: holName,
           status: st,
           paid_credit: 1.0,
-          notes: st === 'Holiday (Worked OT)' ? `Worked on festival: earned ${r.sunday_ot_hours || 0}h Special OT` : 'Paid festival benefit credited'
+          notes: st === 'Holiday (Worked OT)' ? `Worked on holiday: earned ${r.sunday_ot_hours || 0}h Special OT` : 'Paid holiday benefit credited'
         });
       } else if (st === 'Holiday (Forfeited)') {
         forfeitedHolidays++;
@@ -689,30 +707,28 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
         deductedRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           date: r.date,
           weekday: r.weekday || '',
-          category: 'Declared Paid Holiday',
+          category: 'Paid Holiday',
           title: holName,
           status: st,
-          reason: 'Sandwich Rule: Worker was unapproved absent on adjacent working day(s) immediately before or after holiday',
+          reason: 'Sandwich Rule: Absent on adjacent working day immediately before or after holiday',
           raw_swipes: r.raw_swipes || 'No punch',
-          deduction: `-₹${dayRate} (1 Day Pay Loss)`
+          deduction: isPayrollUnlocked ? `-₹${dayRate} (1 Day Loss)` : '1 Day Deducted'
         });
       } else if (st === 'Weekly Off (Forfeited)') {
         forfeitedOffs++;
         deductedRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           date: r.date,
           weekday: r.weekday || '',
           category: 'Sunday Weekly Off',
           title: 'Sunday Weekly Off',
           status: st,
-          reason: '4+ Absents: Worker had 4 or more unapproved absences during Monday–Saturday work week or exceeded absence quota',
+          reason: '4+ Absents: 4 or more absences during work week or exceeded absence quota',
           raw_swipes: r.raw_swipes || 'No punch',
-          deduction: `-₹${dayRate} (1 Day Pay Loss)`
+          deduction: isPayrollUnlocked ? `-₹${dayRate} (1 Day Loss)` : '1 Day Deducted'
         });
       } else if (st.includes('Present')) {
         payableDaysCount += 1;
@@ -723,23 +739,26 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
 
     const totalForfeited = forfeitedOffs + forfeitedHolidays;
     const loss = +(totalForfeited * dayRate).toFixed(2);
-    const isExempt = w.assigned_shift === 'exempt' || w.assigned_shift === 'flexible';
+    const isExempt = w.is_exception === 1 || w.assigned_shift === 'exempt' || w.assigned_shift === 'flexible' || w.assigned_shift === 'exception';
 
-    summaryRows.push({
+    const summaryObj = {
       staff_no: w.staff_no,
       staff_name: w.staff_name,
-      department: w.department || 'WORKER',
-      assigned_shift: w.assigned_shift || 'auto',
-      monthly_salary: salary,
       granted_offs: grantedOffs,
       granted_holidays: grantedHolidays,
       forfeited_offs: forfeitedOffs,
       forfeited_holidays: forfeitedHolidays,
       total_forfeited_days: totalForfeited,
-      salary_loss: loss,
       payable_days: +payableDaysCount.toFixed(1),
-      audit_status: isExempt ? 'Exception Worker (Exempt)' : totalForfeited > 0 ? `${totalForfeited} Day(s) Deducted via Policy` : 'Clean (All Offs & Holidays Valid)'
-    });
+      audit_status: isExempt ? 'Exception Worker' : totalForfeited > 0 ? `${totalForfeited} Day(s) Deducted` : 'Clean'
+    };
+
+    if (isPayrollUnlocked) {
+      summaryObj.monthly_salary = salary;
+      summaryObj.salary_loss = loss;
+    }
+
+    summaryRows.push(summaryObj);
   }
 
   populateDataRows(summaryConfig, summaryRows);
@@ -750,32 +769,41 @@ async function buildDeductedHolidaysAndOffsReport({ month, workers, attendanceMa
 }
 
 // ==========================================
-// 5. REPORT 5: PAID HOLIDAYS & OFF-DAYS DUTY
+// 5. REPORT 5: PAID HOLIDAYS & OFF-DAYS DUTY (NO DEPARTMENT / NO SHIFT)
 // ==========================================
-async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap, settings, factoryCalendarMap, paidHolidaysMap }) {
+async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap, settings, factoryCalendarMap, paidHolidaysMap, isPayrollUnlocked = false }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KKI Attendance & Payroll System';
   const monthLabel = month && month !== 'all' ? `Month: ${month}` : 'All Months';
 
   // Sheet 1: Worker Summary
   const summaryCols = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 24, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 15 },
-    { key: 'assigned_shift', header: 'Shift Type', align: 'center', minWidth: 14 },
-    { key: 'monthly_salary', header: 'Base Salary (₹)', align: 'right', type: 'currency', minWidth: 16 },
-    { key: 'paid_holidays', header: 'Paid Holidays Credited', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
-    { key: 'holidays_worked', header: 'Holidays Worked (Duty)', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 24, type: 'text_left', bold: true }
+  ];
+
+  if (isPayrollUnlocked) {
+    summaryCols.push({ key: 'monthly_salary', header: 'Base Salary (₹)', align: 'right', type: 'currency', minWidth: 16 });
+  }
+
+  summaryCols.push(
+    { key: 'paid_holidays', header: 'Paid Holidays', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
+    { key: 'holidays_worked', header: 'Holidays Worked', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
     { key: 'sundays_worked', header: 'Sundays/Offs Worked', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
     { key: 'total_off_days_worked', header: 'Total Off-Days Worked', align: 'right', type: 'number', decimals: 0, minWidth: 16, bold: true },
-    { key: 'special_ot_hours', header: 'Special OT Hours (2.0x)', align: 'right', type: 'number', decimals: 2, minWidth: 18, bold: true },
-    { key: 'hourly_rate', header: 'Hourly Rate (₹)', align: 'right', type: 'currency', minWidth: 14 },
-    { key: 'special_ot_pay', header: 'Special OT Pay (₹)', align: 'right', type: 'currency', minWidth: 16, bold: true, highlight: () => 'FEF08A' }
-  ];
+    { key: 'special_ot_hours', header: 'Special OT Hours', align: 'right', type: 'number', decimals: 2, minWidth: 18, bold: true }
+  );
+
+  if (isPayrollUnlocked) {
+    summaryCols.push(
+      { key: 'hourly_rate', header: 'Hourly Rate (₹)', align: 'right', type: 'currency', minWidth: 14 },
+      { key: 'special_ot_pay', header: 'Special OT Pay (₹)', align: 'right', type: 'currency', minWidth: 16, bold: true, highlight: () => 'FEF08A' }
+    );
+  }
 
   const summaryConfig = createStyledSheet(wb, 'Worker Summary', {
     theme: THEMES.INDIGO,
-    title: 'Paid Holidays & Off-Days Worked Duty Report',
+    title: 'Paid Holidays & Off-Days Worked Report',
     subtitle: `KKI Factory Attendance Management — ${monthLabel}`,
     columns: summaryCols
   });
@@ -784,24 +812,23 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
   const holidayCols = [
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 13 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
-    { key: 'title', header: 'Holiday / Festival Name', align: 'center', minWidth: 24 },
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 14 },
-    { key: 'status', header: 'Attendance Status', align: 'center', minWidth: 20 },
-    { key: 'raw_swipes', header: 'Raw Swipes', align: 'left', minWidth: 18, type: 'text_left' },
-    { key: 'effective_in', header: 'Effective IN', align: 'center', minWidth: 12 },
-    { key: 'effective_out', header: 'Effective OUT', align: 'center', minWidth: 12 },
-    { key: 'worked_hours', header: 'Worked Hours', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
+    { key: 'title', header: 'Holiday Name', align: 'center', minWidth: 24 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
+    { key: 'status', header: 'Status', align: 'center', minWidth: 20 },
+    { key: 'raw_swipes', header: 'Punches', align: 'left', minWidth: 18, type: 'text_left' },
+    { key: 'effective_in', header: 'In Time', align: 'center', minWidth: 12 },
+    { key: 'effective_out', header: 'Out Time', align: 'center', minWidth: 12 },
+    { key: 'worked_hours', header: 'Worked (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
     { key: 'special_ot_hours', header: 'Special OT (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 15, bold: true },
-    { key: 'benefit', header: 'Holiday Paid Benefit', align: 'center', minWidth: 24, bold: true },
-    { key: 'notes', header: 'Notes / Policy Reference', align: 'left', minWidth: 32, type: 'text_left' }
+    { key: 'benefit', header: 'Benefit', align: 'center', minWidth: 20, bold: true },
+    { key: 'notes', header: 'Notes', align: 'left', minWidth: 32, type: 'text_left' }
   ];
 
   const holidayConfig = createStyledSheet(wb, 'Paid Holidays Detail', {
     theme: THEMES.INDIGO,
-    title: 'Itemized Festival & National Holidays Log',
-    subtitle: `Holiday Entitlements & Work Details — ${monthLabel}`,
+    title: 'Itemized Holidays Log',
+    subtitle: `Holiday Work & Entitlements — ${monthLabel}`,
     columns: holidayCols
   });
 
@@ -809,23 +836,22 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
   const offDutyCols = [
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 13 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
-    { key: 'category', header: 'Off-Day Category', align: 'center', minWidth: 22 },
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 14 },
-    { key: 'raw_swipes', header: 'Raw Swipes', align: 'left', minWidth: 18, type: 'text_left' },
+    { key: 'category', header: 'Off Category', align: 'center', minWidth: 22 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
+    { key: 'raw_swipes', header: 'Punches', align: 'left', minWidth: 18, type: 'text_left' },
     { key: 'effective_in', header: 'In Time', align: 'center', minWidth: 12 },
     { key: 'effective_out', header: 'Out Time', align: 'center', minWidth: 12 },
-    { key: 'worked_hours', header: 'Total Worked (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 16 },
-    { key: 'special_ot_hours', header: 'Special OT Earned', align: 'right', type: 'number', decimals: 2, minWidth: 16, bold: true },
-    { key: 'duty_description', header: 'Duty Description & Shift Title', align: 'left', minWidth: 36, type: 'text_left' },
-    { key: 'ot_rate', header: 'OT Multiplier / Rate', align: 'center', minWidth: 22, bold: true }
+    { key: 'worked_hours', header: 'Worked (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 16 },
+    { key: 'special_ot_hours', header: 'Special OT (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 16, bold: true },
+    { key: 'duty_description', header: 'Duty Description', align: 'left', minWidth: 36, type: 'text_left' },
+    { key: 'ot_rate', header: 'OT Multiplier', align: 'center', minWidth: 20, bold: true }
   ];
 
   const offDutyConfig = createStyledSheet(wb, 'Off-Days Worked Log', {
     theme: THEMES.INDIGO,
     title: 'Off-Days & Sunday Production Duty Log',
-    subtitle: `Worker Duties on Non-Working Schedule Days — ${monthLabel}`,
+    subtitle: `Work on Non-Working Days — ${monthLabel}`,
     columns: offDutyCols
   });
 
@@ -853,17 +879,17 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
 
       if (isHolidayDate) {
         const holName = calOverride?.title || paidHolidaysMap[r.date] || 'Declared Holiday';
-        let benefitText = '1.0 Full Paid Day';
+        let benefitText = '1.0 Paid Day';
         if (st === 'Holiday (Worked OT)') {
           creditedHolidays += 1;
           holidaysWorkedCount += 1;
           totalSpecialOtHours += sunOt;
-          benefitText = '1.0 Paid Day + 2.0x OT';
+          benefitText = '1.0 Paid Day + OT';
         } else if (st === 'Holiday (Paid)') {
           creditedHolidays += 1;
-          benefitText = '1.0 Full Paid Day';
+          benefitText = '1.0 Paid Day';
         } else if (st === 'Holiday (Forfeited)') {
-          benefitText = '0.0 Forfeited (Adjacent Absent)';
+          benefitText = '0.0 Forfeited';
         }
 
         holidayRows.push({
@@ -872,7 +898,6 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
           title: holName,
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           status: st,
           raw_swipes: r.raw_swipes || 'No punch',
           effective_in: r.effective_in || '—',
@@ -880,7 +905,7 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
           worked_hours: workedHrs,
           special_ot_hours: sunOt,
           benefit: benefitText,
-          notes: st === 'Holiday (Worked OT)' ? `Special Holiday OT: ${sunOt}h` : st === 'Holiday (Forfeited)' ? 'Deducted due to sandwich rule' : 'Paid national holiday'
+          notes: st === 'Holiday (Worked OT)' ? `Special Holiday OT: ${sunOt}h` : st === 'Holiday (Forfeited)' ? 'Deducted (Adjacent Absent)' : 'Paid holiday'
         });
       }
 
@@ -889,23 +914,22 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
         offDutyRows.push({
           date: r.date,
           weekday: r.weekday || '',
-          category: 'Declared Paid Holiday',
+          category: 'Holiday Duty',
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           raw_swipes: r.raw_swipes || '',
           effective_in: r.effective_in || '—',
           effective_out: r.effective_out || '—',
           worked_hours: workedHrs,
           special_ot_hours: sunOt,
-          duty_description: `Worked on Festival / Holiday: ${holName}`,
-          ot_rate: '2.0x Special Holiday OT'
+          duty_description: `Worked on Holiday: ${holName}`,
+          ot_rate: '2.0x OT'
         });
       } else if (st === 'Weekly Off (Worked OT)' || ((isSundayDate || isSubstituteOffDate) && workedHrs > 0)) {
         sundaysWorkedCount += 1;
         totalSpecialOtHours += sunOt;
-        const category = isSubstituteOffDate ? 'Substitute Paid Off' : 'Sunday Weekly Off';
-        const title = calOverride?.title || (isSubstituteOffDate ? 'Substitute Factory Off' : 'Sunday Factory Production Duty');
+        const category = isSubstituteOffDate ? 'Substitute Off' : 'Sunday Off';
+        const title = calOverride?.title || (isSubstituteOffDate ? 'Substitute Factory Off' : 'Sunday Factory Duty');
 
         offDutyRows.push({
           date: r.date,
@@ -913,30 +937,28 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
           category,
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           raw_swipes: r.raw_swipes || '',
           effective_in: r.effective_in || '—',
           effective_out: r.effective_out || '—',
           worked_hours: workedHrs,
           special_ot_hours: sunOt,
           duty_description: `Worked on Off-Day: ${title}`,
-          ot_rate: '2.0x Special Sunday/Off OT'
+          ot_rate: '2.0x OT'
         });
       } else if (isMandatorySundayWork && workedHrs > 0) {
         offDutyRows.push({
           date: r.date,
           weekday: r.weekday || '',
-          category: 'Mandatory Working Sunday',
+          category: 'Working Sunday',
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           raw_swipes: r.raw_swipes || '',
           effective_in: r.effective_in || '—',
           effective_out: r.effective_out || '—',
           worked_hours: workedHrs,
           special_ot_hours: parseFloat(r.ot_hours || 0),
-          duty_description: `Compensatory Sunday Working Day: ${calOverride?.title || 'Factory Production'} (In lieu of substitute off)`,
-          ot_rate: '1.0x Regular Duty (8h) + Standard OT'
+          duty_description: `Sunday Shift: ${calOverride?.title || 'Factory Production'}`,
+          ot_rate: '1.0x Regular + OT'
         });
       }
     });
@@ -944,20 +966,23 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
     const totalOffDays = holidaysWorkedCount + sundaysWorkedCount;
     const specialOtPay = +(totalSpecialOtHours * hourlyRate * 2.0).toFixed(2);
 
-    summaryRows.push({
+    const summaryObj = {
       staff_no: w.staff_no,
       staff_name: w.staff_name,
-      department: w.department || 'WORKER',
-      assigned_shift: w.assigned_shift || 'auto',
-      monthly_salary: salary,
       paid_holidays: creditedHolidays,
       holidays_worked: holidaysWorkedCount,
       sundays_worked: sundaysWorkedCount,
       total_off_days_worked: totalOffDays,
-      special_ot_hours: +totalSpecialOtHours.toFixed(2),
-      hourly_rate: hourlyRate,
-      special_ot_pay: specialOtPay
-    });
+      special_ot_hours: +totalSpecialOtHours.toFixed(2)
+    };
+
+    if (isPayrollUnlocked) {
+      summaryObj.monthly_salary = salary;
+      summaryObj.hourly_rate = hourlyRate;
+      summaryObj.special_ot_pay = specialOtPay;
+    }
+
+    summaryRows.push(summaryObj);
   }
 
   populateDataRows(summaryConfig, summaryRows);
@@ -967,9 +992,9 @@ async function buildPaidHolidaysAndOffDutyReport({ month, workers, attendanceMap
   return await wb.xlsx.writeBuffer();
 }
 
-// =========================================================================
-// 6. REPORT 6: FIXES & MANUAL EDITS AUDIT REPORT (NEW REQUESTED REPORT)
-// =========================================================================
+// ==========================================
+// 6. REPORT 6: FIXES & MANUAL EDITS REPORT (NO DEPARTMENT / NO SHIFT)
+// ==========================================
 async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, auditLogs, settings }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KKI Attendance & Payroll System';
@@ -977,15 +1002,14 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
 
   // Sheet 1: Fixes Summary by Worker
   const summaryCols = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 24, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 15 },
-    { key: 'total_fixes', header: 'Total Fixes / Overrides', align: 'right', type: 'number', decimals: 0, minWidth: 18, bold: true, highlight: (v) => v > 0 ? 'FEF3C7' : null },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 24, type: 'text_left', bold: true },
+    { key: 'total_fixes', header: 'Total Fixes', align: 'right', type: 'number', decimals: 0, minWidth: 16, bold: true, highlight: (v) => v > 0 ? 'FEF3C7' : null },
     { key: 'missing_out_fixed', header: 'Missing OUT Fixed', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
     { key: 'missing_in_fixed', header: 'Missing IN Fixed', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
-    { key: 'manual_punch_edits', header: 'Punch / Time Overrides', align: 'right', type: 'number', decimals: 0, minWidth: 18 },
+    { key: 'manual_punch_edits', header: 'Punch Overrides', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
     { key: 'status_corrections', header: 'Status Rectified', align: 'right', type: 'number', decimals: 0, minWidth: 16 },
-    { key: 'credited_hours', header: 'Total Credited Hours (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 20, bold: true },
+    { key: 'credited_hours', header: 'Credited Hours (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 18, bold: true },
     { key: 'remarks', header: 'Audit Status', align: 'left', minWidth: 28, type: 'text_left' }
   ];
 
@@ -998,49 +1022,47 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
 
   // Sheet 2: Detailed Fixes Log
   const detailCols = [
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
-    { key: 'staff_name', header: 'Employee Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
-    { key: 'department', header: 'Department', align: 'center', minWidth: 14 },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_name', header: 'Worker Name', align: 'left', minWidth: 22, type: 'text_left', bold: true },
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 13 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
-    { key: 'original_swipes', header: 'Original Machine Punches (Before Fix)', align: 'left', minWidth: 26, type: 'text_left', textColor: () => '991B1B' },
-    { key: 'fixed_timing', header: 'Fixed / Filled Timings (Management)', align: 'left', minWidth: 26, type: 'text_left', bold: true, textColor: () => '065F46', highlight: () => 'DCFCE7' },
+    { key: 'original_swipes', header: 'Original Punches', align: 'left', minWidth: 24, type: 'text_left', textColor: () => '991B1B' },
+    { key: 'fixed_timing', header: 'Fixed Timings', align: 'left', minWidth: 24, type: 'text_left', bold: true, textColor: () => '065F46', highlight: () => 'DCFCE7' },
     { key: 'effective_in', header: 'In Time', align: 'center', minWidth: 12 },
     { key: 'effective_out', header: 'Out Time', align: 'center', minWidth: 12 },
-    { key: 'shift', header: 'Assigned Shift', align: 'center', minWidth: 14 },
-    { key: 'fix_type', header: 'Fix / Override Category', align: 'center', minWidth: 24, bold: true },
+    { key: 'fix_type', header: 'Fix Category', align: 'center', minWidth: 22, bold: true },
     { key: 'resolved_status', header: 'Resolved Status', align: 'center', minWidth: 18 },
-    { key: 'regular_hours', header: 'Regular (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
-    { key: 'ot_hours', header: 'OT Hours', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
-    { key: 'total_hours', header: 'Total Hours', align: 'right', type: 'number', decimals: 2, minWidth: 14, bold: true },
-    { key: 'reason', header: 'Management Reason / Approval Note', align: 'left', minWidth: 36, type: 'text_left' },
-    { key: 'updated_at', header: 'Last Modified Timestamp', align: 'center', minWidth: 20 }
+    { key: 'regular_hours', header: 'Duty (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
+    { key: 'ot_hours', header: 'OT (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
+    { key: 'total_hours', header: 'Total (Hrs)', align: 'right', type: 'number', decimals: 2, minWidth: 14, bold: true },
+    { key: 'reason', header: 'Management Reason', align: 'left', minWidth: 32, type: 'text_left' },
+    { key: 'updated_at', header: 'Modified Time', align: 'center', minWidth: 20 }
   ];
 
   const detailConfig = createStyledSheet(wb, 'Detailed Fixes Log', {
     theme: THEMES.AMBER,
     title: 'Detailed Log of Punch Corrections & Timings Filled',
-    subtitle: `Before vs After Biometric Punch Modifications — ${monthLabel}`,
+    subtitle: `Punch Modifications Audit — ${monthLabel}`,
     columns: detailCols
   });
 
   // Sheet 3: System Audit Trail
   const auditCols = [
     { key: 'id', header: 'Audit ID', align: 'center', minWidth: 10 },
-    { key: 'staff_no', header: 'Staff No', align: 'center', minWidth: 12, bold: true },
+    { key: 'staff_no', header: 'Worker ID', align: 'center', minWidth: 12, bold: true },
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 13 },
     { key: 'field_changed', header: 'Field Modified', align: 'center', minWidth: 18 },
-    { key: 'old_value', header: 'Original Value (Old)', align: 'left', minWidth: 24, type: 'text_left' },
-    { key: 'new_value', header: 'Updated Value (New)', align: 'left', minWidth: 24, type: 'text_left', bold: true },
+    { key: 'old_value', header: 'Old Value', align: 'left', minWidth: 24, type: 'text_left' },
+    { key: 'new_value', header: 'New Value', align: 'left', minWidth: 24, type: 'text_left', bold: true },
     { key: 'edited_by', header: 'Edited By', align: 'center', minWidth: 14 },
-    { key: 'reason', header: 'Change Reason', align: 'left', minWidth: 32, type: 'text_left' },
-    { key: 'created_at', header: 'Audit Timestamp', align: 'center', minWidth: 20 }
+    { key: 'reason', header: 'Reason', align: 'left', minWidth: 32, type: 'text_left' },
+    { key: 'created_at', header: 'Timestamp', align: 'center', minWidth: 20 }
   ];
 
   const auditConfig = createStyledSheet(wb, 'System Audit Trail', {
     theme: THEMES.AMBER,
     title: 'Complete System Modification & Audit History',
-    subtitle: `Immutable Record of Management Edits — ${monthLabel}`,
+    subtitle: `Management Edits Record — ${monthLabel}`,
     columns: auditCols
   });
 
@@ -1067,38 +1089,36 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
         const fixed = r.raw_swipes || r.manual_punches || 'Manual Punch Filled';
 
         // Detect category of fix
-        let fixCategory = 'Manual Punch Override';
+        let fixCategory = 'Manual Override';
         if (orig.split(' ').filter(Boolean).length === 1 && fixed.split(' ').filter(Boolean).length >= 2) {
           missingOutCount++;
-          fixCategory = 'Missing OUT Punch Fixed';
+          fixCategory = 'Missing OUT Fixed';
         } else if (!orig || orig.trim() === '') {
           missingInCount++;
-          fixCategory = 'Full Attendance Filled Manually';
+          fixCategory = 'Manual Shift Fill';
         } else if (r.override_reason && r.override_reason.toLowerCase().includes('status')) {
           statusCorrections++;
-          fixCategory = 'Status Manually Rectified';
+          fixCategory = 'Status Rectified';
         } else {
           manualPunchEdits++;
-          fixCategory = 'Punch Timings Modified';
+          fixCategory = 'Timing Modified';
         }
 
         detailRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
-          department: w.department || 'WORKER',
           date: r.date,
           weekday: r.weekday || '',
           original_swipes: orig,
           fixed_timing: fixed,
           effective_in: r.effective_in || '—',
           effective_out: r.effective_out || '—',
-          shift: r.shift || '08:00',
           fix_type: fixCategory,
           resolved_status: r.status || 'Present (Full)',
           regular_hours: parseFloat(r.regular_hours || 0),
           ot_hours: parseFloat(r.ot_hours || 0),
           total_hours: totalHrs,
-          reason: r.override_reason || 'Management Fast-Fix Resolution',
+          reason: r.override_reason || 'Management Resolution',
           updated_at: r.updated_at || '—'
         });
       }
@@ -1110,14 +1130,13 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
     summaryRows.push({
       staff_no: w.staff_no,
       staff_name: w.staff_name,
-      department: w.department || 'WORKER',
       total_fixes: workerFixCount,
       missing_out_fixed: missingOutCount,
       missing_in_fixed: missingInCount,
       manual_punch_edits: manualPunchEdits,
       status_corrections: statusCorrections,
       credited_hours: +workerCreditedHours.toFixed(2),
-      remarks: workerFixCount > 0 ? `${workerFixCount} Timings Resolved` : 'No Manual Edits (Pure Biometric)'
+      remarks: workerFixCount > 0 ? `${workerFixCount} Timings Resolved` : 'Biometric Auto'
     });
   }
 

@@ -71,6 +71,9 @@ async function initDatabase() {
       food_allowance REAL DEFAULT 0,
       other_allowance REAL DEFAULT 0,
       salary_type TEXT DEFAULT 'monthly',
+      assigned_shift TEXT DEFAULT 'auto',
+      is_exception INTEGER DEFAULT 0,
+      exception_reason TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
 
@@ -246,6 +249,8 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE workers ADD COLUMN food_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE workers ADD COLUMN other_allowance REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE workers ADD COLUMN assigned_shift TEXT DEFAULT 'auto'`); } catch (e) {}
+  try { await execute(`ALTER TABLE workers ADD COLUMN is_exception INTEGER DEFAULT 0`); } catch (e) {}
+  try { await execute(`ALTER TABLE workers ADD COLUMN exception_reason TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN original_raw_swipes TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN manual_punches TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}

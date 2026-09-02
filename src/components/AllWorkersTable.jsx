@@ -255,20 +255,20 @@ export default function AllWorkersTable({
             )}
           </div>
 
-          {workers.some(w => w.payroll?.hasIncompleteEntries || (w.payroll?.incompleteDays || 0) > 0) ? (
+          {workers.some(w => !w.is_exception && (w.payroll?.hasIncompleteEntries || (w.payroll?.incompleteDays || 0) > 0)) ? (
             <button
               onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
               className="px-4 py-2 bg-amber-950 text-amber-300 border-2 border-amber-500 rounded-xl text-xs font-bold flex items-center space-x-2 shadow-md transition-all whitespace-nowrap cursor-pointer hover:bg-amber-900 animate-pulse"
-              title="Reports Locked: Click here to fix all incomplete punches in Fast-Fix Center first"
+              title="Reports Locked: Click here to fix all incomplete punches in Fast-Fix Center first or mark workers as Exception"
             >
               <AlertTriangle className="w-4 h-4 text-amber-400" />
-              <span>🔒 Reports Locked ({workers.reduce((acc, w) => acc + (w.payroll?.incompleteDays || 0), 0)} Incomplete — Click to Fix)</span>
+              <span>🔒 Reports Locked ({workers.filter(w => !w.is_exception).reduce((acc, w) => acc + (w.payroll?.incompleteDays || 0), 0)} Incomplete — Click to Fix)</span>
             </button>
           ) : (
             <>
               {/* 5-Col Summary */}
               <a
-                href={`/api/export/excel/summary${monthQueryParam}`}
+                href={`/api/export/excel/summary${monthQueryParam}${isPayrollUnlocked ? (monthQueryParam ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-teal-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -280,7 +280,7 @@ export default function AllWorkersTable({
 
               {/* Deducted Holidays & Forfeited Offs Report */}
               <a
-                href={`/api/export/excel/deducted-holidays-and-offs${monthQueryParam}${workers.some(w => (w.payroll?.incompleteDays || 0) > 0) ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+                href={`/api/export/excel/deducted-holidays-and-offs${monthQueryParam}${isPayrollUnlocked ? (monthQueryParam ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-2 bg-rose-900/90 hover:bg-rose-800 text-rose-100 rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-rose-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -292,7 +292,7 @@ export default function AllWorkersTable({
 
               {/* Paid Holidays & Off-Days Duty Report */}
               <a
-                href={`/api/export/excel/paid-holidays-and-off-duty${monthQueryParam}${workers.some(w => (w.payroll?.incompleteDays || 0) > 0) ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+                href={`/api/export/excel/paid-holidays-and-off-duty${monthQueryParam}${isPayrollUnlocked ? (monthQueryParam ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-2 bg-indigo-800 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-indigo-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -315,7 +315,7 @@ export default function AllWorkersTable({
 
               {/* Fixes Audit */}
               <a
-                href={`/api/export/excel/fixes-audit${monthQueryParam}${workers.some(w => (w.payroll?.incompleteDays || 0) > 0) ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+                href={`/api/export/excel/fixes-audit${monthQueryParam}${isPayrollUnlocked ? (monthQueryParam ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-3 py-2 bg-amber-800 hover:bg-amber-700 text-amber-100 rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-amber-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
@@ -328,7 +328,7 @@ export default function AllWorkersTable({
               {isPayrollUnlocked ? (
                 <>
                   <a
-                    href={`/api/export/excel${monthQueryParam}`}
+                    href={`/api/export/excel${monthQueryParam}?payroll_unlocked=true`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-emerald-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"

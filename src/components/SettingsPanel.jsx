@@ -30,7 +30,10 @@ import {
   ArrowRight,
   X,
   Lock,
-  Unlock
+  Unlock,
+  Star,
+  UserCheck,
+  Search
 } from 'lucide-react';
 
 export default function SettingsPanel({
@@ -183,10 +186,46 @@ export default function SettingsPanel({
     }
   };
 
+  // Exception Workers State
+  const [exceptionWorkersList, setExceptionWorkersList] = useState([]);
+  const [exceptionSearchTerm, setExceptionSearchTerm] = useState('');
+  const [selectedStaffToAddException, setSelectedStaffToAddException] = useState('');
+
+  const fetchExceptionWorkers = async () => {
+    try {
+      const res = await fetch('/api/exception-workers').then(r => r.json());
+      if (res.success) setExceptionWorkersList(res.workers || []);
+    } catch (err) {
+      console.error('Error fetching exception workers:', err);
+    }
+  };
+
+  const handleToggleExceptionWorker = async (staffNo, isEx, reason = 'Configured in Settings Panel') => {
+    try {
+      const res = await fetch(`/api/workers/${staffNo}/toggle-exception`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_exception: isEx ? 1 : 0, exception_reason: reason })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setToast(`Worker #${staffNo} ${isEx ? 'added to Exception Workers' : 'removed from Exception Workers'}`);
+        setTimeout(() => setToast(''), 4000);
+        fetchExceptionWorkers();
+        if (typeof onSettingsUpdated === 'function') onSettingsUpdated();
+      } else {
+        alert('Error: ' + res.error);
+      }
+    } catch (err) {
+      alert('Failed: ' + err.message);
+    }
+  };
+
   useEffect(() => {
     fetchRuleProfiles();
     fetchCustomRules();
     fetchSalaryRules();
+    fetchExceptionWorkers();
   }, []);
 
   const handleChange = (key, val) => {
@@ -539,6 +578,109 @@ export default function SettingsPanel({
       )}
 
 
+
+      {/* ==================== EXCEPTION WORKERS MANAGEMENT ==================== */}
+      <div className="glass-card rounded-2xl p-6 border-2 border-amber-500/50 space-y-4 bg-gradient-to-br from-amber-950/30 via-slate-900 to-amber-950/20 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/40">
+              <Star className="w-5 h-5 fill-amber-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white font-display uppercase tracking-wider text-amber-300 flex items-center gap-2">
+                <span>Exception Workers Management</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                  {exceptionWorkersList.length} Exempt
+                </span>
+              </h3>
+              <p className="text-xs text-slate-300">
+                Workers on this list are exempt from uncompleted swipe download locks. Unfixed timings for these workers will NOT block monthly report downloads.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Add Worker to Exception Form */}
+        <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row items-center gap-3">
+          <div className="flex-1 w-full">
+            <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1">Select Worker to Add as Exception:</label>
+            <select
+              value={selectedStaffToAddException}
+              onChange={(e) => setSelectedStaffToAddException(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500"
+            >
+              <option value="">-- Choose a Worker --</option>
+              {workers.map(w => (
+                <option key={w.staff_no} value={w.staff_no}>
+                  #{w.staff_no} - {w.staff_name} {w.is_exception === 1 ? '(Already Exception)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={() => {
+              if (!selectedStaffToAddException) return alert('Please select a worker first.');
+              handleToggleExceptionWorker(selectedStaffToAddException, true, 'Added from Settings Panel');
+              setSelectedStaffToAddException('');
+            }}
+            disabled={!selectedStaffToAddException}
+            className="mt-auto w-full md:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-black rounded-xl text-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-md"
+          >
+            <Star className="w-4 h-4 fill-slate-950" />
+            <span>Add to Exception List</span>
+          </button>
+        </div>
+
+        {/* Current Exception Workers Table/List */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span className="font-bold uppercase tracking-wider text-slate-300">Active Exception Workers ({exceptionWorkersList.length})</span>
+            {exceptionWorkersList.length > 0 && (
+              <div className="relative w-48">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter exception workers..."
+                  value={exceptionSearchTerm}
+                  onChange={(e) => setExceptionSearchTerm(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-2 py-1 text-[11px] text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+            )}
+          </div>
+
+          {exceptionWorkersList.length === 0 ? (
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 text-center text-xs text-slate-400">
+              No workers are currently marked as Exception. All workers require resolved punch swipes before monthly reports can be downloaded.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1">
+              {exceptionWorkersList
+                .filter(w => !exceptionSearchTerm.trim() || (w.staff_name || '').toLowerCase().includes(exceptionSearchTerm.toLowerCase()) || String(w.staff_no).includes(exceptionSearchTerm))
+                .map(w => (
+                  <div key={w.staff_no} className="p-3 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center justify-between gap-2 shadow-sm">
+                    <div className="space-y-0.5 min-w-0">
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-mono text-cyan-300 text-xs font-bold">#{w.staff_no}</span>
+                        <span className="text-white text-xs font-bold truncate">{w.staff_name}</span>
+                      </div>
+                      <p className="text-[10px] text-amber-300/80 truncate">
+                        {w.exception_reason || 'Exempt from punch download lock'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleExceptionWorker(w.staff_no, false)}
+                      className="text-rose-400 hover:text-rose-300 px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-[10px] font-bold shrink-0 transition-colors"
+                      title="Remove Exception Status (will require resolved punches)"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ==================== CLEAR ATTENDANCE LOGS (MONTHLY RESET) ==================== */}
       <div className="glass-card rounded-2xl p-6 border border-red-500/30 space-y-4 bg-gradient-to-br from-red-950/20 to-slate-900/90 shadow-xl">

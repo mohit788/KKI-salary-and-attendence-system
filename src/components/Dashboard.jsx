@@ -20,7 +20,9 @@ import {
   Download,
   X,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 
@@ -270,95 +272,104 @@ export default function Dashboard({
           )}
 
           <div className="mt-5 space-y-2.5">
-            {/* 1. Concise Summary */}
-            <a
-              href={`/api/export/excel/summary${monthQueryParam}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-teal-700 hover:bg-teal-600 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-teal-500 shadow-md transition-all cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-teal-200" />
-              <span>Download 5-Column Summary Report (.xlsx)</span>
-            </a>
-
-            {/* 2. Deducted Holidays & Offs Audit Report */}
-            <a
-              href={`/api/export/excel/deducted-holidays-and-offs${monthQueryParam}${metrics?.incompleteCount > 0 ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-rose-900/90 hover:bg-rose-800 text-rose-100 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-rose-500 shadow-md transition-all cursor-pointer"
-              title="Download detailed breakdown of forfeited Sundays, deducted paid holidays with exact reasons"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-rose-300" />
-              <span>Deducted Holidays & Forfeited Offs Report (.xlsx)</span>
-            </a>
-
-            {/* 3. Paid Holidays & Off-Days Duty Report */}
-            <a
-              href={`/api/export/excel/paid-holidays-and-off-duty${monthQueryParam}${metrics?.incompleteCount > 0 ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-indigo-800 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-indigo-500 shadow-md transition-all cursor-pointer"
-              title="Download paid holidays breakdown and workers who attended on off-days/Sundays with duty descriptions"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
-              <span>Paid Holidays & Off-Days Duty Report (.xlsx)</span>
-            </a>
-
-            {/* 4. Timings Sheet */}
-            <a
-              href={`/api/export/excel/timings${monthQueryParam}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-blue-500 shadow-md transition-all cursor-pointer"
-            >
-              <Clock className="w-4 h-4 text-blue-200" />
-              <span>Download Biometric Timings Sheet (.xlsx)</span>
-            </a>
-
-            {/* 5. Worker Fixes & Manual Timings Audit Report */}
-            <a
-              href={`/api/export/excel/fixes-audit${monthQueryParam}${metrics?.incompleteCount > 0 ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 bg-amber-800 hover:bg-amber-700 text-amber-100 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-amber-500 shadow-md transition-all cursor-pointer"
-              title="Download audit of all worker fixes, manual punch timings filled, and management overrides"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-amber-300" />
-              <span>Worker Fixes & Manual Timings Audit Report (.xlsx)</span>
-            </a>
-
-            {/* 5. Full Payroll (When Unlocked) */}
-            {isPayrollUnlocked ? (
-              <a
-                href={`/api/export/excel${monthQueryParam}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
-                <span>Download Full Payroll Report (.xlsx)</span>
-              </a>
+            {metrics?.incompleteCount > 0 ? (
+              <div className="p-4 rounded-xl bg-amber-950/70 border-2 border-amber-500/80 text-amber-200 text-xs shadow-lg space-y-2.5">
+                <div className="flex items-center space-x-2 text-amber-300 font-extrabold text-sm">
+                  <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>🔒 Reports Locked ({selectedMonth && selectedMonth !== 'all' ? selectedMonth : 'Current Period'})</span>
+                </div>
+                <p className="text-slate-300 leading-relaxed">
+                  There are <strong className="text-amber-300 font-mono font-bold">{metrics.incompleteCount} uncompleted punch records</strong> in this month. Reports are locked until missing punch times are filled or workers are marked as Exception.
+                </p>
+                <button
+                  onClick={() => onOpenIncompleteManager && onOpenIncompleteManager()}
+                  className="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-md"
+                >
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>Open Fast-Fix Center ({metrics.incompleteCount} Fixes / Set Exceptions)</span>
+                </button>
+              </div>
             ) : (
-              <button
-                onClick={onOpenUnlockModal}
-                className="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-600 transition-all cursor-pointer"
-              >
-                <span>🔒 Enter PIN to Unlock Financial / Salary Export</span>
-              </button>
-            )}
+              <>
+                {/* 1. Concise Summary */}
+                <a
+                  href={`/api/export/excel/summary${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}${isPayrollUnlocked ? (selectedMonth && selectedMonth !== 'all' ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-teal-700 hover:bg-teal-600 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-teal-500 shadow-md transition-all cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-teal-200" />
+                  <span>Download 5-Column Summary Report (.xlsx)</span>
+                </a>
 
-            {/* 6. Exception Download Option (if incomplete punches exist) */}
-            {(metrics?.incompleteCount || 0) > 0 && (
-              <a
-                href={`/api/export/excel${monthQueryParam ? `${monthQueryParam}&allow_incomplete=true` : '?allow_incomplete=true'}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-2 px-3 bg-amber-950/70 hover:bg-amber-900/90 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-amber-600/70 transition-all cursor-pointer"
-                title="Download Excel reports treating workers with unfixed timings as exceptions"
-              >
-                <span>⚡ Download All Reports (Allow Exception Workers / Unfixed Timings)</span>
-              </a>
+                {/* 2. Deducted Holidays & Offs Audit Report */}
+                <a
+                  href={`/api/export/excel/deducted-holidays-and-offs${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}${isPayrollUnlocked ? (selectedMonth && selectedMonth !== 'all' ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-rose-900/90 hover:bg-rose-800 text-rose-100 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-rose-500 shadow-md transition-all cursor-pointer"
+                  title="Download detailed breakdown of forfeited Sundays, deducted paid holidays with exact reasons"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-rose-300" />
+                  <span>Deducted Holidays & Forfeited Offs Report (.xlsx)</span>
+                </a>
+
+                {/* 3. Paid Holidays & Off-Days Duty Report */}
+                <a
+                  href={`/api/export/excel/paid-holidays-and-off-duty${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}${isPayrollUnlocked ? (selectedMonth && selectedMonth !== 'all' ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-indigo-800 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-indigo-500 shadow-md transition-all cursor-pointer"
+                  title="Download paid holidays breakdown and workers who attended on off-days/Sundays with duty descriptions"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-indigo-300" />
+                  <span>Paid Holidays & Off-Days Duty Report (.xlsx)</span>
+                </a>
+
+                {/* 4. Timings Sheet */}
+                <a
+                  href={`/api/export/excel/timings${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-blue-500 shadow-md transition-all cursor-pointer"
+                >
+                  <Clock className="w-4 h-4 text-blue-200" />
+                  <span>Download Biometric Timings Sheet (.xlsx)</span>
+                </a>
+
+                {/* 5. Worker Fixes & Manual Timings Audit Report */}
+                <a
+                  href={`/api/export/excel/fixes-audit${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}${isPayrollUnlocked ? (selectedMonth && selectedMonth !== 'all' ? '&' : '?') + 'payroll_unlocked=true' : ''}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-amber-800 hover:bg-amber-700 text-amber-100 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-amber-500 shadow-md transition-all cursor-pointer"
+                  title="Download audit of all worker fixes, manual punch timings filled, and management overrides"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-amber-300" />
+                  <span>Worker Fixes & Manual Timings Audit Report (.xlsx)</span>
+                </a>
+
+                {/* 6. Full Payroll Report */}
+                {isPayrollUnlocked ? (
+                  <a
+                    href={`/api/export/excel${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}?payroll_unlocked=true`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-emerald-500 shadow-md transition-all cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-200" />
+                    <span>Download Full Payroll Report (.xlsx)</span>
+                  </a>
+                ) : (
+                  <button
+                    onClick={onOpenUnlockModal}
+                    className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold rounded-xl text-xs flex items-center justify-center space-x-2 border border-slate-600 transition-all cursor-pointer"
+                  >
+                    <Lock className="w-4 h-4 text-amber-400" />
+                    <span>🔒 Enter PIN to Unlock Financial / Salary Export</span>
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

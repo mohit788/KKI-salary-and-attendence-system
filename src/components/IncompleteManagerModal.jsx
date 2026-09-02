@@ -17,7 +17,8 @@ import {
   CornerDownLeft,
   Filter,
   Zap,
-  Edit3
+  Edit3,
+  Star
 } from 'lucide-react';
 import { normalizeTimeInput, normalizeSingleTimeToken } from '../utils/formatters';
 
@@ -373,6 +374,60 @@ export default function IncompleteManagerModal({
     });
   };
 
+  // Toggle single worker exception
+  const handleToggleWorkerException = async (staffNo, isException = true, reason = 'Marked as Exception Worker') => {
+    try {
+      const res = await fetch(`/api/workers/${staffNo}/toggle-exception`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_exception: isException ? 1 : 0, exception_reason: reason })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setGlobalSuccessMsg(`Worker #${staffNo} ${isException ? 'marked as Exception Worker (Exempt from Missing Punch Locks)' : 'removed from Exception'}`);
+        if (onRefreshData) onRefreshData();
+        fetchIncomplete(modalMonth);
+      } else {
+        alert('Exception update error: ' + res.error);
+      }
+    } catch (err) {
+      alert('Exception toggle failed: ' + err.message);
+    }
+  };
+
+  // Batch mark workers as exception
+  const handleBatchMarkException = async () => {
+    const staffNos = Array.from(new Set(
+      selectedIds.size > 0
+        ? Array.from(selectedIds).map(id => id.split('_')[0])
+        : filteredRecords.map(r => r.staff_no)
+    ));
+
+    if (staffNos.length === 0) return;
+
+    if (!window.confirm(`Mark ${staffNos.length} worker(s) as Exception Workers (exempt from missing punch locks)?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/workers/batch-exception', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff_nos: staffNos, is_exception: 1, exception_reason: 'Batch marked as Exception from Fast-Fix Center' })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setGlobalSuccessMsg(`Successfully marked ${staffNos.length} worker(s) as Exception Workers.`);
+        if (onRefreshData) onRefreshData();
+        fetchIncomplete(modalMonth);
+      } else {
+        alert('Batch exception error: ' + res.error);
+      }
+    } catch (err) {
+      alert('Batch exception failed: ' + err.message);
+    }
+  };
+
   // INLINE SAVE A SINGLE ROW
   const handleSaveSingleRow = async (record) => {
     const key = `${record.staff_no}_${record.date}`;
@@ -658,6 +713,15 @@ export default function IncompleteManagerModal({
             >
               Mark Absent
             </button>
+            <button
+              onClick={handleBatchMarkException}
+              disabled={selectedIds.size === 0 && filteredRecords.length === 0}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/50 disabled:opacity-40 transition-all cursor-pointer flex items-center space-x-1 shadow-sm"
+              title="Mark selected workers as Exception Workers (exempts them from blocking report downloads)"
+            >
+              <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              <span>⭐ Mark {selectedIds.size > 0 ? `${selectedIds.size} Selected` : 'All'} as Exception</span>
+            </button>
           </div>
         </div>
 
@@ -715,6 +779,7 @@ export default function IncompleteManagerModal({
                   <th className="py-3 px-3 bg-slate-950">Type Missing Time</th>
                   <th className="py-3 px-3 bg-slate-950">Resulting Punch Preview</th>
                   <th className="py-3 px-2 text-center bg-slate-950 w-24">Save Row</th>
+                  <th className="py-3 px-2 text-center bg-slate-950 w-28">Exception</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -922,6 +987,18 @@ export default function IncompleteManagerModal({
                               <span>Save</span>
                             </>
                           )}
+                        </button>
+                      </td>
+
+                      {/* WORKER EXCEPTION BUTTON */}
+                      <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                        <button
+                          onClick={() => handleToggleWorkerException(r.staff_no, true)}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-950/70 hover:bg-amber-900 text-amber-300 border border-amber-600/70 text-[11px] font-bold flex items-center justify-center space-x-1 w-full transition-all cursor-pointer shadow-sm"
+                          title={`Mark #${r.staff_no} as Exception Worker (exempts from blocking report downloads)`}
+                        >
+                          <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                          <span>⭐ Exception</span>
                         </button>
                       </td>
 
