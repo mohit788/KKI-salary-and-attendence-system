@@ -151,16 +151,22 @@ async function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
 
-    // Custom Rules table (timing-based restrictions)
+    // Custom Rules table (timing-based restrictions & worker exemptions)
     `CREATE TABLE IF NOT EXISTS custom_rules (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rule_name TEXT NOT NULL,
-      rule_type TEXT NOT NULL, -- 'midday_exit', 'late_penalty', 'ot_rule', 'salary_rule'
+      rule_type TEXT NOT NULL, -- 'midday_exit', 'late_penalty', 'grace_slab_exempt', 'late_penalty_grace', 'ot_rule', 'salary_rule'
+      target_staff_no TEXT DEFAULT 'all',
+      exemption_type TEXT DEFAULT '',
       start_time TEXT DEFAULT '',
       end_time TEXT DEFAULT '',
       threshold_mins INTEGER DEFAULT 0,
       deduction_mins INTEGER DEFAULT 0,
       deduction_amount REAL DEFAULT 0,
+      valid_from TEXT DEFAULT '',
+      valid_to TEXT DEFAULT '',
+      max_allowed_days INTEGER DEFAULT 0,
+      grace_allowed_mins INTEGER DEFAULT 30,
       is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
@@ -246,6 +252,10 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN shift TEXT DEFAULT '08:00'`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN exemption_type TEXT DEFAULT ''`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_rules ADD COLUMN valid_from TEXT DEFAULT ''`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_rules ADD COLUMN valid_to TEXT DEFAULT ''`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_rules ADD COLUMN max_allowed_days INTEGER DEFAULT 0`); } catch (e) {}
+  try { await execute(`ALTER TABLE custom_rules ADD COLUMN grace_allowed_mins INTEGER DEFAULT 30`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_salary_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
   try { await execute(`UPDATE daily_attendance SET original_raw_swipes = raw_swipes WHERE original_raw_swipes IS NULL OR original_raw_swipes = ''`); } catch (e) {}
 

@@ -326,8 +326,9 @@ function resolvePunchesForDuty(cleanedPunches, shiftStart = '08:00', shiftEnd = 
  * @param {string} dynamicShiftStart - Optional detected date-specific shift start (e.g. '07:00' or '06:00')
  * @param {boolean} isPaidHoliday - true if date is a declared paid national/factory holiday
  * @param {string} holidayName - Name of the holiday (e.g. 'Independence Day')
- * @param {boolean} isLeisureForgiven - true if 2-minute leisure time is approved
+ * @param {boolean} isLeisureForgiven - true if 2-minute leisure time or special late grace exemption is approved
  * @param {Object|string|null} calendarOverride - Optional factory calendar override { day_type: 'working_day' | 'off_day' | 'holiday', title, notes }
+ * @param {string} dateStr - Optional record date string (YYYY-MM-DD)
  */
 function computeDailyAttendance(
   timestamps,
@@ -338,7 +339,8 @@ function computeDailyAttendance(
   isPaidHoliday = false,
   holidayName = '',
   isLeisureForgiven = false,
-  calendarOverride = null
+  calendarOverride = null,
+  dateStr = ''
 ) {
   const rawCleaned = cleanAndDebouncePunches(timestamps, 5);
   const shiftEnd = settings.shift_end || '16:30';
@@ -359,7 +361,18 @@ function computeDailyAttendance(
 
   const cleanedPunches = resolvePunchesForDuty(rawCleaned, shiftStart, shiftEnd);
 
-  const isGraceExempt = Array.isArray(customRules) && customRules.some(r => r && r.is_active && (r.exemption_type === 'grace_slab_exempt' || r.rule_type === 'grace_slab_exempt'));
+  // Check if worker has an unconditional grace slab exemption (no day limit or date boundary restriction)
+  const isGraceExempt = Array.isArray(customRules) && customRules.some(r => {
+    if (!r || !r.is_active) return false;
+    const isLateExemptType = (r.exemption_type === 'grace_slab_exempt' || r.rule_type === 'grace_slab_exempt' || r.rule_type === 'late_penalty_grace' || r.exemption_type === 'late_penalty_grace');
+    if (!isLateExemptType) return false;
+    if (r.valid_from && dateStr && dateStr < r.valid_from) return false;
+    if (r.valid_to && dateStr && dateStr > r.valid_to) return false;
+    // If rule specifies a monthly day limit, it is evaluated dynamically via applyMonthlyLeisureGrace
+    if (r.max_allowed_days && parseInt(r.max_allowed_days, 10) > 0) return false;
+    return true;
+  });
+
   const slabMinutes = isGraceExempt ? 0 : parseInt(settings.grace_slab_minutes || 30, 10);
   const otRounding = settings.ot_rounding || '30min_block';
   const shortThreshold = parseFloat(settings.short_hours_threshold || 4.0);
@@ -623,17 +636,33 @@ function computeDailyAttendance(
 }
 
 /**
- * 5-Minute Leisure Time Policy Evaluation across a worker's monthly attendance:
- * - Each worker is granted up to leisureMinsAllowed (Default: 5 min) on up to leisureDaysAllowed (2 days/month).
- * - 3rd Strike Revocation: If the worker is late 3 or more times (even 1-5 mins),
- *   ALL leisure forgiveness is REVOKED and all late days get full 30-min slab penalty!
+ * Policy Evaluation across a worker's monthly attendance:
+ * 1. Worker Special Late Exemption Rules:
+ *    - Valid date range (valid_from to valid_to)
+ *    - Allowed late minutes (grace_allowed_mins / threshold_mins, e.g. up to 15, 20, 30 mins)
+ *    - Monthly allowed occurrences limit (max_allowed_days, e.g. up to 3 days/month, or 0 for unlimited)
+ *    - Waives the 30-minute late penalty slab when qualified!
+ * 2. 5-Minute Factory Leisure Policy:
+ *    - Up to leisureMinsAllowed (5 min) on up to leisureDaysAllowed (2 days/month).
+ *    - 3rd Strike Revocation: if 3 or more unexcused late days, leisure forgiveness is revoked.
  */
 function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules = [], paidHolidaysMap = {}, factoryCalendarMap = {}) {
   const leisureMinsAllowed = parseInt(settings.leisure_mins_allowed || 5, 10);
   const leisureDaysAllowed = parseInt(settings.leisure_days_allowed || 2, 10);
 
-  // Identify all late days for this worker in the month
-  const lateDayIndices = [];
+  // Active late exemption rules for this worker
+  const lateExemptionRules = (customRules || []).filter(r =>
+    r && r.is_active && (
+      r.exemption_type === 'grace_slab_exempt' ||
+      r.rule_type === 'grace_slab_exempt' ||
+      r.rule_type === 'late_penalty_grace' ||
+      r.exemption_type === 'late_penalty_grace'
+    )
+  );
+
+  const ruleUsageCounts = new Map(); // rule_id -> days used
+  const workerExemptDayIndices = new Set();
+  const unexcusedLateDayIndices = [];
   const leisureCandidateIndices = [];
 
   for (let i = 0; i < dailyRecords.length; i++) {
@@ -650,26 +679,56 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
 
     if (inMins > shiftMins) {
       const lateDelta = inMins - shiftMins;
-      lateDayIndices.push(i);
-      if (lateDelta <= leisureMinsAllowed) {
-        leisureCandidateIndices.push(i);
+
+      // Check if this day qualifies for any worker special late exemption rule
+      let dayGrantedSpecialExemption = false;
+      for (const rule of lateExemptionRules) {
+        // 1. Time Frame / Date Range Check
+        if (rule.valid_from && r.date && r.date < rule.valid_from) continue;
+        if (rule.valid_to && r.date && r.date > rule.valid_to) continue;
+
+        // 2. Allowed Late Minutes Threshold Check
+        const allowedMins = parseInt(rule.grace_allowed_mins || rule.threshold_mins || 30, 10);
+        if (lateDelta > allowedMins) continue;
+
+        // 3. Monthly Days / Frequency Limit Check
+        const maxDays = parseInt(rule.max_allowed_days || 0, 10);
+        const ruleKey = rule.id || rule.rule_name;
+        const currentUsage = ruleUsageCounts.get(ruleKey) || 0;
+        if (maxDays > 0 && currentUsage >= maxDays) continue;
+
+        // Exemption criteria satisfied!
+        dayGrantedSpecialExemption = true;
+        ruleUsageCounts.set(ruleKey, currentUsage + 1);
+        workerExemptDayIndices.add(i);
+        break;
+      }
+
+      // If not granted special exemption, evaluate standard factory leisure grace
+      if (!dayGrantedSpecialExemption) {
+        unexcusedLateDayIndices.push(i);
+        if (lateDelta <= leisureMinsAllowed) {
+          leisureCandidateIndices.push(i);
+        }
       }
     }
   }
 
-  const isRevokedBy3rdStrike = (lateDayIndices.length > leisureDaysAllowed);
+  const isRevokedBy3rdStrike = (unexcusedLateDayIndices.length > leisureDaysAllowed);
 
   const eligibleLeisureIndices = isRevokedBy3rdStrike
     ? []
     : leisureCandidateIndices.slice(0, leisureDaysAllowed);
 
-  const forgivenSet = new Set(eligibleLeisureIndices);
+  const leisureForgivenSet = new Set(eligibleLeisureIndices);
 
-  // Recompute records with leisure status and calendar overrides
+  // Recompute records with special exemption / leisure grace and calendar overrides
   return dailyRecords.map((r, idx) => {
     const swipes = r.raw_swipes || r.swipe_record || '';
     const timestamps = (String(swipes).match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00' && t !== '0:00');
-    const isLeisure = forgivenSet.has(idx);
+    const isSpecialExempt = workerExemptDayIndices.has(idx);
+    const isLeisure = leisureForgivenSet.has(idx);
+    const isGraceForgiven = isSpecialExempt || isLeisure;
 
     const calOverride = (factoryCalendarMap && factoryCalendarMap[r.date])
       ? factoryCalendarMap[r.date]
@@ -686,13 +745,15 @@ function applyMonthlyLeisureGrace(dailyRecords = [], settings = {}, customRules 
       settings.assigned_shift || 'auto',
       isHoliday,
       holidayName,
-      isLeisure,
-      calOverride
+      isGraceForgiven,
+      calOverride,
+      r.date || ''
     );
 
     return {
       ...r,
       ...computed,
+      is_special_exempt: isSpecialExempt ? 1 : 0,
       is_leisure_forgiven: isLeisure ? 1 : 0
     };
   });

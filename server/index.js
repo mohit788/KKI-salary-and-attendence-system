@@ -130,25 +130,37 @@ app.post('/api/custom-rules', async (req, res) => {
       threshold_mins = 0,
       deduction_mins = 0,
       deduction_amount = 0,
+      valid_from = '',
+      valid_to = '',
+      max_allowed_days = 0,
+      grace_allowed_mins = 30,
     } = req.body;
 
     if (!rule_name || !rule_type) {
       return res.status(400).json({ success: false, error: 'rule_name and rule_type are required' });
     }
 
+    const resolvedGraceMins = parseInt(grace_allowed_mins !== undefined ? grace_allowed_mins : threshold_mins, 10) || 30;
+
     await execute(
-      `INSERT INTO custom_rules (rule_name, rule_type, target_staff_no, exemption_type, start_time, end_time, threshold_mins, deduction_mins, deduction_amount, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO custom_rules (
+        rule_name, rule_type, target_staff_no, exemption_type, start_time, end_time,
+        threshold_mins, deduction_mins, deduction_amount, valid_from, valid_to, max_allowed_days, grace_allowed_mins, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       [
         rule_name,
         rule_type,
         target_staff_no || 'all',
         exemption_type || '',
-        start_time,
-        end_time,
+        start_time || '',
+        end_time || '',
         parseInt(threshold_mins, 10) || 0,
         parseInt(deduction_mins, 10) || 0,
         parseFloat(deduction_amount) || 0,
+        valid_from || '',
+        valid_to || '',
+        parseInt(max_allowed_days, 10) || 0,
+        resolvedGraceMins,
       ]
     );
 
@@ -380,6 +392,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
       const sortedRecords = (worker.records || []).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
+      const workerCustomRules = (customRules || []).filter(r => !r.target_staff_no || r.target_staff_no === 'all' || String(r.target_staff_no).trim() === String(worker.staff_no).trim());
+
       let dailyComputed = sortedRecords.map(r => {
         totalRecords++;
         if (r.date) datesSet.add(r.date);
@@ -387,7 +401,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         const calOverride = factoryCalendarMap[r.date] || null;
         const isHoliday = !!paidHolidaysMap[r.date] || calOverride?.day_type === 'holiday';
         const holidayName = calOverride?.title || paidHolidaysMap[r.date] || '';
-        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, customRules, 'auto', isHoliday, holidayName, false, calOverride);
+        const attendance = computeDailyAttendance(timestamps, settings, r.weekday, workerCustomRules, 'auto', isHoliday, holidayName, false, calOverride, r.date || '');
         if (attendance.status === 'Incomplete') {
           flaggedCount++;
         }
@@ -401,11 +415,25 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         };
       });
 
-      dailyComputed = applyMonthlyLeisureGrace(dailyComputed, settings, customRules, paidHolidaysMap, factoryCalendarMap);
-      dailyComputed = applyWeeklyOffForfeiture(dailyComputed, settings, customRules, factoryCalendarMap);
-      dailyComputed = applyPaidHolidayForfeiture(dailyComputed, settings);
+      // Apply Monthly Leisure & Worker Special Late Exemption Grace per calendar month
+      const recordsByMonth = new Map();
+      dailyComputed.forEach(r => {
+        const mKey = (r.date || '').slice(0, 7) || 'general';
+        if (!recordsByMonth.has(mKey)) recordsByMonth.set(mKey, []);
+        recordsByMonth.get(mKey).push(r);
+      });
 
-      for (const d of dailyComputed) {
+      let leisureProcessed = [];
+      for (const [mKey, mRecords] of recordsByMonth.entries()) {
+        let mComputed = applyMonthlyLeisureGrace(mRecords, settings, workerCustomRules, paidHolidaysMap, factoryCalendarMap);
+        leisureProcessed.push(...mComputed);
+      }
+      leisureProcessed.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+      let weeklyOffProcessed = applyWeeklyOffForfeiture(leisureProcessed, settings, workerCustomRules, factoryCalendarMap);
+      let finalProcessed = applyPaidHolidayForfeiture(weeklyOffProcessed, settings);
+
+      for (const d of finalProcessed) {
         dbStatements.push({
           sql: `INSERT INTO raw_punches (staff_no, date, weekday, swipe_record, machine_work_time, batch_id)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -691,7 +719,8 @@ async function recomputeAllAttendance() {
         isHoliday,
         holidayName,
         false,
-        calOverride
+        calOverride,
+        r.date || ''
       );
       return {
         ...r,

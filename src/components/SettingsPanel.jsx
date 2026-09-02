@@ -74,6 +74,10 @@ export default function SettingsPanel({
   const [endTime, setEndTime] = useState('15:00');
   const [thresholdMins, setThresholdMins] = useState('30');
   const [deductionMins, setDeductionMins] = useState('60');
+  const [ruleValidFrom, setRuleValidFrom] = useState('');
+  const [ruleValidTo, setRuleValidTo] = useState('');
+  const [ruleMaxAllowedDays, setRuleMaxAllowedDays] = useState('');
+  const [ruleGraceAllowedMins, setRuleGraceAllowedMins] = useState('15');
 
   // Salary Rule Form State
   const [salaryRuleName, setSalaryRuleName] = useState('');
@@ -270,11 +274,16 @@ export default function SettingsPanel({
         body: JSON.stringify({
           rule_name: ruleName.trim(),
           rule_type: ruleType,
+          exemption_type: ruleType === 'grace_slab_exempt' ? 'grace_slab_exempt' : '',
           target_staff_no: targetStaffNo || 'all',
           start_time: startTime,
           end_time: endTime,
-          threshold_mins: parseInt(thresholdMins, 10) || 0,
+          threshold_mins: parseInt(ruleType === 'grace_slab_exempt' ? (ruleGraceAllowedMins || 15) : thresholdMins, 10) || 0,
           deduction_mins: parseInt(deductionMins, 10) || 0,
+          grace_allowed_mins: parseInt(ruleGraceAllowedMins || thresholdMins, 10) || 15,
+          max_allowed_days: parseInt(ruleMaxAllowedDays, 10) || 0,
+          valid_from: ruleValidFrom || '',
+          valid_to: ruleValidTo || '',
         }),
       }).then(r => r.json());
 
@@ -283,6 +292,10 @@ export default function SettingsPanel({
         setTimeout(() => setToast(''), 4000);
         setRuleName('');
         setTargetStaffNo('all');
+        setRuleValidFrom('');
+        setRuleValidTo('');
+        setRuleMaxAllowedDays('');
+        setRuleGraceAllowedMins('15');
         setShowCreateRuleModal(false);
         fetchCustomRules();
       } else {
@@ -836,7 +849,7 @@ export default function SettingsPanel({
 
         {customRules.length === 0 ? (
           <div className="p-6 text-center text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
-            No custom restriction rules created yet. Click "+ Create Timing Rule" above to add mid-day exit or late penalty rules!
+            No custom restriction rules created yet. Click "+ Create Timing Rule" above to add mid-day exit, late penalty, or special grace exemption rules!
           </div>
         ) : (
           <div className="space-y-3">
@@ -845,11 +858,21 @@ export default function SettingsPanel({
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                     <span className="text-sm font-bold text-white">{r.rule_name}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-semibold uppercase">
-                      {r.rule_type === 'midday_exit' ? 'Mid-Day Exit Penalty' : 'Late Arrival Deduction'}
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${
+                      r.rule_type === 'grace_slab_exempt' || r.exemption_type === 'grace_slab_exempt'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : r.rule_type === 'midday_exit'
+                        ? 'bg-slate-800 text-slate-300'
+                        : 'bg-rose-500/20 text-rose-300'
+                    }`}>
+                      {r.rule_type === 'grace_slab_exempt' || r.exemption_type === 'grace_slab_exempt'
+                        ? '✨ Late Exemption Grace (No 30m Cut)'
+                        : r.rule_type === 'midday_exit'
+                        ? 'Mid-Day Exit Penalty'
+                        : 'Late Arrival Deduction'}
                     </span>
                     {r.target_staff_no && r.target_staff_no !== 'all' ? (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40 font-mono">
+                      <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/40 font-mono">
                         👤 #{r.target_staff_no}
                       </span>
                     ) : (
@@ -857,10 +880,23 @@ export default function SettingsPanel({
                         🌐 Factory-Wide
                       </span>
                     )}
+                    {r.grace_allowed_mins || r.threshold_mins ? (
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 text-[10px] font-mono">
+                        ≤{r.grace_allowed_mins || r.threshold_mins}m allowed
+                      </span>
+                    ) : null}
+                    {r.max_allowed_days > 0 ? (
+                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-cyan-300 text-[10px] font-mono">
+                        Max {r.max_allowed_days} days/mo
+                      </span>
+                    ) : null}
                   </div>
                   <p className="text-xs text-slate-400 font-mono">
-                    If condition threshold &gt; {r.threshold_mins}m ➔ Deduct {r.deduction_mins} mins from working hours
+                    {r.rule_type === 'grace_slab_exempt' || r.exemption_type === 'grace_slab_exempt'
+                      ? `Exempts 30-minute late penalty slab when arriving ≤ ${r.grace_allowed_mins || r.threshold_mins || 15} mins late${r.max_allowed_days > 0 ? ` (up to ${r.max_allowed_days} days/month)` : ' (Unlimited days)'}`
+                      : `If condition threshold > ${r.threshold_mins}m ➔ Deduct ${r.deduction_mins} mins from working hours`}
                     {r.start_time && r.end_time ? ` (Window: ${r.start_time} - ${r.end_time})` : ''}
+                    {r.valid_from || r.valid_to ? ` | Period: ${r.valid_from || 'Start'} ➔ ${r.valid_to || 'Ongoing'}` : ''}
                   </p>
                 </div>
 
@@ -909,7 +945,7 @@ export default function SettingsPanel({
               <label className="block text-xs font-semibold text-slate-300 mb-1">Rule Name</label>
               <input
                 type="text"
-                placeholder="e.g. Lunch Exit Outside > 30 mins Deduction"
+                placeholder="e.g. 15-Min Late Arrival Exemption (No 30m Cut)"
                 value={ruleName}
                 onChange={(e) => setRuleName(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
@@ -940,55 +976,107 @@ export default function SettingsPanel({
                 onChange={(e) => setRuleType(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
               >
+                <option value="grace_slab_exempt">✨ Late Arrival Exemption Grace (No 30m Penalty)</option>
                 <option value="midday_exit">Mid-Day Exit Penalty (Outside during shift)</option>
                 <option value="late_penalty">Late Arrival Deduction Penalty</option>
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Threshold Limit (Minutes)</label>
-              <input
-                type="number"
-                placeholder="e.g. 30"
-                value={thresholdMins}
-                onChange={(e) => setThresholdMins(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
-                required
-              />
-              <p className="text-[11px] text-slate-400 mt-1">Triggers if outside/late time exceeds this many minutes.</p>
-            </div>
+            {ruleType === 'grace_slab_exempt' ? (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Allowed Late Arrival (Minutes)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 15"
+                    value={ruleGraceAllowedMins}
+                    onChange={(e) => setRuleGraceAllowedMins(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Late arrivals up to this limit won't get penalized with a 30m cut.</p>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Deduction Penalty (Minutes)</label>
-              <input
-                type="number"
-                placeholder="e.g. 60"
-                value={deductionMins}
-                onChange={(e) => setDeductionMins(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
-                required
-              />
-              <p className="text-[11px] text-slate-400 mt-1">Minutes to deduct from worker regular hours when triggered.</p>
-            </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Monthly Days Limit (0 = Unlimited)</label>
+                  <input
+                    type="number"
+                    placeholder="0 for unlimited, or e.g. 5"
+                    value={ruleMaxAllowedDays}
+                    onChange={(e) => setRuleMaxAllowedDays(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Number of days per month the worker can use this exemption.</p>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Time Window (Optional)</label>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="time"
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-1/2 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white font-mono"
-                />
-                <span className="text-xs text-slate-500">to</span>
-                <input
-                  type="time"
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  className="w-1/2 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white font-mono"
-                />
-              </div>
-            </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Valid From (Start Date)</label>
+                  <input
+                    type="date"
+                    value={ruleValidFrom}
+                    onChange={(e) => setRuleValidFrom(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Valid To (End Date)</label>
+                  <input
+                    type="date"
+                    value={ruleValidTo}
+                    onChange={(e) => setRuleValidTo(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Threshold Limit (Minutes)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 30"
+                    value={thresholdMins}
+                    onChange={(e) => setThresholdMins(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Triggers if outside/late time exceeds this many minutes.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Deduction Penalty (Minutes)</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 60"
+                    value={deductionMins}
+                    onChange={(e) => setDeductionMins(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">Minutes to deduct from worker regular hours when triggered.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Time Window (Optional)</label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="time"
+                      value={startTime}
+                      onChange={(e) => setStartTime(e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white font-mono"
+                    />
+                    <span className="text-xs text-slate-500">to</span>
+                    <input
+                      type="time"
+                      value={endTime}
+                      onChange={(e) => setEndTime(e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white font-mono"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="sm:col-span-2 flex justify-end space-x-3 pt-2 border-t border-slate-800">
               <button

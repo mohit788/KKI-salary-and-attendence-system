@@ -47,6 +47,10 @@ export default function WorkerDetail({
   const [showSpecialRulesModal, setShowSpecialRulesModal] = useState(false);
   const [specialShift, setSpecialShift] = useState('auto');
   const [specialGraceExempt, setSpecialGraceExempt] = useState(false);
+  const [specialGraceAllowedMins, setSpecialGraceAllowedMins] = useState('15');
+  const [specialGraceMaxDays, setSpecialGraceMaxDays] = useState('');
+  const [specialGraceValidFrom, setSpecialGraceValidFrom] = useState('');
+  const [specialGraceValidTo, setSpecialGraceValidTo] = useState('');
   const [specialBonusAmount, setSpecialBonusAmount] = useState('');
   const [specialBonusName, setSpecialBonusName] = useState('');
   const [specialDeductionAmount, setSpecialDeductionAmount] = useState('');
@@ -63,6 +67,16 @@ export default function WorkerDetail({
       const myTimingRules = (crRes?.rules || []).filter(r => String(r.target_staff_no) === String(staffNo));
       const mySalaryRules = (srRes?.rules || []).filter(r => String(r.target_staff_no) === String(staffNo));
       setWorkerRulesList([...myTimingRules, ...mySalaryRules]);
+
+      // Pre-fill existing grace rule if present
+      const existingGrace = myTimingRules.find(r => r.is_active && (r.exemption_type === 'grace_slab_exempt' || r.rule_type === 'grace_slab_exempt' || r.rule_type === 'late_penalty_grace'));
+      if (existingGrace) {
+        setSpecialGraceExempt(true);
+        setSpecialGraceAllowedMins(String(existingGrace.grace_allowed_mins || existingGrace.threshold_mins || 15));
+        setSpecialGraceMaxDays(existingGrace.max_allowed_days ? String(existingGrace.max_allowed_days) : '');
+        setSpecialGraceValidFrom(existingGrace.valid_from || '');
+        setSpecialGraceValidTo(existingGrace.valid_to || '');
+      }
     } catch (e) {
       console.error('Error fetching worker rules:', e);
     }
@@ -83,16 +97,21 @@ export default function WorkerDetail({
         })
       });
 
-      // 2. Grace Slab Exemption
+      // 2. Grace Slab Exemption with Fine-Grained Grace Mins, Day Limit, and Validity Period
       if (specialGraceExempt) {
         await fetch('/api/custom-rules', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            rule_name: `Grace Exemption for #${staffNo} (${workerData?.worker?.staff_name || ''})`,
+            rule_name: `Late Grace Exemption for #${staffNo} (${workerData?.worker?.staff_name || ''})`,
             rule_type: 'grace_slab_exempt',
             target_staff_no: String(staffNo),
-            exemption_type: 'grace_slab_exempt'
+            exemption_type: 'grace_slab_exempt',
+            threshold_mins: parseInt(specialGraceAllowedMins, 10) || 15,
+            grace_allowed_mins: parseInt(specialGraceAllowedMins, 10) || 15,
+            max_allowed_days: parseInt(specialGraceMaxDays, 10) || 0,
+            valid_from: specialGraceValidFrom || '',
+            valid_to: specialGraceValidTo || ''
           })
         });
       }
@@ -420,17 +439,84 @@ export default function WorkerDetail({
               </div>
 
               {/* 2. Grace Exemption */}
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-white">Grace Slab Exemption</h4>
-                  <p className="text-[11px] text-slate-400">Do not apply 30-minute late penalty slab to this worker</p>
+              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>Late Penalty Exemption Grace</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">Special Exemption</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">Waives the 30-minute late penalty slab when worker arrives within allowed limit</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={specialGraceExempt}
+                    onChange={(e) => setSpecialGraceExempt(e.target.checked)}
+                    className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
+                  />
                 </div>
-                <input
-                  type="checkbox"
-                  checked={specialGraceExempt}
-                  onChange={(e) => setSpecialGraceExempt(e.target.checked)}
-                  className="w-5 h-5 accent-amber-500 rounded cursor-pointer"
-                />
+
+                {specialGraceExempt && (
+                  <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Allowed Late Minutes (mins)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          placeholder="e.g. 15"
+                          value={specialGraceAllowedMins}
+                          onChange={(e) => setSpecialGraceAllowedMins(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono"
+                        />
+                        <span className="absolute right-3 top-2 text-xs text-slate-400">mins late</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Late arrival up to this many mins won't cut 30m.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Monthly Days Limit (0 = Unlimited)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          placeholder="0 for unlimited, or e.g. 5"
+                          value={specialGraceMaxDays}
+                          onChange={(e) => setSpecialGraceMaxDays(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono"
+                        />
+                        <span className="absolute right-3 top-2 text-xs text-slate-400">days/mo</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Max late days per month worker can use this exemption.</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Valid From (Start Date)
+                      </label>
+                      <input
+                        type="date"
+                        value={specialGraceValidFrom}
+                        onChange={(e) => setSpecialGraceValidFrom(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Valid To (End Date)
+                      </label>
+                      <input
+                        type="date"
+                        value={specialGraceValidTo}
+                        onChange={(e) => setSpecialGraceValidTo(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* 3. Special Monthly Bonus */}
@@ -485,14 +571,33 @@ export default function WorkerDetail({
               {workerRulesList.length > 0 && (
                 <div className="pt-2 border-t border-slate-800">
                   <h4 className="text-xs font-bold text-slate-300 mb-2">Existing Special Rules on this Worker:</h4>
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto">
                     {workerRulesList.map((r, i) => (
-                      <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800 text-xs">
-                        <span className="font-medium text-amber-200">{r.rule_name}</span>
+                      <div key={i} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 text-xs flex items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-amber-200">{r.rule_name}</span>
+                            {r.grace_allowed_mins || r.threshold_mins ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-[10px]">
+                                ≤{r.grace_allowed_mins || r.threshold_mins}m late allowed
+                              </span>
+                            ) : null}
+                            {r.max_allowed_days > 0 ? (
+                              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">
+                                Max {r.max_allowed_days} days/mo
+                              </span>
+                            ) : null}
+                          </div>
+                          {r.valid_from || r.valid_to ? (
+                            <p className="text-[10px] text-slate-400 font-mono">
+                              Period: {r.valid_from || 'Start'} ➔ {r.valid_to || 'Ongoing'}
+                            </p>
+                          ) : null}
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleDeleteWorkerRule(r)}
-                          className="text-rose-400 hover:text-rose-300 px-1.5 py-0.5 rounded bg-rose-500/10 text-[10px]"
+                          className="text-rose-400 hover:text-rose-300 px-2 py-1 rounded bg-rose-500/10 text-[10px] font-bold"
                         >
                           Remove
                         </button>
