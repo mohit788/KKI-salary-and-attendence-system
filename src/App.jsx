@@ -383,6 +383,7 @@ export default function App() {
             selectedMonth={selectedMonth}
             availableMonths={availableMonths}
             onSelectMonth={handleSelectMonth}
+            onRefreshData={refreshData}
           />
         )}
 

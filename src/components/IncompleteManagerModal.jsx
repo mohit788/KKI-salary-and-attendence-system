@@ -51,8 +51,15 @@ export default function IncompleteManagerModal({
   // High-performance client-side extractor from memory (0ms instant hydration)
   const extractIncompleteFromMemory = (targetMonth = modalMonth) => {
     const map = new Map();
+    const exemptStaffSet = new Set();
+    (workers || []).forEach(w => {
+      if (w.is_exception === 1 || ['exempt', 'flexible', 'exception'].includes(w.assigned_shift)) {
+        exemptStaffSet.add(String(w.staff_no));
+      }
+    });
 
     (workers || []).forEach(w => {
+      if (exemptStaffSet.has(String(w.staff_no))) return; // Skip exception workers!
       (w.dailyRecords || []).forEach(r => {
         if (targetMonth && targetMonth !== 'all' && !r.date?.startsWith(targetMonth)) return;
         const raw = (r.raw_swipes || '').trim();
@@ -88,6 +95,7 @@ export default function IncompleteManagerModal({
     });
 
     (allAttendance || []).forEach(r => {
+      if (exemptStaffSet.has(String(r.staff_no))) return; // Skip exception workers!
       if (targetMonth && targetMonth !== 'all' && !r.date?.startsWith(targetMonth)) return;
       const raw = (r.raw_swipes || '').trim();
       const punches = (raw.match(/\b\d{1,2}:\d{2}\b/g) || []).filter(t => t !== '00:00');

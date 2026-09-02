@@ -22,9 +22,12 @@ import {
   ChevronRight,
   Sparkles,
   Lock,
-  Unlock
+  Unlock,
+  Star,
+  ShieldCheck
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
+import ExceptionManagerModal from './ExceptionManagerModal';
 
 export default function Dashboard({
   metrics,
@@ -38,11 +41,17 @@ export default function Dashboard({
   onOpenIncompleteManager,
   selectedMonth,
   availableMonths = [],
-  onSelectMonth
+  onSelectMonth,
+  onRefreshData
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWorkerModal, setSelectedWorkerModal] = useState(null);
+  const [showExceptionModal, setShowExceptionModal] = useState(false);
+
+  const exceptionWorkersCount = useMemo(() => {
+    return (workers || []).filter(w => w.is_exception === 1 || ['exempt', 'flexible', 'exception'].includes(w.assigned_shift)).length;
+  }, [workers]);
 
   const monthQueryParam = selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : '';
 
@@ -159,6 +168,14 @@ export default function Dashboard({
               <span className="text-slate-400 block text-[10px] uppercase font-bold">Calendar Divisor</span>
               <span className="font-bold text-emerald-300">{metrics.activeMonth.totalDays} Days in Month</span>
             </div>
+            <button
+              onClick={() => setShowExceptionModal(true)}
+              className="bg-amber-950/90 hover:bg-amber-900 px-3.5 py-2 rounded-xl border-2 border-amber-500/80 text-amber-200 font-extrabold flex items-center gap-1.5 shadow-md transition-all cursor-pointer hover:scale-[1.02]"
+              title="Manage Exempt & Exception Workers"
+            >
+              <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+              <span>⭐ Exception Workers ({exceptionWorkersCount})</span>
+            </button>
           </div>
         </div>
       ) : null}
@@ -286,7 +303,14 @@ export default function Dashboard({
                   className="w-full py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all flex items-center justify-center space-x-2 cursor-pointer shadow-md"
                 >
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>Open Fast-Fix Center ({metrics.incompleteCount} Fixes / Set Exceptions)</span>
+                  <span>Open Fast-Fix Center ({metrics.incompleteCount} Fixes Needed)</span>
+                </button>
+                <button
+                  onClick={() => setShowExceptionModal(true)}
+                  className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold rounded-xl text-xs transition-all flex items-center justify-center space-x-1.5 border border-amber-500/60 cursor-pointer shadow-sm"
+                >
+                  <Star className="w-3.5 h-3.5 fill-amber-400" />
+                  <span>⭐ Manage Exception Workers ({exceptionWorkersCount} Active)</span>
                 </button>
               </div>
             ) : (
@@ -504,21 +528,36 @@ export default function Dashboard({
               <span className="text-xs px-3 py-1 rounded-full bg-blue-950 text-blue-300 font-mono font-bold border border-blue-600">
                 {filteredWorkers.length} Workers
               </span>
+              {exceptionWorkersCount > 0 && (
+                <span className="text-xs px-2.5 py-1 rounded-full bg-amber-950 text-amber-300 font-mono font-bold border border-amber-600 flex items-center gap-1">
+                  <Star className="w-3 h-3 fill-amber-400" /> {exceptionWorkersCount} Exceptions
+                </span>
+              )}
             </h3>
             <p className="text-sm text-slate-300 mt-1 font-medium">
               Click on any employee to view their daily swipe times, regular 8h duty, and overtime breakdown
             </p>
           </div>
 
-          <div className="relative max-w-sm w-full">
-            <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Search by name or Staff No..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border-2 border-slate-700 rounded-xl pl-11 pr-4 py-2.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 font-medium"
-            />
+          <div className="flex items-center gap-2.5 max-w-lg w-full">
+            <div className="relative flex-1">
+              <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by name or Staff No..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-900 border-2 border-slate-700 rounded-xl pl-11 pr-4 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 font-medium"
+              />
+            </div>
+            <button
+              onClick={() => setShowExceptionModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all shrink-0 cursor-pointer"
+              title="Open Exception Manager Modal"
+            >
+              <Star className="w-4 h-4 fill-slate-950 text-slate-950" />
+              <span>Exceptions ({exceptionWorkersCount})</span>
+            </button>
           </div>
         </div>
 
@@ -546,9 +585,16 @@ export default function Dashboard({
                         #{w.staff_no}
                       </div>
                       <div>
-                        <h4 className="text-base font-bold text-white group-hover:text-blue-300 transition-colors">
-                          {w.staff_name}
-                        </h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-base font-bold text-white group-hover:text-blue-300 transition-colors">
+                            {w.staff_name}
+                          </h4>
+                          {(w.is_exception === 1 || ['exempt', 'flexible', 'exception'].includes(w.assigned_shift)) && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-black flex items-center gap-0.5">
+                              <Star className="w-2.5 h-2.5 fill-current" /> EXEMPT
+                            </span>
+                          )}
+                        </div>
                         <span className="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold uppercase border border-slate-700">
                           {w.department || 'WORKER'}
                         </span>
@@ -839,6 +885,15 @@ export default function Dashboard({
           </div>
         </div>
       )}
+
+      {/* EXCEPTION WORKERS MANAGEMENT MODAL */}
+      <ExceptionManagerModal
+        isOpen={showExceptionModal}
+        onClose={() => setShowExceptionModal(false)}
+        workers={workers}
+        onRefreshData={onRefreshData}
+        onOpenIncompleteManager={onOpenIncompleteManager}
+      />
 
     </div>
   );

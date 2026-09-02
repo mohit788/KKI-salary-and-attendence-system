@@ -1361,6 +1361,11 @@ app.post('/api/workers/batch-exception', async (req, res) => {
         `UPDATE workers SET is_exception = ?, exception_reason = ? WHERE staff_no = ?`,
         [flag, reason, String(sNo)]
       );
+      await execute(
+        `INSERT INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason)
+         VALUES (?, date('now'), 'Exception Status', ?, ?, 'Admin', ?)`,
+        [String(sNo), flag === 1 ? 'Standard Worker' : 'Exception Worker', flag === 1 ? 'Exception Worker' : 'Standard Worker', reason]
+      );
     }
 
     res.json({
@@ -1551,6 +1556,21 @@ app.get('/api/attendance/incomplete', async (req, res) => {
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
+    // Fetch exempt and exception workers
+    const exemptWorkersRes = await execute(
+      `SELECT staff_no FROM workers WHERE is_exception = 1 OR assigned_shift IN ('exempt', 'flexible', 'exception')`
+    );
+    const exemptStaffSet = new Set(exemptWorkersRes.rows.map(w => String(w.staff_no)));
+
+    // Fetch custom rule exemptions
+    customRules.forEach(r => {
+      if (r && r.is_active && (r.exemption_type === 'incomplete_exempt' || r.exemption_type === 'forfeiture_exempt' || r.rule_type === 'forfeiture_exempt' || r.rule_type === 'grace_slab_exempt')) {
+        if (r.target_staff_no && r.target_staff_no !== 'all') {
+          exemptStaffSet.add(String(r.target_staff_no));
+        }
+      }
+    });
+
     let query = `
       SELECT 
         d.*, 
@@ -1575,6 +1595,9 @@ app.get('/api/attendance/incomplete', async (req, res) => {
     const seenKeys = new Set();
 
     for (const r of allRecords.rows) {
+      if (exemptStaffSet.has(String(r.staff_no))) {
+        continue; // Exempt/Exception worker - exclude from Fast-Fix list!
+      }
       if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
         continue;
       }
