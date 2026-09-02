@@ -816,11 +816,13 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [],
       // Check weekly absent count in preceding Mon-Sat stretch (ONLY pure unworked absents)
       let weeklyAbsentCount = 0;
       let weeklyOffsInWeek = 0;
+      const absentDatesInWeek = [];
       for (let j = Math.max(0, i - 6); j < i; j++) {
         const prevRec = dailyRecords[j];
         if (isPureAbsentForForfeiture(prevRec)) {
           weeklyAbsentCount++;
           weeklyOffsInWeek++;
+          absentDatesInWeek.push(`${prevRec.date} (${prevRec.weekday || ''})`);
         } else if ((prevRec.status || '').includes('Weekly Off')) {
           weeklyOffsInWeek++;
         }
@@ -828,8 +830,13 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [],
 
       if (weeklyAbsentCount >= absentThreshold || weeklyOffsInWeek >= weeklyOffForfeiture) {
         rec.status = 'Weekly Off (Forfeited)';
+        const dateListStr = absentDatesInWeek.length > 0 ? ` [${absentDatesInWeek.join(', ')}]` : '';
+        rec.forfeiture_reason = `${weeklyAbsentCount} unapproved off(s) in this week${dateListStr} — Sunday forfeited (Weekly Off Rule)`;
+        rec.forfeitureReason = rec.forfeiture_reason;
       } else {
         rec.status = 'Weekly Off (Paid)';
+        rec.forfeiture_reason = '';
+        rec.forfeitureReason = '';
       }
     }
   }
@@ -857,6 +864,8 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [],
 
           if (r.status === 'Weekly Off (Paid)') {
             r.status = 'Weekly Off (Forfeited)';
+            r.forfeiture_reason = `Paid Sunday cut due to 4+ leaves in month (${monthAbsents} unapproved leaves taken in ${mKey})`;
+            r.forfeitureReason = r.forfeiture_reason;
             break; // Forfeit 1 Paid Sunday in this month!
           }
         }
@@ -885,6 +894,7 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
     if (rec.status !== 'Holiday (Paid)') continue;
 
     let isForfeited = false;
+    let forfeitReason = '';
 
     // 1. Check ONLY the 1-2 immediate preceding working days right before the holiday (e.g. 13th & 14th)
     let precedingWorkingDaysChecked = 0;
@@ -900,6 +910,7 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
       // If absent on either of the 1-2 days directly preceding the holiday:
       if (isPureAbsentForForfeiture(prev)) {
         isForfeited = true;
+        forfeitReason = `Sandwich Rule: Absent on adjacent working day (${prev.date} ${prev.weekday || ''}) immediately before holiday`;
         break;
       }
     }
@@ -917,6 +928,7 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
         // First regular scheduled working day found (e.g. Mon Aug 17):
         if (isPureAbsentForForfeiture(next)) {
           isForfeited = true;
+          forfeitReason = `Sandwich Rule: Absent on bridge working day (${next.date} ${next.weekday || ''}) immediately after holiday`;
         }
         break;
       }
@@ -924,6 +936,8 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
 
     if (isForfeited) {
       rec.status = 'Holiday (Forfeited)';
+      rec.forfeiture_reason = forfeitReason;
+      rec.forfeitureReason = forfeitReason;
       rec.regularHours = 0;
       rec.regular_hours = 0;
       rec.totalHours = 0;
