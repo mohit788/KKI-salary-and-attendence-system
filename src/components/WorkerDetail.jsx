@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { 
-  ArrowLeft, 
-  Printer, 
-  Edit3, 
-  Clock, 
-  DollarSign, 
-  Calendar, 
-  CheckCircle2, 
+import {
+  ArrowLeft,
+  Printer,
+  Edit3,
+  Clock,
+  DollarSign,
+  Calendar,
+  CheckCircle2,
   AlertTriangle,
   UserCheck,
   Building2,
@@ -24,13 +24,13 @@ import {
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 
-export default function WorkerDetail({ 
-  staffNo, 
-  workerData, 
+export default function WorkerDetail({
+  staffNo,
+  workerData,
   workers = [],
   onSelectWorker,
-  onBack, 
-  onEditRecord, 
+  onBack,
+  onEditRecord,
   onAddAdvance,
   isPayrollUnlocked = false,
   onOpenUnlockModal,
@@ -177,8 +177,8 @@ export default function WorkerDetail({
   };
 
   const totalRegularDutyHours = dailyRecords.reduce((acc, r) => acc + (parseFloat(r.regular_hours) || 0), 0);
-  const sunHolDays = payroll?.sundayAndHolidayWorkedDays !== undefined 
-    ? payroll.sundayAndHolidayWorkedDays 
+  const sunHolDays = payroll?.sundayAndHolidayWorkedDays !== undefined
+    ? payroll.sundayAndHolidayWorkedDays
     : ((payroll?.sundayWorkedDays || 0) + (payroll?.holidayWorkedDays || 0));
 
   // Worker navigation helpers
@@ -227,10 +227,10 @@ export default function WorkerDetail({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
-      
+
       {/* Top Action Bar with Prominent Worker Searcher & Prev/Next Switcher */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 no-print">
-        
+
         {/* Left: Back button + Prev/Next Worker Controls */}
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           <button
@@ -272,7 +272,7 @@ export default function WorkerDetail({
 
         {/* Center/Right: Large Quick Search Switcher Dropdown & Action Buttons */}
         <div className="flex items-center space-x-2.5 flex-wrap gap-y-2 justify-between lg:justify-end flex-1">
-          
+
           {/* Large, Prominent & Spacious Worker Search Bar */}
           {onSelectWorker && workers.length > 0 && (
             <div className="relative flex-1 sm:w-[450px] md:w-[560px] lg:w-[680px]">
@@ -299,8 +299,8 @@ export default function WorkerDetail({
 
               {showSearchDropdown && workerSearchTerm.trim() && (
                 <>
-                  <div 
-                    className="fixed inset-0 z-30" 
+                  <div
+                    className="fixed inset-0 z-30"
                     onClick={() => setShowSearchDropdown(false)}
                   />
                   <div className="absolute left-0 top-full mt-1.5 w-full min-w-[320px] max-h-72 overflow-y-auto bg-slate-900 border-2 border-slate-700 rounded-2xl shadow-2xl z-40 p-2 divide-y divide-slate-800 backdrop-blur-md">
@@ -315,9 +315,8 @@ export default function WorkerDetail({
                             setWorkerSearchTerm('');
                             setShowSearchDropdown(false);
                           }}
-                          className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer ${
-                            String(w.staff_no) === String(staffNo) ? 'bg-blue-950/80 border border-blue-500 text-cyan-300 font-bold' : 'text-slate-200'
-                          }`}
+                          className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs hover:bg-slate-800 transition-colors flex items-center justify-between cursor-pointer ${String(w.staff_no) === String(staffNo) ? 'bg-blue-950/80 border border-blue-500 text-cyan-300 font-bold' : 'text-slate-200'
+                            }`}
                         >
                           <div className="flex items-center space-x-3">
                             <span className="font-mono text-xs px-2 py-0.5 rounded-lg bg-blue-950 text-cyan-300 font-bold border border-blue-700">#{w.staff_no}</span>
@@ -381,7 +380,7 @@ export default function WorkerDetail({
       {showSpecialRulesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in">
           <div className="glass-modal w-full max-w-xl rounded-2xl p-6 shadow-2xl border-2 border-amber-500/60 bg-slate-900 flex flex-col space-y-4">
-            
+
             <div className="flex items-center justify-between border-b border-slate-700 pb-3">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
@@ -400,7 +399,7 @@ export default function WorkerDetail({
             </div>
 
             <form onSubmit={handleSaveWorkerSpecialRules} className="space-y-4">
-              
+
               {/* 1. Custom Shift Start */}
               <div>
                 <label className="block text-xs font-bold text-slate-200 mb-1.5">
@@ -581,22 +580,20 @@ export default function WorkerDetail({
                     <button
                       key={m.month_key}
                       onClick={() => onSelectMonth(m.month_key)}
-                      className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        selectedMonth === m.month_key
-                          ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
-                          : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
-                      }`}
+                      className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${selectedMonth === m.month_key
+                        ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                        }`}
                     >
                       {m.month_label}
                     </button>
                   ))}
                   <button
                     onClick={() => onSelectMonth('all')}
-                    className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      selectedMonth === 'all'
-                        ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
-                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
-                    }`}
+                    className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${selectedMonth === 'all'
+                      ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                      : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                      }`}
                   >
                     All Months
                   </button>
@@ -631,7 +628,7 @@ export default function WorkerDetail({
 
         {/* Month Summary Cards Grid (Including Sunday/Holiday Worked Days Card) */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 mt-6">
-          
+
           <div className="bg-slate-950 border border-slate-700 rounded-xl p-3">
             <p className="text-xs font-bold uppercase text-slate-300">Payable Days</p>
             {payroll?.hasIncompleteEntries ? (
@@ -767,22 +764,21 @@ export default function WorkerDetail({
                 const isManual = r.is_manual_override === 1 || r.is_manual_override === true;
 
                 return (
-                  <tr 
-                    key={r.date} 
-                    className={`transition-colors divide-x divide-slate-800/80 ${
-                      isManual 
-                        ? 'bg-violet-950/35 hover:bg-violet-900/45 border-l-4 border-l-violet-500' 
-                        : r.status === 'Weekly Off (Worked OT)' 
-                          ? 'bg-amber-950/30 hover:bg-slate-800/90' 
-                          : 'even:bg-slate-950/40 odd:bg-slate-900/60 hover:bg-slate-800/90'
-                    }`}
+                  <tr
+                    key={r.date}
+                    className={`transition-colors divide-x divide-slate-800/80 ${isManual
+                      ? 'bg-violet-950/35 hover:bg-violet-900/45 border-l-4 border-l-violet-500'
+                      : r.status === 'Weekly Off (Worked OT)'
+                        ? 'bg-amber-950/30 hover:bg-slate-800/90'
+                        : 'even:bg-slate-950/40 odd:bg-slate-900/60 hover:bg-slate-800/90'
+                      }`}
                   >
                     {/* Date with Manual Override Tag */}
                     <td className="px-4 py-3 font-mono font-bold text-white whitespace-nowrap">
                       <div className="flex items-center space-x-2">
                         <span>{r.date} <span className="text-slate-400 font-normal">({r.weekday})</span></span>
                         {isManual && (
-                          <span 
+                          <span
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-900/90 text-violet-200 border border-violet-500 flex items-center gap-1 shadow-sm"
                             title={r.override_reason || 'Manual Admin Correction'}
                           >
@@ -801,7 +797,7 @@ export default function WorkerDetail({
                             const currentTokens = (r.raw_swipes || '').split(/\s+/).filter(Boolean);
                             const manualTokens = new Set((r.manual_punches || '').split(/\s+/).filter(Boolean));
                             const origTokens = new Set((r.original_raw_swipes || '').split(/\s+/).filter(Boolean));
-                            
+
                             return currentTokens.map((token, idx) => {
                               let isAddedTiming = false;
                               if (isManual) {
@@ -815,13 +811,12 @@ export default function WorkerDetail({
                               return (
                                 <span
                                   key={idx}
-                                  className={`px-2 py-0.5 rounded-lg text-xs font-bold font-mono transition-all inline-flex items-center gap-1.5 ${
-                                    isAddedTiming
-                                      ? 'bg-sky-950/90 text-sky-200 border border-sky-400 font-bold shadow-sm shadow-sky-500/20 ring-1 ring-sky-400/40'
-                                      : isManual
-                                        ? 'bg-violet-950/80 text-violet-200 border border-violet-700/70'
-                                        : 'bg-slate-950 text-cyan-300 border border-slate-700/80'
-                                  }`}
+                                  className={`px-2 py-0.5 rounded-lg text-xs font-bold font-mono transition-all inline-flex items-center gap-1.5 ${isAddedTiming
+                                    ? 'bg-sky-950/90 text-sky-200 border border-sky-400 font-bold shadow-sm shadow-sky-500/20 ring-1 ring-sky-400/40'
+                                    : isManual
+                                      ? 'bg-violet-950/80 text-violet-200 border border-violet-700/70'
+                                      : 'bg-slate-950 text-cyan-300 border border-slate-700/80'
+                                    }`}
                                   title={isAddedTiming ? `Manually Added Timing: ${token}` : `Biometric Punch: ${token}`}
                                 >
                                   {isAddedTiming && (
