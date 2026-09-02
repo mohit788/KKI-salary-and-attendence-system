@@ -316,6 +316,18 @@ export default function Dashboard({
               <span>Download Biometric Timings Sheet (.xlsx)</span>
             </a>
 
+            {/* 5. Worker Fixes & Manual Timings Audit Report */}
+            <a
+              href={`/api/export/excel/fixes-audit${monthQueryParam}${metrics?.incompleteCount > 0 ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2.5 px-4 bg-amber-800 hover:bg-amber-700 text-amber-100 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center space-x-2 border border-amber-500 shadow-md transition-all cursor-pointer"
+              title="Download audit of all worker fixes, manual punch timings filled, and management overrides"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-amber-300" />
+              <span>Worker Fixes & Manual Timings Audit Report (.xlsx)</span>
+            </a>
+
             {/* 5. Full Payroll (When Unlocked) */}
             {isPayrollUnlocked ? (
               <a

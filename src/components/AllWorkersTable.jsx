@@ -313,6 +313,18 @@ export default function AllWorkersTable({
                 <span>Timings (.xlsx)</span>
               </a>
 
+              {/* Fixes Audit */}
+              <a
+                href={`/api/export/excel/fixes-audit${monthQueryParam}${workers.some(w => (w.payroll?.incompleteDays || 0) > 0) ? (monthQueryParam ? '&' : '?') + 'allow_incomplete=true' : ''}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 bg-amber-800 hover:bg-amber-700 text-amber-100 rounded-xl text-xs font-bold flex items-center space-x-1.5 border border-amber-500 shadow-sm transition-all whitespace-nowrap cursor-pointer"
+                title="Download audit of all worker fixes, manual punch timings filled, and management overrides"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-300" />
+                <span>Fixes Audit (.xlsx)</span>
+              </a>
+
               {isPayrollUnlocked ? (
                 <>
                   <a
