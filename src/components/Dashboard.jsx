@@ -34,7 +34,9 @@ export default function Dashboard({
   isPayrollUnlocked = false,
   onOpenUnlockModal,
   onOpenIncompleteManager,
-  selectedMonth
+  selectedMonth,
+  availableMonths = [],
+  onSelectMonth
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -87,7 +89,7 @@ export default function Dashboard({
   return (
     <div className="space-y-6 animate-in fade-in duration-300 text-slate-100">
 
-      {/* DETECTED ACTIVE MONTH BANNER */}
+      {/* DETECTED ACTIVE MONTH BANNER WITH QUICK MONTH SWITCHER */}
       {metrics?.activeMonth?.monthName ? (
         <div className="glass-card rounded-2xl p-5 sm:p-6 border-2 border-blue-500/60 bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
@@ -109,6 +111,36 @@ export default function Dashboard({
                   {metrics.totalWorkers || 0} Workers Enrolled
                 </span>
               </h2>
+
+              {/* Quick Month Switch Pills */}
+              {availableMonths && availableMonths.length > 1 && onSelectMonth && (
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  <span className="text-[11px] font-bold text-slate-400 mr-1">Switch Month:</span>
+                  {availableMonths.map(m => (
+                    <button
+                      key={m.month_key}
+                      onClick={() => onSelectMonth(m.month_key)}
+                      className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selectedMonth === m.month_key
+                          ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                          : 'bg-slate-800/90 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                      }`}
+                    >
+                      {m.month_label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => onSelectMonth('all')}
+                    className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      selectedMonth === 'all'
+                        ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                        : 'bg-slate-800/90 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                    }`}
+                  >
+                    All Records
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

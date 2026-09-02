@@ -34,7 +34,10 @@ export default function WorkerDetail({
   onAddAdvance,
   isPayrollUnlocked = false,
   onOpenUnlockModal,
-  onRefreshData
+  onRefreshData,
+  selectedMonth,
+  availableMonths = [],
+  onSelectMonth
 }) {
   const [workerSearchTerm, setWorkerSearchTerm] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
@@ -354,6 +357,16 @@ export default function WorkerDetail({
             </button>
           )}
 
+          <a
+            href={`/api/export/excel/worker/${staffNo}${selectedMonth && selectedMonth !== 'all' ? `?month=${selectedMonth}` : ''}`}
+            download
+            className="flex items-center space-x-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white shadow-md border border-emerald-500 transition-all cursor-pointer"
+            title="Download Single Worker Excel Report"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Excel</span>
+          </a>
+
           <button
             onClick={handlePrint}
             className="flex items-center space-x-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-blue-700 hover:bg-blue-600 text-white shadow-md border border-blue-500 transition-all cursor-pointer"
@@ -559,6 +572,36 @@ export default function WorkerDetail({
                   </>
                 )}
               </div>
+
+              {/* Month Switcher Pills inside Worker Detail */}
+              {availableMonths && availableMonths.length > 1 && onSelectMonth && (
+                <div className="flex items-center gap-1.5 mt-2.5 flex-wrap no-print">
+                  <span className="text-[11px] font-bold text-slate-400 mr-1">Active Month:</span>
+                  {availableMonths.map(m => (
+                    <button
+                      key={m.month_key}
+                      onClick={() => onSelectMonth(m.month_key)}
+                      className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selectedMonth === m.month_key
+                          ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                          : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                      }`}
+                    >
+                      {m.month_label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => onSelectMonth('all')}
+                    className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      selectedMonth === 'all'
+                        ? 'bg-blue-600 text-white border border-blue-400 shadow-sm'
+                        : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700'
+                    }`}
+                  >
+                    All Months
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

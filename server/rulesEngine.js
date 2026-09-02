@@ -681,18 +681,12 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [])
   const weeklyOffForfeiture = parseInt(settings.weekly_off_forfeiture_threshold || 4, 10);
   const monthlyAbsentForfeiture = parseInt(settings.monthly_absent_forfeiture_threshold || 4, 10);
 
-  // Count total monthly PURE absents (0h worked)
-  let totalMonthlyAbsents = 0;
-  dailyRecords.forEach(r => {
-    if (isPureAbsentForForfeiture(r)) totalMonthlyAbsents++;
-  });
-
-  // Step 1: Evaluate Weekly Forfeiture rules for each Sunday
+  // Step 1: Evaluate Weekly Forfeiture rules for each Sunday across continuous dates
   for (let i = 0; i < dailyRecords.length; i++) {
     const rec = dailyRecords[i];
     const isWeeklyOff = rec.weekday && rec.weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3));
 
-    if (isWeeklyOff && rec.status.includes('Weekly Off')) {
+    if (isWeeklyOff && (rec.status || '').includes('Weekly Off')) {
       // Don't forfeit Sunday if worker worked OT that day
       if (rec.status === 'Weekly Off (Worked OT)' || (rec.sundayOtHours && rec.sundayOtHours > 0) || (rec.sunday_ot_hours && rec.sunday_ot_hours > 0)) {
         rec.status = 'Weekly Off (Worked OT)';
@@ -707,7 +701,7 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [])
         if (isPureAbsentForForfeiture(prevRec)) {
           weeklyAbsentCount++;
           weeklyOffsInWeek++;
-        } else if (prevRec.status.includes('Weekly Off')) {
+        } else if ((prevRec.status || '').includes('Weekly Off')) {
           weeklyOffsInWeek++;
         }
       }
@@ -720,16 +714,30 @@ function applyWeeklyOffForfeiture(dailyRecords, settings = {}, customRules = [])
     }
   }
 
-  // Step 2: Monthly Forfeiture Rule (If 4+ absents in month, deduct 1 Paid Sunday from earned Sundays if worker has <= 1 forfeited Sunday)
-  if (totalMonthlyAbsents >= monthlyAbsentForfeiture) {
-    let forfeitedCount = dailyRecords.filter(r => r.status === 'Weekly Off (Forfeited)').length;
-    if (forfeitedCount <= 1) {
-      for (let i = 0; i < dailyRecords.length; i++) {
-        const rec = dailyRecords[i];
-        const isWeeklyOff = rec.weekday && rec.weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3));
-        if (isWeeklyOff && rec.status === 'Weekly Off (Paid)') {
-          rec.status = 'Weekly Off (Forfeited)';
-          break; // Forfeit 1 Paid Sunday!
+  // Step 2: Monthly Forfeiture Rule (Grouped strictly by calendar month YYYY-MM)
+  // If 4+ absents in a given month, deduct 1 Paid Sunday from earned Sundays in that same month if worker has <= 1 forfeited Sunday in that month
+  const recordsByMonth = new Map();
+  dailyRecords.forEach((r, idx) => {
+    const mKey = (r.date || '').slice(0, 7) || 'general';
+    if (!recordsByMonth.has(mKey)) recordsByMonth.set(mKey, []);
+    recordsByMonth.get(mKey).push({ record: r, originalIndex: idx });
+  });
+
+  for (const [mKey, mGroup] of recordsByMonth.entries()) {
+    let monthAbsents = 0;
+    mGroup.forEach(({ record: r }) => {
+      if (isPureAbsentForForfeiture(r)) monthAbsents++;
+    });
+
+    if (monthAbsents >= monthlyAbsentForfeiture) {
+      let monthForfeitedCount = mGroup.filter(({ record: r }) => r.status === 'Weekly Off (Forfeited)').length;
+      if (monthForfeitedCount <= 1) {
+        for (const { record: r } of mGroup) {
+          const isWeeklyOff = r.weekday && r.weekday.toLowerCase().startsWith(weeklyOffDay.toLowerCase().slice(0, 3));
+          if (isWeeklyOff && r.status === 'Weekly Off (Paid)') {
+            r.status = 'Weekly Off (Forfeited)';
+            break; // Forfeit 1 Paid Sunday in this month!
+          }
         }
       }
     }

@@ -146,10 +146,12 @@ export default function App() {
     }
   };
 
-  // Fetch detail for single worker
-  const fetchWorkerDetail = async (staffNo) => {
+  // Fetch detail for single worker (supporting current month filter)
+  const fetchWorkerDetail = async (staffNo, overrideMonth = null) => {
     try {
-      const res = await fetch(`/api/workers/${staffNo}`).then(r => r.json());
+      const monthToUse = overrideMonth !== null ? overrideMonth : selectedMonth;
+      const monthQuery = monthToUse && monthToUse !== 'all' ? `?month=${monthToUse}` : '';
+      const res = await fetch(`/api/workers/${staffNo}${monthQuery}`).then(r => r.json());
       if (res.success) {
         setSelectedWorkerData(res);
       }
@@ -161,7 +163,7 @@ export default function App() {
   // Select a worker to view details
   const handleSelectWorker = (staffNo) => {
     setSelectedStaffNo(staffNo);
-    fetchWorkerDetail(staffNo);
+    fetchWorkerDetail(staffNo, selectedMonth);
     setActiveTab('worker-detail');
   };
 
@@ -181,7 +183,11 @@ export default function App() {
       if (contentType.includes('application/json')) {
         const res = await response.json();
         if (res.success) {
-          await refreshData();
+          const uploadedMonth = res.detectedMonth?.monthKey || selectedMonth;
+          if (uploadedMonth && uploadedMonth !== 'all') {
+            setSelectedMonth(uploadedMonth);
+          }
+          await refreshData(uploadedMonth);
           setActiveTab('workers');
           setPreviewData(res);
         } else {
@@ -228,14 +234,20 @@ export default function App() {
     }
   };
 
-  // Add advance payment
-  const handleAddAdvance = async (staffNo, amount, note, date) => {
+  // Add advance payment (supports object or positional arguments)
+  const handleAddAdvance = async (staffNoOrObj, amount, note, date) => {
     setLoading(true);
+    let payload;
+    if (typeof staffNoOrObj === 'object' && staffNoOrObj !== null) {
+      payload = staffNoOrObj;
+    } else {
+      payload = { staff_no: staffNoOrObj, amount, note, date };
+    }
     try {
       const res = await fetch('/api/advances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staff_no: staffNo, amount, note, date }),
+        body: JSON.stringify(payload),
       }).then(r => r.json());
 
       if (res.success) {
@@ -368,6 +380,8 @@ export default function App() {
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
             onOpenIncompleteManager={handleOpenIncompleteManager}
             selectedMonth={selectedMonth}
+            availableMonths={availableMonths}
+            onSelectMonth={handleSelectMonth}
           />
         )}
 
@@ -403,6 +417,14 @@ export default function App() {
             isPayrollUnlocked={isPayrollUnlocked}
             onOpenUnlockModal={() => { setUnlockError(''); setShowUnlockModal(true); }}
             onRefreshData={refreshData}
+            selectedMonth={selectedMonth}
+            availableMonths={availableMonths}
+            onSelectMonth={(m) => {
+              handleSelectMonth(m);
+              if (selectedStaffNo) {
+                fetchWorkerDetail(selectedStaffNo, m);
+              }
+            }}
           />
         )}
 

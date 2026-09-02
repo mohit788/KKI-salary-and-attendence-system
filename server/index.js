@@ -690,14 +690,14 @@ async function recomputeAllAttendance() {
 
   for (const w of workersRes.rows) {
     const dailyRes = await execute(
-      `SELECT staff_no, date, weekday, raw_swipes, is_manual_override, status FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
+      `SELECT staff_no, date, weekday, raw_swipes, original_raw_swipes, manual_punches, is_manual_override, status FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
       [w.staff_no]
     );
 
     let recordsToCompute = dailyRes.rows;
     if (!recordsToCompute || recordsToCompute.length === 0) {
       const punchesRes = await execute(
-        `SELECT staff_no, date, weekday, swipe_record as raw_swipes, 0 as is_manual_override, 'Absent' as status FROM raw_punches WHERE staff_no = ? ORDER BY date ASC`,
+        `SELECT staff_no, date, weekday, swipe_record as raw_swipes, '' as original_raw_swipes, '' as manual_punches, 0 as is_manual_override, 'Absent' as status FROM raw_punches WHERE staff_no = ? ORDER BY date ASC`,
         [w.staff_no]
       );
       recordsToCompute = punchesRes.rows;
@@ -705,26 +705,53 @@ async function recomputeAllAttendance() {
     if (!recordsToCompute || recordsToCompute.length === 0) continue;
 
     const workerSettings = { ...settings, assigned_shift: w.assigned_shift || 'auto' };
+    const workerCustomRules = (customRules || []).filter(r => !r.target_staff_no || r.target_staff_no === 'all' || String(r.target_staff_no).trim() === String(w.staff_no).trim());
 
-    // Group records by month so leisure time is evaluated per month
+    // 1. Compute daily base attendance for each day
+    let dailyComputed = recordsToCompute.map(r => {
+      const { timestamps } = parseSwipeRecord(r.raw_swipes);
+      const isHoliday = !!paidHolidaysMap[r.date];
+      const holidayName = paidHolidaysMap[r.date] || '';
+      const attendance = computeDailyAttendance(
+        timestamps,
+        workerSettings,
+        r.weekday,
+        workerCustomRules,
+        workerSettings.assigned_shift || 'auto',
+        isHoliday,
+        holidayName
+      );
+      return {
+        ...r,
+        ...attendance,
+        status: r.is_manual_override === 1 ? r.status : attendance.status
+      };
+    });
+
+    // 2. Apply Monthly Leisure Grace (per calendar month)
     const recordsByMonth = new Map();
-    recordsToCompute.forEach(r => {
+    dailyComputed.forEach(r => {
       const mKey = (r.date || '').slice(0, 7) || 'general';
       if (!recordsByMonth.has(mKey)) recordsByMonth.set(mKey, []);
       recordsByMonth.get(mKey).push(r);
     });
 
-    const workerCustomRules = (customRules || []).filter(r => !r.target_staff_no || r.target_staff_no === 'all' || String(r.target_staff_no).trim() === String(w.staff_no).trim());
-
-    let allRecomputedRecords = [];
+    let leisureProcessed = [];
     for (const [mKey, mRecords] of recordsByMonth.entries()) {
       let mComputed = applyMonthlyLeisureGrace(mRecords, workerSettings, workerCustomRules, paidHolidaysMap);
-      mComputed = applyWeeklyOffForfeiture(mComputed, workerSettings, workerCustomRules);
-      mComputed = applyPaidHolidayForfeiture(mComputed, workerSettings);
-      allRecomputedRecords.push(...mComputed);
+      leisureProcessed.push(...mComputed);
     }
 
-    for (const d of allRecomputedRecords) {
+    // Sort chronologically across all months
+    leisureProcessed.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    // 3. Apply Weekly Off Forfeiture with cross-month continuous sequence
+    let weeklyOffProcessed = applyWeeklyOffForfeiture(leisureProcessed, workerSettings, workerCustomRules);
+
+    // 4. Apply Paid Holiday Forfeiture with continuous sequence
+    let finalProcessed = applyPaidHolidayForfeiture(weeklyOffProcessed, workerSettings);
+
+    for (const d of finalProcessed) {
       await execute(
         `UPDATE daily_attendance SET
            effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?,
@@ -732,13 +759,13 @@ async function recomputeAllAttendance() {
            status = CASE WHEN is_manual_override = 1 THEN status ELSE ? END
          WHERE staff_no = ? AND date = ?`,
         [
-          d.effectiveIn || '',
-          d.effectiveOut || '',
-          d.regularHours || 0,
-          d.otHours || 0,
-          d.sundayOtHours || 0,
-          d.totalHours || 0,
-          d.lateMinutes || 0,
+          d.effectiveIn || d.effective_in || '',
+          d.effectiveOut || d.effective_out || '',
+          d.regularHours || d.regular_hours || 0,
+          d.otHours || d.ot_hours || 0,
+          d.sundayOtHours || d.sunday_ot_hours || 0,
+          d.totalHours || d.total_hours || 0,
+          d.lateMinutes || d.late_minutes || 0,
           d.shift || '08:00',
           d.status || 'Absent',
           d.staff_no,
@@ -858,6 +885,8 @@ app.get('/api/workers', async (req, res) => {
     const { month } = req.query;
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
+
+    const isMonthFiltered = month && month !== 'all';
     let attQuery = `
       SELECT d.*, r.swipe_record as original_raw_swipes 
       FROM daily_attendance d 
@@ -867,7 +896,7 @@ app.get('/api/workers', async (req, res) => {
     const attParams = [];
     const advParams = [];
 
-    if (month && month !== 'all') {
+    if (isMonthFiltered) {
       attQuery += ` WHERE d.date LIKE ?`;
       attParams.push(`${month}%`);
       advQuery += ` WHERE date LIKE ?`;
@@ -876,9 +905,24 @@ app.get('/api/workers', async (req, res) => {
     attQuery += ` ORDER BY d.staff_no, d.date ASC`;
     advQuery += ` ORDER BY staff_no, date DESC`;
 
-    // Batch fetch all data in parallel
-    const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
-      execute(`
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
@@ -895,7 +939,11 @@ app.get('/api/workers', async (req, res) => {
         ) d
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
-      `),
+      `;
+
+    // Batch fetch all data in parallel
+    const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
       execute(attQuery, attParams),
       execute(advQuery, advParams)
     ]);
@@ -935,6 +983,7 @@ app.get('/api/workers', async (req, res) => {
         ...w,
         payroll,
         recordCount: dailyRecords.length,
+        dailyRecords,
       };
     });
 
@@ -944,10 +993,11 @@ app.get('/api/workers', async (req, res) => {
   }
 });
 
-// 6. GET Single Worker Detail
+// 6. GET Single Worker Detail (with optional ?month=YYYY-MM)
 app.get('/api/workers/:staff_no', async (req, res) => {
   try {
     const { staff_no } = req.params;
+    const { month } = req.query;
     const settings = await getSettingsMap();
 
     const workerRes = await execute(`SELECT * FROM workers WHERE staff_no = ?`, [staff_no]);
@@ -956,26 +1006,34 @@ app.get('/api/workers/:staff_no', async (req, res) => {
     }
     const worker = workerRes.rows[0];
 
-    const attRes = await execute(
-      `SELECT d.*, r.swipe_record as original_raw_swipes 
-       FROM daily_attendance d
-       LEFT JOIN raw_punches r ON d.staff_no = r.staff_no AND d.date = r.date
-       WHERE d.staff_no = ? 
-       ORDER BY d.date ASC`,
-      [staff_no]
-    );
+    const isMonthFiltered = month && month !== 'all';
+    let attQuery = `
+      SELECT d.*, r.swipe_record as original_raw_swipes 
+      FROM daily_attendance d
+      LEFT JOIN raw_punches r ON d.staff_no = r.staff_no AND d.date = r.date
+      WHERE d.staff_no = ?
+    `;
+    let advQuery = `SELECT * FROM advances WHERE staff_no = ?`;
+    const attParams = [staff_no];
+    const advParams = [staff_no];
 
-    const advRes = await execute(
-      `SELECT * FROM advances WHERE staff_no = ? ORDER BY date DESC`,
-      [staff_no]
-    );
+    if (isMonthFiltered) {
+      attQuery += ` AND d.date LIKE ?`;
+      attParams.push(`${month}%`);
+      advQuery += ` AND date LIKE ?`;
+      advParams.push(`${month}%`);
+    }
 
-    const auditRes = await execute(
-      `SELECT * FROM audit_logs WHERE staff_no = ? ORDER BY created_at DESC`,
-      [staff_no]
-    );
+    attQuery += ` ORDER BY d.date ASC`;
+    advQuery += ` ORDER BY date DESC`;
 
-    const salaryRules = await getSalaryRules();
+    const [attRes, advRes, auditRes, salaryRules] = await Promise.all([
+      execute(attQuery, attParams),
+      execute(advQuery, advParams),
+      execute(`SELECT * FROM audit_logs WHERE staff_no = ? ORDER BY created_at DESC`, [staff_no]),
+      getSalaryRules()
+    ]);
+
     const payroll = calculateWorkerPayroll({
       staffNo: worker.staff_no,
       monthlySalary: worker.monthly_salary,
@@ -995,6 +1053,7 @@ app.get('/api/workers/:staff_no', async (req, res) => {
       advances: advRes.rows,
       auditLogs: auditRes.rows,
       payroll,
+      selectedMonth: month || 'all'
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1179,24 +1238,32 @@ app.post('/api/attendance/edit', async (req, res) => {
   }
 });
 
-// GET All Incomplete Attendance Records (For Fast-Fix Center)
+// GET All Incomplete Attendance Records (For Fast-Fix Center, optional ?month=YYYY-MM)
 app.get('/api/attendance/incomplete', async (req, res) => {
   try {
+    const { month } = req.query;
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
 
-    const allRecords = await execute(`
+    let query = `
       SELECT 
         d.*, 
         w.staff_name, 
         w.department 
       FROM daily_attendance d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
-      WHERE d.status = 'Incomplete' 
+      WHERE (d.status = 'Incomplete' 
          OR d.status LIKE '%Incomplete%'
-         OR (d.raw_swipes != '' AND d.raw_swipes IS NOT NULL AND d.is_manual_override = 0)
-      ORDER BY d.date ASC, CAST(d.staff_no AS INTEGER) ASC
-    `);
+         OR (d.raw_swipes != '' AND d.raw_swipes IS NOT NULL AND d.is_manual_override = 0))
+    `;
+    const params = [];
+    if (month && month !== 'all') {
+      query += ` AND d.date LIKE ? `;
+      params.push(`${month}%`);
+    }
+    query += ` ORDER BY d.date ASC, CAST(d.staff_no AS INTEGER) ASC `;
+
+    const allRecords = await execute(query, params);
 
     const trueIncomplete = [];
     const seenKeys = new Set();
@@ -1438,6 +1505,43 @@ app.get('/api/audit-logs', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+// Helper: Verified true incomplete count (optional ?month=YYYY-MM)
+async function getTrueIncompleteCount(month) {
+  let query = `
+    SELECT d.staff_no, d.date, d.raw_swipes, d.status, d.is_manual_override
+    FROM daily_attendance d
+    WHERE (d.status = 'Incomplete' 
+       OR d.status LIKE '%Incomplete%'
+       OR (d.raw_swipes != '' AND d.raw_swipes IS NOT NULL AND d.is_manual_override = 0))
+  `;
+  const params = [];
+  if (month && month !== 'all') {
+    query += ` AND d.date LIKE ? `;
+    params.push(`${month}%`);
+  }
+
+  const allRecords = await execute(query, params);
+  let trueIncomplete = 0;
+  const seenKeys = new Set();
+
+  for (const r of allRecords.rows) {
+    if (r.is_manual_override === 1 && !r.status.includes('Incomplete')) {
+      continue;
+    }
+    const rowKey = `${r.staff_no}_${r.date}`;
+    if (seenKeys.has(rowKey)) continue;
+    seenKeys.add(rowKey);
+
+    const { timestamps } = parseSwipeRecord(r.raw_swipes);
+    const cleaned = cleanAndDebouncePunches(timestamps, 5);
+
+    if (cleaned.length % 2 !== 0) {
+      trueIncomplete++;
+    }
+  }
+
+  return trueIncomplete;
+}
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -1484,29 +1588,33 @@ app.get('/api/dashboard', async (req, res) => {
     const salaryRules = await getSalaryRules();
     const { month } = req.query;
 
-    let dateCond = '';
-    const dateParams = [];
-    if (month && month !== 'all') {
-      dateCond = ` WHERE date LIKE ? `;
-      dateParams.push(`${month}%`);
-    }
-
+    const isMonthFiltered = month && month !== 'all';
+    const dateCond = isMonthFiltered ? ` WHERE date LIKE ? ` : '';
+    const dateParams = isMonthFiltered ? [`${month}%`] : [];
     const whereDaily = dateCond;
     const whereAdvances = dateCond;
-    const whereBounds = dateCond ? `${dateCond} AND date IS NOT NULL AND date != ''` : `WHERE date IS NOT NULL AND date != ''`;
+    const whereBounds = isMonthFiltered 
+      ? `WHERE date LIKE ? AND date IS NOT NULL AND date != ''` 
+      : `WHERE date IS NOT NULL AND date != ''`;
 
-    // Execute all count queries in parallel
-    const [workersCountRes, recordsCountRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
-      execute(`
-        SELECT COUNT(DISTINCT staff_no) as cnt FROM (
-          SELECT staff_no FROM workers
-          UNION
-          SELECT DISTINCT staff_no FROM daily_attendance ${whereDaily}
-        )
-      `, dateParams),
-      execute(`SELECT COUNT(*) as cnt FROM daily_attendance ${whereDaily}`, dateParams),
-      execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance ${whereDaily} GROUP BY status`, dateParams),
-      execute(`
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
@@ -1517,23 +1625,59 @@ app.get('/api/dashboard', async (req, res) => {
           COALESCE(w.other_allowance, 0) as other_allowance,
           COALESCE(w.assigned_shift, 'auto') as assigned_shift
         FROM (
-          SELECT DISTINCT staff_no FROM daily_attendance ${whereDaily}
+          SELECT DISTINCT staff_no FROM daily_attendance
           UNION
           SELECT staff_no FROM workers
         ) d
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
-      `, dateParams),
+      `;
+
+    const workersCountSql = isMonthFiltered
+      ? `SELECT COUNT(DISTINCT staff_no) as cnt FROM daily_attendance WHERE date LIKE ?`
+      : `
+        SELECT COUNT(DISTINCT staff_no) as cnt FROM (
+          SELECT staff_no FROM workers
+          UNION
+          SELECT DISTINCT staff_no FROM daily_attendance
+        )
+      `;
+
+    // Execute all count queries in parallel
+    const [workersCountRes, recordsCountRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
+      execute(workersCountSql, isMonthFiltered ? [`${month}%`] : []),
+      execute(`SELECT COUNT(*) as cnt FROM daily_attendance ${whereDaily}`, dateParams),
+      execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance ${whereDaily} GROUP BY status`, dateParams),
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
       execute(`SELECT * FROM daily_attendance ${whereDaily} ORDER BY staff_no`, dateParams),
       execute(`SELECT * FROM advances ${whereAdvances} ORDER BY staff_no`, dateParams),
-      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance ${whereBounds}`, dateParams)
+      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance ${whereBounds}`, isMonthFiltered ? [`${month}%`] : [])
     ]);
 
-    const totalWorkers = workersCountRes.rows[0].cnt;
-    const totalRecords = recordsCountRes.rows[0].cnt;
+    const totalWorkers = workersCountRes.rows[0]?.cnt || 0;
+    const totalRecords = recordsCountRes.rows[0]?.cnt || 0;
     const minDate = dateBoundsRes.rows[0]?.min_date || '';
     const maxDate = dateBoundsRes.rows[0]?.max_date || '';
-    const activeMonth = detectActiveMonthDetails(minDate, maxDate);
+
+    let activeMonth;
+    if (isMonthFiltered && (!minDate || !maxDate)) {
+      const parts = month.split('-');
+      const y = parts[0];
+      const mNum = parseInt(parts[1], 10);
+      const name = (mNum >= 1 && mNum <= 12) ? MONTH_NAMES[mNum - 1] : month;
+      const totalDays = new Date(parseInt(y, 10), mNum, 0).getDate();
+      activeMonth = {
+        monthKey: month,
+        monthName: name,
+        year: y,
+        label: `${name} ${y}`,
+        startDate: `${month}-01`,
+        endDate: `${month}-${String(totalDays).padStart(2, '0')}`,
+        totalDays
+      };
+    } else {
+      activeMonth = detectActiveMonthDetails(minDate, maxDate);
+    }
 
     // Calculate verified true incomplete count
     const incompleteCount = await getTrueIncompleteCount(month);
@@ -1565,6 +1709,7 @@ app.get('/api/dashboard', async (req, res) => {
       const advances = advancesMap.get(w.staff_no) || [];
 
       const p = calculateWorkerPayroll({
+        staffNo: w.staff_no,
         monthlySalary: w.monthly_salary,
         housingAllowance: w.housing_allowance,
         foodAllowance: w.food_allowance,
@@ -1601,28 +1746,78 @@ app.get('/api/dashboard', async (req, res) => {
 // 11. POST Google Sheets Live Sync (OPTIMIZED)
 app.post('/api/google-sheets/sync', async (req, res) => {
   try {
-    const { webhook_url } = req.body;
+    const { webhook_url, month } = req.body;
     if (!webhook_url) {
-      return res.status(400).json({ success: false, error: 'Google Sheets Webhook URL is required.' });
+      return res.status(400).json({ success: false, error: 'webhook_url is required.' });
     }
 
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
+    const isMonthFiltered = month && month !== 'all';
+
+    let attQuery = `SELECT * FROM daily_attendance`;
+    let advQuery = `SELECT * FROM advances`;
+    const attParams = [];
+    const advParams = [];
+
+    if (isMonthFiltered) {
+      attQuery += ` WHERE date LIKE ?`;
+      attParams.push(`${month}%`);
+      advQuery += ` WHERE date LIKE ?`;
+      advParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY staff_no, date ASC`;
+    advQuery += ` ORDER BY staff_no, date DESC`;
+
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
+        SELECT 
+          COALESCE(w.staff_no, d.staff_no) as staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance
+          UNION
+          SELECT staff_no FROM workers
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `;
 
     const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
-      execute(`SELECT * FROM workers ORDER BY CAST(staff_no AS INTEGER) ASC`),
-      execute(`SELECT * FROM daily_attendance ORDER BY staff_no`),
-      execute(`SELECT * FROM advances ORDER BY staff_no`)
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
+      execute(attQuery, attParams),
+      execute(advQuery, advParams)
     ]);
 
     const attendanceMap = new Map();
-    const advancesMap = new Map();
-
     allAttendanceRes.rows.forEach(r => {
       if (!attendanceMap.has(r.staff_no)) attendanceMap.set(r.staff_no, []);
       attendanceMap.get(r.staff_no).push(r);
     });
 
+    const advancesMap = new Map();
     allAdvancesRes.rows.forEach(r => {
       if (!advancesMap.has(r.staff_no)) advancesMap.set(r.staff_no, []);
       advancesMap.get(r.staff_no).push(r);
@@ -1633,6 +1828,7 @@ app.post('/api/google-sheets/sync', async (req, res) => {
       const advances = advancesMap.get(w.staff_no) || [];
 
       const payroll = calculateWorkerPayroll({
+        staffNo: w.staff_no,
         monthlySalary: w.monthly_salary,
         housingAllowance: w.housing_allowance,
         foodAllowance: w.food_allowance,
@@ -1681,22 +1877,23 @@ function formatAndAutoFitWorksheet(worksheet, dataAoA) {
 // 12. GET Export Full Factory Attendance & OT Excel Sheet (Clean & Formatted, optional ?month=YYYY-MM)
 app.get('/api/export/excel', async (req, res) => {
   try {
-    const incompleteCount = await getTrueIncompleteCount();
+    const { month } = req.query;
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
     }
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
     const salaryRules = await getSalaryRules();
-    const { month } = req.query;
+    const isMonthFiltered = month && month !== 'all';
 
     let attQuery = `SELECT * FROM daily_attendance`;
     let advQuery = `SELECT * FROM advances`;
     const attParams = [];
     const advParams = [];
 
-    if (month && month !== 'all') {
+    if (isMonthFiltered) {
       attQuery += ` WHERE date LIKE ?`;
       attParams.push(`${month}%`);
       advQuery += ` WHERE date LIKE ?`;
@@ -1705,8 +1902,24 @@ app.get('/api/export/excel', async (req, res) => {
     attQuery += ` ORDER BY staff_no, date ASC`;
     advQuery += ` ORDER BY staff_no, date DESC`;
 
-    const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
-      execute(`
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary,
+          COALESCE(w.housing_allowance, 0) as housing_allowance,
+          COALESCE(w.food_allowance, 0) as food_allowance,
+          COALESCE(w.other_allowance, 0) as other_allowance,
+          COALESCE(w.assigned_shift, 'auto') as assigned_shift
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
@@ -1723,7 +1936,10 @@ app.get('/api/export/excel', async (req, res) => {
         ) d
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
-      `),
+      `;
+
+    const [workersRes, allAttendanceRes, allAdvancesRes] = await Promise.all([
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
       execute(attQuery, attParams),
       execute(advQuery, advParams)
     ]);
@@ -1755,6 +1971,9 @@ app.get('/api/export/excel', async (req, res) => {
       const p = calculateWorkerPayroll({
         staffNo: w.staff_no,
         monthlySalary: w.monthly_salary,
+        housingAllowance: w.housing_allowance,
+        foodAllowance: w.food_allowance,
+        otherAllowance: w.other_allowance,
         dailyRecords,
         advances,
         settings,
@@ -1817,7 +2036,7 @@ app.get('/api/export/excel', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Punch Breakdown');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const fileSuffix = month && month !== 'all' ? `_${month}` : '';
+    const fileSuffix = isMonthFiltered ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Factory_Attendance_and_Overtime_Report${fileSuffix}.xlsx"`);
@@ -1827,17 +2046,18 @@ app.get('/api/export/excel', async (req, res) => {
   }
 });
 
-// 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet
+// 12b. GET Export Dedicated All Employees Daily Biometric Timings Excel Sheet (optional ?month=YYYY-MM)
 app.get('/api/export/excel/timings', async (req, res) => {
   try {
-    const incompleteCount = await getTrueIncompleteCount();
+    const { month } = req.query;
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
     }
 
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
-    const { month } = req.query;
+    const isMonthFiltered = month && month !== 'all';
 
     let query = `
       SELECT 
@@ -1848,7 +2068,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
       LEFT JOIN workers w ON d.staff_no = w.staff_no
     `;
     const params = [];
-    if (month && month !== 'all') {
+    if (isMonthFiltered) {
       query += ` WHERE d.date LIKE ? `;
       params.push(`${month}%`);
     }
@@ -1892,7 +2112,7 @@ app.get('/api/export/excel/timings', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Biometric Timings');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const fileSuffix = month && month !== 'all' ? `_${month}` : '';
+    const fileSuffix = isMonthFiltered ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="All_Employees_Daily_Biometric_Timings${fileSuffix}.xlsx"`);
@@ -1902,27 +2122,40 @@ app.get('/api/export/excel/timings', async (req, res) => {
   }
 });
 
-// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime)
+// 12c. GET Export Concise 5-Column Executive Attendance & Overtime Report (Worker ID, Name, Payable Days, Absent Days, Overtime, optional ?month=YYYY-MM)
 app.get('/api/export/excel/summary', async (req, res) => {
   try {
-    const incompleteCount = await getTrueIncompleteCount();
+    const { month } = req.query;
+    const incompleteCount = await getTrueIncompleteCount(month);
     if (incompleteCount > 0) {
-      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
+      return res.status(400).send(`Excel Download Locked: There are ${incompleteCount} incomplete attendance records in ${month && month !== 'all' ? month : 'database'}. Please resolve missing punches in Fast-Fix Center before downloading reports.`);
     }
 
     const settings = await getSettingsMap();
-    const { month } = req.query;
+    const isMonthFiltered = month && month !== 'all';
 
     let attQuery = `SELECT * FROM daily_attendance`;
     const attParams = [];
-    if (month && month !== 'all') {
+    if (isMonthFiltered) {
       attQuery += ` WHERE date LIKE ?`;
       attParams.push(`${month}%`);
     }
     attQuery += ` ORDER BY staff_no, date ASC`;
 
-    const [workersRes, allAttendanceRes] = await Promise.all([
-      execute(`
+    const workersSql = isMonthFiltered
+      ? `
+        SELECT 
+          d.staff_no,
+          COALESCE(w.staff_name, d.staff_no) as staff_name,
+          COALESCE(w.department, 'WORKER') as department,
+          COALESCE(w.monthly_salary, 15000) as monthly_salary
+        FROM (
+          SELECT DISTINCT staff_no FROM daily_attendance WHERE date LIKE ?
+        ) d
+        LEFT JOIN workers w ON d.staff_no = w.staff_no
+        ORDER BY CAST(d.staff_no AS INTEGER) ASC
+      `
+      : `
         SELECT 
           COALESCE(w.staff_no, d.staff_no) as staff_no,
           COALESCE(w.staff_name, d.staff_no) as staff_name,
@@ -1935,7 +2168,10 @@ app.get('/api/export/excel/summary', async (req, res) => {
         ) d
         LEFT JOIN workers w ON d.staff_no = w.staff_no
         ORDER BY CAST(d.staff_no AS INTEGER) ASC
-      `),
+      `;
+
+    const [workersRes, allAttendanceRes] = await Promise.all([
+      execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
       execute(attQuery, attParams)
     ]);
 
@@ -2010,7 +2246,7 @@ app.get('/api/export/excel/summary', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance & OT Summary');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-    const fileSuffix = month && month !== 'all' ? `_${month}` : '';
+    const fileSuffix = isMonthFiltered ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="Executive_Attendance_and_OT_Summary${fileSuffix}.xlsx"`);
@@ -2020,35 +2256,54 @@ app.get('/api/export/excel/summary', async (req, res) => {
   }
 });
 
-// 13. GET Export Single Worker Excel Sheet
+// 13. GET Export Single Worker Excel Sheet (optional ?month=YYYY-MM)
 app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
   try {
     const { staff_no } = req.params;
+    const { month } = req.query;
     const settings = await getSettingsMap();
     const customRules = await getCustomRules();
+    const isMonthFiltered = month && month !== 'all';
 
     const workerRes = await execute(`
       SELECT 
         COALESCE(w.staff_no, ?) as staff_no,
         COALESCE(w.staff_name, ?) as staff_name,
         COALESCE(w.department, 'WORKER') as department,
-        COALESCE(w.monthly_salary, 15000) as monthly_salary
+        COALESCE(w.monthly_salary, 15000) as monthly_salary,
+        COALESCE(w.housing_allowance, 0) as housing_allowance,
+        COALESCE(w.food_allowance, 0) as food_allowance,
+        COALESCE(w.other_allowance, 0) as other_allowance
       FROM (SELECT ? as staff_no) d
       LEFT JOIN workers w ON d.staff_no = w.staff_no
     `, [staff_no, staff_no, staff_no]);
     const w = workerRes.rows[0] || { staff_no, staff_name: staff_no, department: 'WORKER', monthly_salary: 15000 };
 
-    const attRes = await execute(
-      `SELECT * FROM daily_attendance WHERE staff_no = ? ORDER BY date ASC`,
-      [staff_no]
-    );
-    const advRes = await execute(
-      `SELECT * FROM advances WHERE staff_no = ? ORDER BY date DESC`,
-      [staff_no]
-    );
+    let attQuery = `SELECT * FROM daily_attendance WHERE staff_no = ?`;
+    let advQuery = `SELECT * FROM advances WHERE staff_no = ?`;
+    const attParams = [staff_no];
+    const advParams = [staff_no];
+
+    if (isMonthFiltered) {
+      attQuery += ` AND date LIKE ?`;
+      attParams.push(`${month}%`);
+      advQuery += ` AND date LIKE ?`;
+      advParams.push(`${month}%`);
+    }
+    attQuery += ` ORDER BY date ASC`;
+    advQuery += ` ORDER BY date DESC`;
+
+    const [attRes, advRes] = await Promise.all([
+      execute(attQuery, attParams),
+      execute(advQuery, advParams)
+    ]);
 
     const p = calculateWorkerPayroll({
+      staffNo: w.staff_no,
       monthlySalary: w.monthly_salary,
+      housingAllowance: w.housing_allowance,
+      foodAllowance: w.food_allowance,
+      otherAllowance: w.other_allowance,
       dailyRecords: attRes.rows,
       advances: advRes.rows,
       settings,
@@ -2092,9 +2347,10 @@ app.get('/api/export/excel/worker/:staff_no', async (req, res) => {
     XLSX.utils.book_append_sheet(wb, wsDaily, 'Daily Biometric Swipes');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileSuffix = isMonthFiltered ? `_${month}` : '';
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="Worker_${staff_no}_${w.staff_name.replace(/\s+/g, '_')}_Attendance.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Worker_${staff_no}_${(w.staff_name || staff_no).replace(/\s+/g, '_')}${fileSuffix}_Attendance.xlsx"`);
     res.send(buffer);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
