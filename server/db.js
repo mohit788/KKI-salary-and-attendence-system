@@ -150,7 +150,7 @@ async function initDatabase() {
       short_hours_threshold REAL DEFAULT 4.0,
       weekly_off_day TEXT DEFAULT 'Sun',
       forfeiture_absent_threshold INTEGER DEFAULT 2,
-      standard_month_days TEXT DEFAULT '26',
+      standard_month_days TEXT DEFAULT 'calendar',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
 
@@ -313,13 +313,16 @@ async function initDatabase() {
     );
   }
 
-  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, or leisure_mins_allowed 2
+  // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, leisure_mins_allowed 2, or standard_month_days 26
   try {
     await execute(`UPDATE settings SET value = '08:00' WHERE key = 'shift_start' AND value = '08:30'`);
     await execute(`UPDATE settings SET value = '30' WHERE key = 'lunch_deduction_mins' AND value = '0'`);
     await execute(`UPDATE settings SET value = '3' WHERE key = 'forfeiture_absent_threshold' AND (value = '2' OR value IS NULL)`);
     await execute(`UPDATE settings SET value = '4' WHERE key = 'monthly_absent_forfeiture_threshold' AND (value = '5' OR value IS NULL)`);
     await execute(`UPDATE settings SET value = '5' WHERE key = 'leisure_mins_allowed' AND (value = '2' OR value IS NULL)`);
+    await execute(`UPDATE settings SET value = 'calendar' WHERE key = 'standard_month_days' AND value = '26'`);
+    await execute(`UPDATE settings SET value = '1.5' WHERE key = 'ot_multiplier' AND value = '1'`);
+    await execute(`UPDATE rule_profiles SET standard_month_days = 'calendar' WHERE standard_month_days = '26'`);
   } catch (e) {}
 
   // Insert default Rule Profile if rule_profiles table is empty
@@ -327,7 +330,7 @@ async function initDatabase() {
   if (profilesCountRes.rows[0].cnt === 0) {
     await execute(
       `INSERT INTO rule_profiles (profile_name, is_default, shift_start, shift_end, grace_slab_minutes, ot_multiplier, ot_rounding, short_hours_threshold, weekly_off_day, forfeiture_absent_threshold, standard_month_days)
-       VALUES (?, 1, '08:00', '16:30', 30, 1.5, 'minutes', 4.0, 'Sun', 3, '26')`,
+       VALUES (?, 1, '08:00', '16:30', 30, 1.5, 'minutes', 4.0, 'Sun', 3, 'calendar')`,
       ['Standard Factory Rules (08:00 - 16:30 | 8h Duty + 30m Lunch)']
     );
   }

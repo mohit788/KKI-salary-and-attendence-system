@@ -52,7 +52,7 @@ export default function SettingsPanel({
     short_hours_threshold: '4.0',
     weekly_off_day: 'Sun',
     forfeiture_absent_threshold: '3',
-    standard_month_days: '26',
+    standard_month_days: 'calendar',
     max_ot_hours: '0',
     lunch_deduction_mins: '30',
     late_penalty_threshold_mins: '120',

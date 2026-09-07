@@ -266,7 +266,7 @@ app.post('/api/rule-profiles', async (req, res) => {
       short_hours_threshold = 4.0,
       weekly_off_day = 'Sun',
       forfeiture_absent_threshold = 3,
-      standard_month_days = '26',
+      standard_month_days = 'calendar',
     } = req.body;
 
     if (!profile_name) {
