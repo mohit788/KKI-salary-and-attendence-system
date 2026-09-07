@@ -346,6 +346,58 @@ async function buildExecutiveSummaryReport({ month, workers, attendanceMap, sett
 }
 
 // ==========================================
+// HELPER: DETECT MANUAL IN / OUT TIMINGS
+// ==========================================
+/**
+ * Helper to determine whether In Time, Out Time, or both were manually added/fixed.
+ * Returns { isInManual: boolean, isOutManual: boolean }
+ */
+function getManualTimingStatus(r) {
+  if (!r || (r.is_manual_override !== 1 && (!r.manual_punches || r.manual_punches.trim() === ''))) {
+    return { isInManual: false, isOutManual: false };
+  }
+
+  const rawTokens = (r.raw_swipes || '').split(/\s+/).filter(t => /^\d{1,2}:\d{2}$/.test(t) && t !== '00:00');
+  const origTokens = (r.original_raw_swipes || '').split(/\s+/).filter(t => /^\d{1,2}:\d{2}$/.test(t) && t !== '00:00');
+  const manualTokens = (r.manual_punches || '').split(/\s+/).filter(t => /^\d{1,2}:\d{2}$/.test(t) && t !== '00:00');
+  const reason = (r.override_reason || '').toLowerCase();
+
+  // If no valid raw swipes, check if effective_in / effective_out were directly set manually
+  if (rawTokens.length === 0) {
+    const hasIn = r.effective_in && r.effective_in !== '—' && r.effective_in !== '00:00';
+    const hasOut = r.effective_out && r.effective_out !== '—' && r.effective_out !== '00:00';
+    return { isInManual: Boolean(hasIn), isOutManual: Boolean(hasOut) };
+  }
+
+  // If original had no valid swipes (e.g. absent or 00:00) but rawTokens now has punches
+  if (origTokens.length === 0 && rawTokens.length > 0) {
+    return {
+      isInManual: true,
+      isOutManual: rawTokens.length > 1
+    };
+  }
+
+  const firstRaw = rawTokens[0];
+  const lastRaw = rawTokens.length > 1 ? rawTokens[rawTokens.length - 1] : null;
+
+  const firstInOrig = origTokens.includes(firstRaw);
+  const lastInOrig = lastRaw ? origTokens.includes(lastRaw) : false;
+
+  let isInManual = !firstInOrig;
+  let isOutManual = lastRaw ? !lastInOrig : false;
+
+  // Check override reason clues
+  if (reason.includes('missing in added')) isInManual = true;
+  if (reason.includes('missing out added')) isOutManual = true;
+  if (reason.includes('both punches added') || reason.includes('full shift filled')) {
+    isInManual = true;
+    isOutManual = true;
+  }
+
+  return { isInManual, isOutManual };
+}
+
+// ==========================================
 // 2. REPORT 2: BIOMETRIC TIMINGS REPORT (NO DEPARTMENT / NO SHIFT)
 // ==========================================
 async function buildBiometricTimingsReport({ month, records, settings, customRules }) {
@@ -359,8 +411,24 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
     { key: 'date', header: 'Date', align: 'center', type: 'date', minWidth: 14 },
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
     { key: 'raw_swipes', header: 'Punches', align: 'left', minWidth: 24, type: 'text_left' },
-    { key: 'effective_in', header: 'In Time', align: 'center', minWidth: 12, bold: true },
-    { key: 'effective_out', header: 'Out Time', align: 'center', minWidth: 12, bold: true },
+    {
+      key: 'effective_in',
+      header: 'In Time',
+      align: 'center',
+      minWidth: 12,
+      bold: true,
+      highlight: (val, row) => (row?.is_in_manual && val && val !== '—') ? 'FEF08A' : null,
+      textColor: (val, row) => (row?.is_in_manual && val && val !== '—') ? '854D0E' : '0F172A'
+    },
+    {
+      key: 'effective_out',
+      header: 'Out Time',
+      align: 'center',
+      minWidth: 12,
+      bold: true,
+      highlight: (val, row) => (row?.is_out_manual && val && val !== '—') ? 'FEF08A' : null,
+      textColor: (val, row) => (row?.is_out_manual && val && val !== '—') ? '854D0E' : '0F172A'
+    },
     { key: 'regular_hours', header: 'Duty Hours (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
     { key: 'ot_hours', header: 'Weekday OT', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
     { key: 'sunday_ot_hours', header: 'Sunday/Off OT', align: 'right', type: 'number', decimals: 2, minWidth: 15 },
@@ -380,13 +448,21 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
         return null;
       }
     },
-    { key: 'punch_type', header: 'Punch Type', align: 'center', minWidth: 18 }
+    {
+      key: 'punch_type',
+      header: 'Punch Type',
+      align: 'center',
+      minWidth: 20,
+      bold: true,
+      highlight: (v, row) => (row?.is_in_manual || row?.is_out_manual || row?.is_manual_override) ? 'FEF9C3' : null,
+      textColor: (v, row) => (row?.is_in_manual || row?.is_out_manual || row?.is_manual_override) ? '854D0E' : '475569'
+    }
   ];
 
   const sheetConfig = createStyledSheet(wb, 'Biometric Daily Timings', {
     theme: THEMES.BLUE,
     title: 'Daily Biometric Timings & Punch Sheet',
-    subtitle: `KKI Factory Attendance Management — ${monthLabel}`,
+    subtitle: `KKI Factory Attendance Management — ${monthLabel} | ⚡ Yellow highlight indicates manual punch timing override`,
     columns
   });
 
@@ -401,6 +477,18 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
     totOt += totalOt;
     totWorked += parseFloat(r.total_hours || 0);
     totLate += parseInt(r.late_minutes || 0, 10);
+
+    const manualStatus = getManualTimingStatus(r);
+    let punchType = 'Biometric';
+    if (manualStatus.isInManual && manualStatus.isOutManual) {
+      punchType = 'Manual Fixed (IN & OUT)';
+    } else if (manualStatus.isInManual) {
+      punchType = 'Manual Fixed (IN)';
+    } else if (manualStatus.isOutManual) {
+      punchType = 'Manual Fixed (OUT)';
+    } else if (r.is_manual_override === 1) {
+      punchType = 'Manual Fixed';
+    }
 
     rows.push({
       staff_no: r.staff_no,
@@ -417,7 +505,10 @@ async function buildBiometricTimingsReport({ month, records, settings, customRul
       total_hours: parseFloat(r.total_hours || 0),
       late_minutes: parseInt(r.late_minutes || 0, 10),
       status: r.status || 'Absent',
-      punch_type: r.is_manual_override === 1 ? 'Manual Fixed' : 'Biometric'
+      punch_type: punchType,
+      is_in_manual: manualStatus.isInManual,
+      is_out_manual: manualStatus.isOutManual,
+      is_manual_override: r.is_manual_override === 1
     });
   });
 
@@ -1208,8 +1299,24 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
     { key: 'weekday', header: 'Day', align: 'center', minWidth: 10 },
     { key: 'original_swipes', header: 'Original Machine Punches', align: 'left', minWidth: 26, type: 'text_left', textColor: () => '991B1B' },
     { key: 'fixed_timing', header: 'Corrected Timings Filled', align: 'left', minWidth: 26, type: 'text_left', bold: true, textColor: () => '065F46', highlight: () => 'DCFCE7' },
-    { key: 'effective_in', header: 'In Time', align: 'center', minWidth: 12 },
-    { key: 'effective_out', header: 'Out Time', align: 'center', minWidth: 12 },
+    {
+      key: 'effective_in',
+      header: 'In Time',
+      align: 'center',
+      minWidth: 12,
+      bold: true,
+      highlight: (val, row) => (row?.is_in_manual && val && val !== '—') ? 'FEF08A' : null,
+      textColor: (val, row) => (row?.is_in_manual && val && val !== '—') ? '854D0E' : '0F172A'
+    },
+    {
+      key: 'effective_out',
+      header: 'Out Time',
+      align: 'center',
+      minWidth: 12,
+      bold: true,
+      highlight: (val, row) => (row?.is_out_manual && val && val !== '—') ? 'FEF08A' : null,
+      textColor: (val, row) => (row?.is_out_manual && val && val !== '—') ? '854D0E' : '0F172A'
+    },
     { key: 'fix_type', header: 'Fix Category', align: 'center', minWidth: 24, bold: true },
     { key: 'resolved_status', header: 'Resolved Status', align: 'center', minWidth: 18 },
     { key: 'regular_hours', header: 'Duty (8h)', align: 'right', type: 'number', decimals: 2, minWidth: 14 },
@@ -1292,6 +1399,7 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
           fixCategory = 'Timings Adjusted';
         }
 
+        const manualStatus = getManualTimingStatus(r);
         detailRows.push({
           staff_no: w.staff_no,
           staff_name: w.staff_name,
@@ -1301,6 +1409,8 @@ async function buildFixesAndManualEditsReport({ month, workers, attendanceMap, a
           fixed_timing: fixed,
           effective_in: r.effective_in || '—',
           effective_out: r.effective_out || '—',
+          is_in_manual: manualStatus.isInManual,
+          is_out_manual: manualStatus.isOutManual,
           fix_type: fixCategory,
           resolved_status: r.status || 'Present (Full)',
           regular_hours: parseFloat(r.regular_hours || 0),
@@ -1393,6 +1503,7 @@ module.exports = {
   createStyledSheet,
   populateDataRows,
   addTotalsRow,
+  getManualTimingStatus,
   buildExecutiveSummaryReport,
   buildBiometricTimingsReport,
   buildFullPayrollReport,
