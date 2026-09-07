@@ -6,10 +6,11 @@ dist/
 build/
 
 # Database files
-data/*.db
+data/*_backup*.db
 data/*.sqlite
 data/*.db-journal
 *.db
+!data/attendance.db
 
 # Temporary uploaded files
 uploads/*

@@ -332,6 +332,34 @@ async function initDatabase() {
     );
   }
 
+  // Auto-seed from seed_data.json if workers table is empty (Self-Healing Recovery Net)
+  try {
+    const workersCountRes = await execute(`SELECT COUNT(*) as cnt FROM workers`);
+    if (workersCountRes.rows[0].cnt === 0) {
+      const seedPath = path.join(__dirname, '../data/seed_data.json');
+      if (fs.existsSync(seedPath)) {
+        console.log('🌱 Database is empty. Restoring from seed_data.json backup...');
+        const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+        const tables = ['settings', 'rule_profiles', 'workers', 'custom_rules', 'advances', 'audit_logs', 'raw_punches', 'daily_attendance'];
+        for (const tbl of tables) {
+          const rows = seedData[tbl];
+          if (Array.isArray(rows) && rows.length > 0) {
+            const cols = Object.keys(rows[0]);
+            const placeholders = cols.map(() => '?').join(', ');
+            const insertSql = `INSERT OR IGNORE INTO ${tbl} (${cols.join(', ')}) VALUES (${placeholders})`;
+            for (const r of rows) {
+              const vals = cols.map(c => r[c]);
+              await execute(insertSql, vals);
+            }
+          }
+        }
+        console.log('✅ Successfully restored full seed backup into database.');
+      }
+    }
+  } catch (seedErr) {
+    console.warn('Auto-seed warning:', seedErr.message);
+  }
+
   console.log('✅ Attendance & Payroll Database Initialized.');
 }
 
