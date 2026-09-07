@@ -946,8 +946,8 @@
       "food_allowance": 0,
       "other_allowance": 0,
       "assigned_shift": "auto",
-      "is_exception": 0,
-      "exception_reason": ""
+      "is_exception": 1,
+      "exception_reason": "Driver / Flexible Duty Exemption"
     },
     {
       "id": 170,
