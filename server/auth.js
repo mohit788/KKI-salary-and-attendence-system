@@ -6,7 +6,13 @@ const { execute } = require('./db');
 const ISSUER_NAME = 'KKI Attendance & Payroll';
 const ACCOUNT_LABEL = 'Admin';
 const SESSION_COOKIE_NAME = 'kki_session';
-const SESSION_EXPIRY_DAYS = 7;
+
+// Security Policy: Forced absolute logout after 30 minutes, idle logout after 5 minutes
+const FORCED_LOGOUT_MINUTES = 30; // 30 minutes absolute session lifetime
+const INACTIVITY_TIMEOUT_MINUTES = 5; // 5 minutes inactivity timeout
+const SESSION_MAX_AGE_MS = FORCED_LOGOUT_MINUTES * 60 * 1000; // 1,800,000 ms
+const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT_MINUTES * 60 * 1000; // 300,000 ms
+const SESSION_EXPIRY_DAYS = FORCED_LOGOUT_MINUTES / (24 * 60); // backward-compatible alias
 
 /**
  * Fetch authentication configuration from DB
@@ -123,34 +129,92 @@ async function verifyAndConsumeBackupCode(rawCode, hashedCodesList) {
 }
 
 /**
- * Create a new user session in SQLite
+ * Create a new user session in SQLite with 30-min absolute expiry and inactivity tracking
  */
 async function createSession() {
   const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const now = new Date();
+  const createdAt = now.toISOString();
+  const expiresAt = new Date(now.getTime() + SESSION_MAX_AGE_MS).toISOString();
+  const lastActivityAt = createdAt;
 
   await execute(
-    `INSERT INTO user_sessions (token, expires_at) VALUES (?, ?)`,
-    [token, expiresAt]
+    `INSERT INTO user_sessions (token, created_at, expires_at, last_activity_at) VALUES (?, ?, ?, ?)`,
+    [token, createdAt, expiresAt, lastActivityAt]
   );
 
-  return { token, expiresAt };
+  return { token, createdAt, expiresAt, lastActivityAt };
 }
 
 /**
- * Validate session token
+ * Validate session token checking both 30-min forced ceiling and 5-min inactivity timeout.
+ * Returns { valid: boolean, reason?: 'invalid' | 'session_timeout' | 'inactivity', remainingSessionMs?: number, remainingIdleMs?: number }
  */
 async function validateSession(token) {
-  if (!token) return false;
+  if (!token) return { valid: false, reason: 'invalid' };
   try {
     const res = await execute(
-      `SELECT token FROM user_sessions WHERE token = ? AND expires_at > CURRENT_TIMESTAMP`,
+      `SELECT token, created_at, expires_at, last_activity_at FROM user_sessions WHERE token = ?`,
       [token]
     );
-    return res.rows && res.rows.length > 0;
+    if (!res.rows || res.rows.length === 0) {
+      return { valid: false, reason: 'invalid' };
+    }
+
+    const session = res.rows[0];
+    const now = Date.now();
+
+    const parseDbDate = (val) => {
+      if (!val) return null;
+      if (typeof val === 'number') return val;
+      const str = String(val).trim();
+      if (str.includes('Z') || /[+-]\d{2}:\d{2}$/.test(str)) {
+        return new Date(str).getTime();
+      }
+      return new Date(str.replace(' ', 'T') + 'Z').getTime();
+    };
+
+    const expiresTime = parseDbDate(session.expires_at) || (now + SESSION_MAX_AGE_MS);
+    const createdAtTime = parseDbDate(session.created_at) || now;
+    const lastActivityTime = parseDbDate(session.last_activity_at) || createdAtTime;
+
+    // Check 1: 30-minute absolute forced session ceiling
+    if (now >= expiresTime) {
+      await destroySession(token);
+      return { valid: false, reason: 'session_timeout' };
+    }
+
+    // Check 2: 5-minute idle inactivity timeout
+    const idleElapsedMs = now - lastActivityTime;
+    if (idleElapsedMs >= INACTIVITY_TIMEOUT_MS) {
+      await destroySession(token);
+      return { valid: false, reason: 'inactivity' };
+    }
+
+    // Touch last_activity_at if > 5 seconds have elapsed since last write
+    if (idleElapsedMs > 5000) {
+      try {
+        const currentIso = new Date().toISOString();
+        await execute(
+          `UPDATE user_sessions SET last_activity_at = ? WHERE token = ?`,
+          [currentIso, token]
+        );
+      } catch (err) {
+        console.error('Failed to update session activity:', err.message);
+      }
+    }
+
+    const remainingSessionMs = Math.max(0, expiresTime - now);
+    const remainingIdleMs = Math.max(0, INACTIVITY_TIMEOUT_MS - idleElapsedMs);
+
+    return {
+      valid: true,
+      remainingSessionMs,
+      remainingIdleMs
+    };
   } catch (err) {
     console.error('Validate session error:', err.message);
-    return false;
+    return { valid: false, reason: 'invalid' };
   }
 }
 
@@ -190,6 +254,10 @@ function extractTokenFromReq(req) {
 
 module.exports = {
   SESSION_COOKIE_NAME,
+  FORCED_LOGOUT_MINUTES,
+  INACTIVITY_TIMEOUT_MINUTES,
+  SESSION_MAX_AGE_MS,
+  INACTIVITY_TIMEOUT_MS,
   SESSION_EXPIRY_DAYS,
   getAuthConfig,
   generateTotpSetup,

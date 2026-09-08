@@ -13,7 +13,8 @@ import {
   Calendar,
   Sparkles,
   LogOut,
-  ShieldCheck
+  ShieldCheck,
+  Clock
 } from 'lucide-react';
 
 export default function Navbar({ 
@@ -29,7 +30,8 @@ export default function Navbar({
   onSelectMonth,
   onOpenCalendarModal,
   onOpenHolidaysModal,
-  onLogout
+  onLogout,
+  sessionRemainingMs = null
 }) {
   const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresPayroll: false },
@@ -46,6 +48,14 @@ export default function Navbar({
   const handleCalendarClick = () => {
     if (onOpenCalendarModal) onOpenCalendarModal();
     else if (onOpenHolidaysModal) onOpenHolidaysModal();
+  };
+
+  const formatSessionTime = (ms) => {
+    if (ms === null || ms === undefined || ms <= 0) return '00:00';
+    const totalSec = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   return (
@@ -172,6 +182,23 @@ export default function Navbar({
                 <Unlock className="w-3.5 h-3.5 text-amber-400" />
                 <span>Unlock Payroll</span>
               </button>
+            )}
+
+            {/* 30-Minute Session Countdown Pill */}
+            {sessionRemainingMs !== null && sessionRemainingMs > 0 && (
+              <div
+                className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-mono font-bold border transition-all ${
+                  sessionRemainingMs <= 5 * 60 * 1000
+                    ? 'bg-rose-950/80 text-rose-300 border-rose-500 shadow-sm animate-pulse'
+                    : sessionRemainingMs <= 10 * 60 * 1000
+                    ? 'bg-amber-950/70 text-amber-300 border-amber-500/60'
+                    : 'bg-slate-900/90 text-cyan-300 border-slate-700'
+                }`}
+                title={`30-Minute Session limit. Time remaining: ${formatSessionTime(sessionRemainingMs)}. Automatic logout after 5m inactivity.`}
+              >
+                <Clock className={`w-3.5 h-3.5 shrink-0 ${sessionRemainingMs <= 5 * 60 * 1000 ? 'text-rose-400' : 'text-cyan-400'}`} />
+                <span>{formatSessionTime(sessionRemainingMs)}</span>
+              </div>
             )}
 
             {/* 2FA Protected Admin Badge & Logout Button */}

@@ -16,14 +16,32 @@ import {
   Building2,
   ArrowRight,
   HelpCircle,
-  FileText
+  FileText,
+  Clock,
+  Timer,
+  X
 } from 'lucide-react';
 
-export default function LoginGate({ onLoginSuccess }) {
+export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutReason }) {
   // Mode: 'login' | 'setup-password' | 'setup-qr' | 'setup-backup' | 'backup-login'
   const [mode, setMode] = useState('login');
   const [totpConfigured, setTotpConfigured] = useState(false);
   const [initialChecking, setInitialChecking] = useState(true);
+  const [activeLogoutReason, setActiveLogoutReason] = useState(
+    () => logoutReason || sessionStorage.getItem('kki_logout_reason') || null
+  );
+
+  useEffect(() => {
+    if (logoutReason) {
+      setActiveLogoutReason(logoutReason);
+    }
+  }, [logoutReason]);
+
+  const handleDismissNotice = () => {
+    setActiveLogoutReason(null);
+    sessionStorage.removeItem('kki_logout_reason');
+    if (onClearLogoutReason) onClearLogoutReason();
+  };
 
   // Form Fields
   const [password, setPassword] = useState('');
@@ -108,6 +126,11 @@ export default function LoginGate({ onLoginSuccess }) {
           if (res.token) {
             sessionStorage.setItem('kki_auth_token', res.token);
           }
+          const now = Date.now();
+          sessionStorage.setItem('kki_session_start_time', String(now));
+          sessionStorage.setItem('kki_session_expires_at', String(now + 30 * 60 * 1000));
+          localStorage.setItem('kki_last_activity', String(now));
+          sessionStorage.removeItem('kki_logout_reason');
           setTimeout(() => {
             if (onLoginSuccess) onLoginSuccess();
           }, 400);
@@ -152,6 +175,11 @@ export default function LoginGate({ onLoginSuccess }) {
         if (res.token) {
           sessionStorage.setItem('kki_auth_token', res.token);
         }
+        const now = Date.now();
+        sessionStorage.setItem('kki_session_start_time', String(now));
+        sessionStorage.setItem('kki_session_expires_at', String(now + 30 * 60 * 1000));
+        localStorage.setItem('kki_last_activity', String(now));
+        sessionStorage.removeItem('kki_logout_reason');
         setTimeout(() => {
           if (onLoginSuccess) onLoginSuccess();
         }, 600);
@@ -309,6 +337,53 @@ export default function LoginGate({ onLoginSuccess }) {
 
         {/* Main Card Container */}
         <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl shadow-black/80 relative">
+
+          {/* Session Expiry or Inactivity Timeout Notification Banner */}
+          {activeLogoutReason && (
+            <div className={`mb-6 p-4 rounded-2xl border text-left flex items-start gap-3 animate-in fade-in slide-in-from-top-2 ${
+              activeLogoutReason === 'inactivity'
+                ? 'bg-amber-950/70 border-amber-500/60 text-amber-200'
+                : activeLogoutReason === 'session_timeout'
+                ? 'bg-blue-950/70 border-blue-500/60 text-blue-200'
+                : 'bg-slate-800/80 border-slate-600 text-slate-300'
+            }`}>
+              <div className="p-2 rounded-xl bg-black/30 shrink-0 mt-0.5">
+                {activeLogoutReason === 'inactivity' ? (
+                  <Clock className="w-5 h-5 text-amber-400 animate-pulse" />
+                ) : activeLogoutReason === 'session_timeout' ? (
+                  <Timer className="w-5 h-5 text-blue-400" />
+                ) : (
+                  <ShieldCheck className="w-5 h-5 text-slate-400" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                  <span>
+                    {activeLogoutReason === 'inactivity'
+                      ? 'Inactivity Timeout (5 Minutes)'
+                      : activeLogoutReason === 'session_timeout'
+                      ? 'Session Expired (30-Minute Maximum)'
+                      : 'Logged Out'}
+                  </span>
+                </h3>
+                <p className="text-xs opacity-90 leading-relaxed">
+                  {activeLogoutReason === 'inactivity'
+                    ? 'Your session was automatically locked after 5 minutes of no user activity to protect company records.'
+                    : activeLogoutReason === 'session_timeout'
+                    ? 'Your 30-minute maximum security session has ended. Please authenticate again to resume work.'
+                    : 'You have been safely signed out.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleDismissNotice}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 text-xs shrink-0 transition-colors"
+                title="Dismiss message"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {/* ========================================================= */}
           {/* MODE 1: Standard Login (Master Password + Google Auth OTP) */}

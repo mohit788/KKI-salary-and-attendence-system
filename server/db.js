@@ -211,16 +211,29 @@ async function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`,
 
-    // User Sessions table for 2FA-gated authentication
+    // User Sessions table for 2FA-gated authentication with forced & inactivity timeout tracking
     `CREATE TABLE IF NOT EXISTS user_sessions (
       token TEXT PRIMARY KEY,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      expires_at DATETIME NOT NULL
+      expires_at DATETIME NOT NULL,
+      last_activity_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );`
   ];
 
   for (const sql of schemaQueries) {
     await execute(sql);
+  }
+
+  // Safe migration: Ensure last_activity_at and created_at exist on older databases
+  try {
+    await execute(`ALTER TABLE user_sessions ADD COLUMN last_activity_at DATETIME;`);
+  } catch (e) {
+    // Column already exists, ignore
+  }
+  try {
+    await execute(`ALTER TABLE user_sessions ADD COLUMN created_at DATETIME;`);
+  } catch (e) {
+    // Column already exists, ignore
   }
 
   // Seed default national holidays if empty

@@ -14,12 +14,23 @@ import AiAssistantBar from './components/AiAssistantBar';
 import IncompleteManagerModal from './components/IncompleteManagerModal';
 import FactoryCalendarModal from './components/FactoryCalendarModal';
 import LoginGate from './components/LoginGate';
+import InactivityWarningModal from './components/InactivityWarningModal';
 import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
+
+const FORCED_LOGOUT_MS = 30 * 60 * 1000; // 30 minutes forced session ceiling
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle timeout
+const INACTIVITY_WARNING_MS = 4 * 60 * 1000; // 4 minutes (60s countdown warning)
 
 export default function App() {
   // Global 2FA Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
+  const [logoutReason, setLogoutReason] = useState(() => {
+    return sessionStorage.getItem('kki_logout_reason') || null;
+  });
+  const [sessionRemainingMs, setSessionRemainingMs] = useState(null);
+  const [showInactivityModal, setShowInactivityModal] = useState(false);
+  const [inactivityCountdownSec, setInactivityCountdownSec] = useState(60);
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [metrics, setMetrics] = useState(null);
@@ -115,9 +126,29 @@ export default function App() {
       const res = await fetch('/api/auth/status').then(r => r.json());
       if (res && res.success && res.isAuthenticated) {
         setIsAuthenticated(true);
+        const now = Date.now();
+
+        let expiresAt = Number(sessionStorage.getItem('kki_session_expires_at'));
+        if (res.remainingSessionMs) {
+          expiresAt = now + res.remainingSessionMs;
+          sessionStorage.setItem('kki_session_expires_at', String(expiresAt));
+        } else if (!expiresAt) {
+          expiresAt = now + FORCED_LOGOUT_MS;
+          sessionStorage.setItem('kki_session_expires_at', String(expiresAt));
+        }
+        setSessionRemainingMs(Math.max(0, expiresAt - now));
+
+        if (!localStorage.getItem('kki_last_activity')) {
+          localStorage.setItem('kki_last_activity', String(now));
+        }
+
         refreshData();
       } else {
         setIsAuthenticated(false);
+        if (res && res.reason) {
+          sessionStorage.setItem('kki_logout_reason', res.reason);
+          setLogoutReason(res.reason);
+        }
       }
     } catch (err) {
       console.error('Failed to verify session:', err);
@@ -132,21 +163,174 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = () => {
+    const now = Date.now();
+    sessionStorage.removeItem('kki_logout_reason');
+    setLogoutReason(null);
+    sessionStorage.setItem('kki_session_start_time', String(now));
+    sessionStorage.setItem('kki_session_expires_at', String(now + FORCED_LOGOUT_MS));
+    localStorage.setItem('kki_last_activity', String(now));
+    setSessionRemainingMs(FORCED_LOGOUT_MS);
     setIsAuthenticated(true);
     refreshData();
   };
 
-  const handleLogout = async () => {
+  const handleLogout = async (reason = null) => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
     } catch (e) {
       console.error('Logout error:', e);
     }
+
     sessionStorage.removeItem('kki_auth_token');
     sessionStorage.removeItem('kki_payroll_unlocked');
+    sessionStorage.removeItem('kki_session_start_time');
+    sessionStorage.removeItem('kki_session_expires_at');
+    localStorage.removeItem('kki_last_activity');
+
+    if (reason && (reason === 'inactivity' || reason === 'session_timeout')) {
+      sessionStorage.setItem('kki_logout_reason', reason);
+      setLogoutReason(reason);
+    } else {
+      sessionStorage.removeItem('kki_logout_reason');
+      setLogoutReason(null);
+    }
+
+    setShowInactivityModal(false);
+    setSessionRemainingMs(null);
     setIsAuthenticated(false);
     setIsPayrollUnlocked(false);
   };
+
+  const handleStayLoggedIn = async () => {
+    const now = Date.now();
+    localStorage.setItem('kki_last_activity', String(now));
+    setShowInactivityModal(false);
+    try {
+      const res = await fetch('/api/auth/ping', { method: 'POST' }).then(r => r.json());
+      if (res && res.remainingSessionMs) {
+        setSessionRemainingMs(res.remainingSessionMs);
+        sessionStorage.setItem('kki_session_expires_at', String(Date.now() + res.remainingSessionMs));
+      }
+    } catch (e) {
+      console.error('Failed to refresh activity ping:', e);
+    }
+  };
+
+  // Activity & Idle Inactivity Tracking (5 mins) + Forced Session Logout (30 mins)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let lastPingTime = Date.now();
+    let lastRecordedActivity = Date.now();
+
+    const recordActivity = () => {
+      const now = Date.now();
+      if (now - lastRecordedActivity > 1000) {
+        lastRecordedActivity = now;
+        localStorage.setItem('kki_last_activity', String(now));
+        setShowInactivityModal(false);
+      }
+
+      // Keep server session active every 60 seconds
+      if (now - lastPingTime > 60000) {
+        lastPingTime = now;
+        fetch('/api/auth/ping', { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (data && data.remainingSessionMs) {
+              setSessionRemainingMs(data.remainingSessionMs);
+              sessionStorage.setItem('kki_session_expires_at', String(Date.now() + data.remainingSessionMs));
+            }
+          })
+          .catch(() => {});
+      }
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(evt => window.addEventListener(evt, recordActivity, { passive: true }));
+
+    const handleStorageChange = (e) => {
+      if (e.key === 'kki_last_activity') {
+        setShowInactivityModal(false);
+      } else if (e.key === 'kki_logout_reason' && e.newValue) {
+        handleLogout(e.newValue);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    const intervalId = setInterval(() => {
+      const now = Date.now();
+
+      // 1. Check 30-Minute Forced Logout
+      let expiresAt = Number(sessionStorage.getItem('kki_session_expires_at'));
+      if (!expiresAt) {
+        expiresAt = now + FORCED_LOGOUT_MS;
+        sessionStorage.setItem('kki_session_expires_at', String(expiresAt));
+      }
+      const sessionRemaining = expiresAt - now;
+      setSessionRemainingMs(Math.max(0, sessionRemaining));
+
+      if (sessionRemaining <= 0) {
+        clearInterval(intervalId);
+        handleLogout('session_timeout');
+        return;
+      }
+
+      // 2. Check 5-Minute Inactivity Idle
+      const lastActivity = Number(localStorage.getItem('kki_last_activity')) || now;
+      const idleElapsed = now - lastActivity;
+
+      if (idleElapsed >= INACTIVITY_TIMEOUT_MS) {
+        clearInterval(intervalId);
+        setShowInactivityModal(false);
+        handleLogout('inactivity');
+        return;
+      } else if (idleElapsed >= INACTIVITY_WARNING_MS) {
+        const remainingSec = Math.max(0, Math.ceil((INACTIVITY_TIMEOUT_MS - idleElapsed) / 1000));
+        setInactivityCountdownSec(remainingSec);
+        setShowInactivityModal(true);
+      } else {
+        setShowInactivityModal(false);
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(intervalId);
+      activityEvents.forEach(evt => window.removeEventListener(evt, recordActivity));
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [isAuthenticated]);
+
+  // Intercept 401 HTTP responses to handle server-triggered timeouts
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 401) {
+        const url = typeof args[0] === 'string' ? args[0] : (args[0]?.url || '');
+        if (!url.includes('/api/auth/login') && !url.includes('/api/auth/status')) {
+          try {
+            const clone = response.clone();
+            const body = await clone.json();
+            if (body && body.reason) {
+              handleLogout(body.reason);
+            } else {
+              handleLogout('session_timeout');
+            }
+          } catch {
+            handleLogout('session_timeout');
+          }
+        }
+      }
+      return response;
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [isAuthenticated]);
 
   // Verify Password & Unlock Payroll
   const handleVerifyPassword = async (e) => {
@@ -405,7 +589,7 @@ export default function App() {
 
   // If unauthenticated, gate the entire system behind Google Authenticator LoginGate
   if (!isAuthenticated) {
-    return <LoginGate onLoginSuccess={handleLoginSuccess} />;
+    return <LoginGate onLoginSuccess={handleLoginSuccess} logoutReason={logoutReason} />;
   }
 
   return (
@@ -422,6 +606,7 @@ export default function App() {
         availableMonths={availableMonths}
         onSelectMonth={handleSelectMonth}
         onOpenCalendarModal={() => setShowCalendarModal(true)}
+        sessionRemainingMs={sessionRemainingMs}
         onLogout={handleLogout}
       />
 
@@ -652,6 +837,14 @@ export default function App() {
           onClose={() => setAdvanceStaffNo(null)}
         />
       )}
+
+      {/* 5-Min Inactivity Warning Modal */}
+      <InactivityWarningModal
+        isOpen={showInactivityModal}
+        secondsRemaining={inactivityCountdownSec}
+        onStayLoggedIn={handleStayLoggedIn}
+        onLogout={() => handleLogout('inactivity')}
+      />
     </div>
   );
 }

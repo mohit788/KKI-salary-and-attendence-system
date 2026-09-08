@@ -52,12 +52,23 @@ app.use(async (req, res, next) => {
 
   // Validate session token
   const token = auth.extractTokenFromReq(req);
-  const isValid = await auth.validateSession(token);
-  if (!isValid) {
+  const sessionCheck = await auth.validateSession(token);
+  if (!sessionCheck || !sessionCheck.valid) {
+    const reason = sessionCheck?.reason || 'unauthorized';
+    let errorMessage = 'Authentication required. Please sign in with Google Authenticator.';
+    let errorCode = 'UNAUTHORIZED';
+    if (reason === 'session_timeout') {
+      errorMessage = 'Your 30-minute session has expired for security. Please sign in again.';
+      errorCode = 'SESSION_EXPIRED';
+    } else if (reason === 'inactivity') {
+      errorMessage = 'Logged out due to 5 minutes of inactivity. Please sign in again.';
+      errorCode = 'INACTIVITY_TIMEOUT';
+    }
     return res.status(401).json({
       success: false,
-      error: 'Authentication required. Please sign in with Google Authenticator.',
-      code: 'UNAUTHORIZED'
+      error: errorMessage,
+      code: errorCode,
+      reason: reason
     });
   }
 
@@ -260,18 +271,52 @@ app.post('/api/settings', async (req, res) => {
 // --- Authentication & 2FA Endpoints ---
 // ==========================================
 
-// 2.0 GET Auth Status
+// 2.0 GET Auth Status (Validates 30m absolute session & 5m inactivity limit)
 app.get('/api/auth/status', async (req, res) => {
   try {
     const token = auth.extractTokenFromReq(req);
-    const isValid = await auth.validateSession(token);
+    const sessionCheck = await auth.validateSession(token);
     const cfg = await auth.getAuthConfig();
+    const isValid = Boolean(sessionCheck && sessionCheck.valid);
     res.json({
       success: true,
       isAuthenticated: isValid,
+      reason: sessionCheck?.reason || null,
+      remainingSessionMs: sessionCheck?.remainingSessionMs || 0,
+      remainingIdleMs: sessionCheck?.remainingIdleMs || 0,
       totpEnabled: cfg.totp_enabled,
       totpConfigured: !!(cfg.totp_secret && cfg.totp_enabled),
       backupCodesCount: cfg.emergency_backup_codes ? cfg.emergency_backup_codes.length : 0
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.05 POST Keepalive / Ping (Resets 5m inactivity timer during active user work)
+app.post('/api/auth/ping', async (req, res) => {
+  try {
+    const token = auth.extractTokenFromReq(req);
+    const sessionCheck = await auth.validateSession(token);
+    if (!sessionCheck || !sessionCheck.valid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Session expired or inactive',
+        code: sessionCheck?.reason === 'session_timeout' ? 'SESSION_EXPIRED' : 'INACTIVITY_TIMEOUT',
+        reason: sessionCheck?.reason || 'invalid'
+      });
+    }
+
+    // Touch last_activity_at timestamp in database
+    await execute(
+      `UPDATE user_sessions SET last_activity_at = ? WHERE token = ?`,
+      [new Date().toISOString(), token]
+    );
+
+    res.json({
+      success: true,
+      remainingSessionMs: sessionCheck.remainingSessionMs,
+      remainingIdleMs: auth.INACTIVITY_TIMEOUT_MS
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -309,13 +354,15 @@ app.post('/api/auth/login', async (req, res) => {
       res.cookie(auth.SESSION_COOKIE_NAME, session.token, {
         httpOnly: true,
         sameSite: 'lax',
-        maxAge: auth.SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+        maxAge: auth.SESSION_MAX_AGE_MS
       });
 
       return res.json({
         success: true,
         token: session.token,
         expiresAt: session.expiresAt,
+        remainingSessionMs: auth.SESSION_MAX_AGE_MS,
+        remainingIdleMs: auth.INACTIVITY_TIMEOUT_MS,
         usedBackupCode: true,
         remainingBackupCodes: remainingCodes.length,
         message: `Logged in using Emergency Backup Code. (${remainingCodes.length} codes remaining)`
@@ -335,18 +382,20 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    // 5. Establish Session
+    // 5. Establish Session (30-minute max lifetime, 5-minute inactivity limit)
     const session = await auth.createSession();
     res.cookie(auth.SESSION_COOKIE_NAME, session.token, {
       httpOnly: true,
       sameSite: 'lax',
-      maxAge: auth.SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+      maxAge: auth.SESSION_MAX_AGE_MS
     });
 
     res.json({
       success: true,
       token: session.token,
       expiresAt: session.expiresAt,
+      remainingSessionMs: auth.SESSION_MAX_AGE_MS,
+      remainingIdleMs: auth.INACTIVITY_TIMEOUT_MS,
       message: 'Signed in successfully with Google Authenticator.'
     });
   } catch (err) {
@@ -423,7 +472,7 @@ app.post('/api/auth/setup/confirm', async (req, res) => {
     res.cookie(auth.SESSION_COOKIE_NAME, session.token, {
       httpOnly: true,
       sameSite: 'lax',
-      maxAge: auth.SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+      maxAge: auth.SESSION_MAX_AGE_MS
     });
 
     res.json({
@@ -431,7 +480,9 @@ app.post('/api/auth/setup/confirm', async (req, res) => {
       message: 'Google Authenticator 2FA successfully activated!',
       backupCodes: rawBackupCodes,
       token: session.token,
-      expiresAt: session.expiresAt
+      expiresAt: session.expiresAt,
+      remainingSessionMs: auth.SESSION_MAX_AGE_MS,
+      remainingIdleMs: auth.INACTIVITY_TIMEOUT_MS
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1143,7 +1194,7 @@ app.get('/api/calendar', async (req, res) => {
       const y = parseInt(yearStr, 10);
       const m = parseInt(monthStr, 10);
       const daysInMonth = new Date(y, m, 0).getDate();
-      
+
       let holidaysCount = 0;
       let workingOverridesCount = 0;
       let offOverridesCount = 0;
@@ -1289,7 +1340,7 @@ app.delete('/api/calendar/:id', async (req, res) => {
     const { id } = req.params;
     const targetRes = await execute(`SELECT date FROM factory_calendar WHERE id = ?`, [id]);
     const targetDate = targetRes.rows[0]?.date;
-    
+
     await execute(`DELETE FROM factory_calendar WHERE id = ?`, [id]);
     if (targetDate) {
       await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [targetDate]);
@@ -2257,8 +2308,8 @@ app.get('/api/dashboard', async (req, res) => {
     const dateParams = isMonthFiltered ? [`${month}%`] : [];
     const whereDaily = dateCond;
     const whereAdvances = dateCond;
-    const whereBounds = isMonthFiltered 
-      ? `WHERE date LIKE ? AND date IS NOT NULL AND date != ''` 
+    const whereBounds = isMonthFiltered
+      ? `WHERE date LIKE ? AND date IS NOT NULL AND date != ''`
       : `WHERE date IS NOT NULL AND date != ''`;
 
     const workersSql = isMonthFiltered
