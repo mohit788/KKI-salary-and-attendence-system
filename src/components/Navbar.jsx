@@ -11,7 +11,9 @@ import {
   Unlock,
   AlertTriangle,
   Calendar,
-  Sparkles
+  Sparkles,
+  LogOut,
+  ShieldCheck
 } from 'lucide-react';
 
 export default function Navbar({ 
@@ -26,7 +28,8 @@ export default function Navbar({
   availableMonths = [],
   onSelectMonth,
   onOpenCalendarModal,
-  onOpenHolidaysModal
+  onOpenHolidaysModal,
+  onLogout
 }) {
   const allTabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, requiresPayroll: false },
@@ -168,6 +171,18 @@ export default function Navbar({
               >
                 <Unlock className="w-3.5 h-3.5 text-amber-400" />
                 <span>Unlock Payroll</span>
+              </button>
+            )}
+
+            {/* 2FA Protected Admin Badge & Logout Button */}
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-rose-950/70 hover:bg-rose-900 text-rose-300 hover:text-rose-100 border border-rose-600/50 hover:border-rose-500 shadow-md transition-all whitespace-nowrap cursor-pointer group"
+                title="Lock Portal & Log Out"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-400 group-hover:-translate-x-0.5 transition-transform" />
+                <span className="hidden sm:inline">Log Out</span>
               </button>
             )}
 

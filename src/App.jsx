@@ -13,9 +13,14 @@ import AuditLogsModal from './components/AuditLogsModal';
 import AiAssistantBar from './components/AiAssistantBar';
 import IncompleteManagerModal from './components/IncompleteManagerModal';
 import FactoryCalendarModal from './components/FactoryCalendarModal';
+import LoginGate from './components/LoginGate';
 import { Lock, Unlock, KeyRound, Eye, EyeOff, X } from 'lucide-react';
 
 export default function App() {
+  // Global 2FA Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [metrics, setMetrics] = useState(null);
   const [workers, setWorkers] = useState([]);
@@ -98,12 +103,50 @@ export default function App() {
   const handleSelectMonth = (newMonth) => {
     const validMonth = newMonth || 'all';
     setSelectedMonth(validMonth);
-    refreshData(validMonth);
+    if (isAuthenticated) {
+      refreshData(validMonth);
+    }
+  };
+
+  // Check 2FA Auth status on initial load
+  const checkAuth = async () => {
+    try {
+      setAuthChecking(true);
+      const res = await fetch('/api/auth/status').then(r => r.json());
+      if (res && res.success && res.isAuthenticated) {
+        setIsAuthenticated(true);
+        refreshData();
+      } else {
+        setIsAuthenticated(false);
+      }
+    } catch (err) {
+      console.error('Failed to verify session:', err);
+      setIsAuthenticated(false);
+    } finally {
+      setAuthChecking(false);
+    }
   };
 
   useEffect(() => {
-    refreshData();
+    checkAuth();
   }, []);
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    refreshData();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error('Logout error:', e);
+    }
+    sessionStorage.removeItem('kki_auth_token');
+    sessionStorage.removeItem('kki_payroll_unlocked');
+    setIsAuthenticated(false);
+    setIsPayrollUnlocked(false);
+  };
 
   // Verify Password & Unlock Payroll
   const handleVerifyPassword = async (e) => {
@@ -350,6 +393,21 @@ export default function App() {
     setShowIncompleteModal(true);
   };
 
+  // If initial auth check is in progress
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-[#070b14] flex flex-col items-center justify-center text-white">
+        <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin mb-4" />
+        <p className="text-slate-400 text-sm font-medium tracking-wide">Checking Security Access...</p>
+      </div>
+    );
+  }
+
+  // If unauthenticated, gate the entire system behind Google Authenticator LoginGate
+  if (!isAuthenticated) {
+    return <LoginGate onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0f19]">
       <Navbar
@@ -364,6 +422,7 @@ export default function App() {
         availableMonths={availableMonths}
         onSelectMonth={handleSelectMonth}
         onOpenCalendarModal={() => setShowCalendarModal(true)}
+        onLogout={handleLogout}
       />
 
       <AiAssistantBar onRefreshData={refreshData} />

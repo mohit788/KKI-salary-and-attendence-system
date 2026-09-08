@@ -33,7 +33,14 @@ import {
   Unlock,
   Star,
   UserCheck,
-  Search
+  Search,
+  Smartphone,
+  QrCode,
+  Copy,
+  KeyRound,
+  AlertCircle,
+  Download,
+  ShieldAlert
 } from 'lucide-react';
 
 export default function SettingsPanel({
@@ -100,6 +107,103 @@ export default function SettingsPanel({
 
   const [toast, setToast] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  // 2FA Management State
+  const [twoFactorStatus, setTwoFactorStatus] = useState({
+    enabled: false,
+    configured: false,
+    backupCodesCount: 0
+  });
+  const [showReset2faModal, setShowReset2faModal] = useState(false);
+  const [resetPasswordInput, setResetPasswordInput] = useState('');
+  const [resetBackupCodeInput, setResetBackupCodeInput] = useState('');
+  const [reset2faLoading, setReset2faLoading] = useState(false);
+  const [reset2faError, setReset2faError] = useState('');
+
+  const [showNewBackupCodesModal, setShowNewBackupCodesModal] = useState(false);
+  const [newBackupCodes, setNewBackupCodes] = useState([]);
+  const [regenPasswordInput, setRegenPasswordInput] = useState('');
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [regenError, setRegenError] = useState('');
+  const [copiedNewCodes, setCopiedNewCodes] = useState(false);
+
+  const fetch2faStatus = async () => {
+    try {
+      const res = await fetch('/api/auth/status').then(r => r.json());
+      if (res && res.success) {
+        setTwoFactorStatus({
+          enabled: !!res.totpEnabled,
+          configured: !!res.totpConfigured,
+          backupCodesCount: res.backupCodesCount || 0
+        });
+      }
+    } catch (e) {
+      console.error('Failed to fetch 2FA status:', e);
+    }
+  };
+
+  const handleReset2fa = async (e) => {
+    e.preventDefault();
+    if (!resetPasswordInput.trim() && !resetBackupCodeInput.trim()) {
+      setReset2faError('Please enter Master Password or Backup Code.');
+      return;
+    }
+    setReset2faLoading(true);
+    setReset2faError('');
+    try {
+      const res = await fetch('/api/auth/reset-2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          password: resetPasswordInput.trim(),
+          backupCode: resetBackupCodeInput.trim()
+        })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setShowReset2faModal(false);
+        setResetPasswordInput('');
+        setResetBackupCodeInput('');
+        setToast('Google Authenticator 2FA reset! Refreshing...');
+        setTimeout(() => window.location.reload(), 1000);
+      } else {
+        setReset2faError(res.error || 'Failed to reset 2FA.');
+      }
+    } catch (err) {
+      setReset2faError('Network error: ' + err.message);
+    } finally {
+      setReset2faLoading(false);
+    }
+  };
+
+  const handleRegenerateBackupCodes = async (e) => {
+    e.preventDefault();
+    if (!regenPasswordInput.trim()) {
+      setRegenError('Please enter your Master Password.');
+      return;
+    }
+    setRegenLoading(true);
+    setRegenError('');
+    try {
+      const res = await fetch('/api/auth/regenerate-backup-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: regenPasswordInput.trim() })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setNewBackupCodes(res.backupCodes || []);
+        setRegenPasswordInput('');
+        fetch2faStatus();
+      } else {
+        setRegenError(res.error || 'Failed to generate codes.');
+      }
+    } catch (err) {
+      setRegenError('Network error: ' + err.message);
+    } finally {
+      setRegenLoading(false);
+    }
+  };
 
   // Clear Attendance Logs State
   const [clearMonth, setClearMonth] = useState('');
@@ -226,7 +330,13 @@ export default function SettingsPanel({
     fetchCustomRules();
     fetchSalaryRules();
     fetchExceptionWorkers();
-  }, []);
+    fetch2faStatus();
+    if (settingsList && settingsList.length > 0) {
+      const map = {};
+      settingsList.forEach(s => { map[s.key] = s.value; });
+      setForm(prev => ({ ...prev, ...map }));
+    }
+  }, [settingsList]);
 
   const handleChange = (key, val) => {
     setForm(prev => ({ ...prev, [key]: val }));
@@ -1539,27 +1649,285 @@ export default function SettingsPanel({
           </div>
         </div>
 
-        {/* Section 5: Security & Payroll Password */}
-        <div className="glass-card rounded-2xl p-6 border border-amber-500/30 space-y-4">
-          <h3 className="text-sm font-bold text-white font-display uppercase tracking-wider text-amber-300 flex items-center gap-2">
-            <Lock className="w-4 h-4" />
-            <span>5. Security & Payroll Unlock Password</span>
-          </h3>
+        {/* Section 5: Security & Access Control */}
+        <div className="glass-card rounded-2xl p-6 border border-amber-500/30 space-y-6">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <h3 className="text-sm font-bold text-white font-display uppercase tracking-wider text-amber-300 flex items-center gap-2">
+              <ShieldCheck className="w-4.5 h-4.5 text-amber-400" />
+              <span>5. Enterprise Security & Google Authenticator (2FA)</span>
+            </h3>
+            <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
+              twoFactorStatus.enabled 
+                ? 'bg-emerald-950 text-emerald-300 border-emerald-500' 
+                : 'bg-amber-950 text-amber-300 border-amber-600'
+            }`}>
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{twoFactorStatus.enabled ? '2FA Enforced' : '2FA Configured'}</span>
+            </span>
+          </div>
 
+          {/* Master Admin Password */}
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Payroll Mode Unlock PIN / Password</label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              Master Admin Password & Payroll Unlock PIN
+            </label>
             <input
               type="text"
               placeholder="e.g. kki123"
               value={form.payroll_password !== undefined ? form.payroll_password : 'kki123'}
-              onChange={(e) => handleChange('payroll_password', e.target.value)}
+              onChange={(e) => {
+                handleChange('payroll_password', e.target.value);
+                handleChange('master_password', e.target.value);
+              }}
               className="w-full bg-slate-900 border border-amber-500/30 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-500"
             />
             <p className="text-[11px] text-slate-400 mt-1">
-              This password protects all salary figures, ₹ financial amounts, allowances, and advance ledgers. (Default: <strong className="text-amber-400 font-mono">kki123</strong>)
+              This password is used for login along with your Google Authenticator code, and to unlock salary/advance ledgers. (Default: <strong className="text-amber-400 font-mono">kki123</strong>)
             </p>
           </div>
+
+          {/* Google Authenticator Management Card */}
+          <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-950/80 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white">Google Authenticator (RFC 6238 TOTP)</h4>
+                  <p className="text-[11px] text-slate-400">
+                    Active 2-Factor Authentication required on every login.
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-[11px] font-bold text-slate-400">
+                  Backup Codes: <strong className="text-cyan-400 font-mono">{twoFactorStatus.backupCodesCount} remaining</strong>
+                </span>
+              </div>
+            </div>
+
+            {/* 2FA Action Buttons */}
+            <div className="flex items-center gap-3 pt-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setRegenError('');
+                  setShowNewBackupCodesModal(true);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Generate 8 New Backup Codes</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setReset2faError('');
+                  setShowReset2faModal(true);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 border border-rose-600/40 text-xs font-semibold text-rose-300 hover:text-rose-100 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-rose-400" />
+                <span>Reset / Reconfigure 2FA</span>
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Modal: Generate New Backup Codes */}
+        {showNewBackupCodesModal && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-cyan-400" />
+                  <span>Generate Emergency Backup Codes</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNewBackupCodesModal(false);
+                    setNewBackupCodes([]);
+                  }}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {newBackupCodes.length === 0 ? (
+                <form onSubmit={handleRegenerateBackupCodes} className="space-y-4">
+                  <p className="text-xs text-slate-300">
+                    Enter your Master Admin Password to invalidate old codes and generate 8 new emergency recovery codes:
+                  </p>
+                  <div>
+                    <input
+                      type="password"
+                      value={regenPasswordInput}
+                      onChange={(e) => { setRegenPasswordInput(e.target.value); setRegenError(''); }}
+                      placeholder="Enter master password..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                      autoFocus
+                      required
+                    />
+                  </div>
+
+                  {regenError && (
+                    <div className="p-2.5 rounded-lg bg-rose-950 border border-rose-700 text-rose-300 text-xs font-medium flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>{regenError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewBackupCodesModal(false)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={regenLoading || !regenPasswordInput}
+                      className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {regenLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <KeyRound className="w-3.5 h-3.5" />}
+                      <span>Generate Codes</span>
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                    <p className="text-[11px] text-slate-400 mb-2 font-semibold">
+                      Save these 8 new codes in a secure location. Old codes are now invalid.
+                    </p>
+                    <div className="grid grid-cols-2 gap-1.5 font-mono text-xs text-cyan-300 font-bold">
+                      {newBackupCodes.map((code, idx) => (
+                        <div key={idx} className="bg-slate-900 border border-slate-800 rounded p-1.5 text-center">
+                          <span className="text-slate-500 text-[10px] mr-1">{idx + 1}.</span>
+                          {code}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const txt = "KKI Emergency Backup Codes:\n" + newBackupCodes.map((c, i) => `${i + 1}. ${c}`).join('\n');
+                        navigator.clipboard.writeText(txt);
+                        setCopiedNewCodes(true);
+                        setTimeout(() => setCopiedNewCodes(false), 2000);
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center justify-center gap-1.5"
+                    >
+                      {copiedNewCodes ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedNewCodes ? 'Copied!' : 'Copy All'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewBackupCodesModal(false);
+                        setNewBackupCodes([]);
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white shadow-lg"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Reset / Reconfigure 2FA Confirmation */}
+        {showReset2faModal && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-rose-600/50 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 className="text-sm font-bold text-rose-300 flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                  <span>Reset Google Authenticator 2FA</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowReset2faModal(false)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-300">
+                Resetting 2FA will clear your current Authenticator secret and backup codes. You will be prompted to scan a new QR code upon next login.
+              </p>
+
+              <form onSubmit={handleReset2fa} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">
+                    Enter Master Admin Password
+                  </label>
+                  <input
+                    type="password"
+                    value={resetPasswordInput}
+                    onChange={(e) => { setResetPasswordInput(e.target.value); setReset2faError(''); }}
+                    placeholder="Master password..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white font-mono placeholder-slate-500 focus:outline-none focus:border-rose-500"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="text-center text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
+                  — OR —
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1">
+                    Emergency Backup Code (If password lost)
+                  </label>
+                  <input
+                    type="text"
+                    value={resetBackupCodeInput}
+                    onChange={(e) => { setResetBackupCodeInput(e.target.value); setReset2faError(''); }}
+                    placeholder="e.g. 1234-5678"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-amber-300 font-mono text-center placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {reset2faError && (
+                  <div className="p-2.5 rounded-lg bg-rose-950 border border-rose-700 text-rose-300 text-xs font-medium flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{reset2faError}</span>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowReset2faModal(false)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={reset2faLoading || (!resetPasswordInput && !resetBackupCodeInput)}
+                    className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-1.5"
+                  >
+                    {reset2faLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+                    <span>Confirm Reset 2FA</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Submit Button */}
         <div className="flex justify-end">

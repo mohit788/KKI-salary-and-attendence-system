@@ -209,6 +209,13 @@ async function initDatabase() {
       notes TEXT DEFAULT '',
       is_recurring INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );`,
+
+    // User Sessions table for 2FA-gated authentication
+    `CREATE TABLE IF NOT EXISTS user_sessions (
+      token TEXT PRIMARY KEY,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      expires_at DATETIME NOT NULL
     );`
   ];
 
@@ -303,7 +310,11 @@ async function initDatabase() {
     ['lunch_deduction_mins', '30', 'Automatic lunch/break deduction in minutes'],
     ['late_penalty_threshold_mins', '120', 'Late arrival cutoff in minutes for half-day penalty'],
     ['sunday_ot_multiplier', '2.0', 'Overtime multiplier for Sunday work'],
-    ['payroll_password', 'kki123', 'Password to unlock salary and payroll figures']
+    ['payroll_password', 'kki123', 'Password to unlock salary and payroll figures'],
+    ['master_password', 'kki123', 'Master Admin Password for application login and access'],
+    ['totp_enabled', 'false', 'Is Google Authenticator 2FA enabled (true/false)'],
+    ['totp_secret', '', 'Base32 secret key for Google Authenticator TOTP'],
+    ['emergency_backup_codes', '[]', 'One-time emergency backup recovery codes (JSON string)']
   ];
 
   for (const [key, value, desc] of defaultSettings) {
@@ -312,6 +323,17 @@ async function initDatabase() {
       [key, value, desc]
     );
   }
+
+  // Sync master_password with payroll_password if payroll_password was previously customized
+  try {
+    const pwRes = await execute(`SELECT value FROM settings WHERE key = 'payroll_password'`);
+    if (pwRes.rows && pwRes.rows.length > 0 && pwRes.rows[0].value) {
+      await execute(
+        `INSERT INTO settings (key, value, description) VALUES ('master_password', ?, 'Master Admin Password') ON CONFLICT(key) DO UPDATE SET value = ? WHERE key = 'master_password' AND value = 'kki123'`,
+        [pwRes.rows[0].value, pwRes.rows[0].value]
+      );
+    }
+  } catch (e) {}
 
   // Update legacy settings if they are still at 08:30, lunch_deduction_mins 0, leisure_mins_allowed 2, or standard_month_days 26
   try {

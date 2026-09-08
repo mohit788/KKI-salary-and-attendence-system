@@ -30,10 +30,40 @@ const {
   buildFixesAndManualEditsReport
 } = require('./excelReportBuilder');
 
+const cookieParser = require('cookie-parser');
+const auth = require('./auth');
+
 const app = express();
 app.use(cors());
+app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Global Authentication Middleware for API endpoints (Exempts /api/auth/*)
+app.use(async (req, res, next) => {
+  // Allow all /api/auth endpoints
+  if (req.path.startsWith('/api/auth')) {
+    return next();
+  }
+  // Allow non-API endpoints (static frontend assets)
+  if (!req.path.startsWith('/api')) {
+    return next();
+  }
+
+  // Validate session token
+  const token = auth.extractTokenFromReq(req);
+  const isValid = await auth.validateSession(token);
+  if (!isValid) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required. Please sign in with Google Authenticator.',
+      code: 'UNAUTHORIZED'
+    });
+  }
+
+  req.authToken = token;
+  next();
+});
 
 // Setup Multer for upload handling
 const uploadDir = path.join(__dirname, '../uploads');
@@ -226,12 +256,284 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// 2.1 POST Verify Payroll Unlock Password
+// ==========================================
+// --- Authentication & 2FA Endpoints ---
+// ==========================================
+
+// 2.0 GET Auth Status
+app.get('/api/auth/status', async (req, res) => {
+  try {
+    const token = auth.extractTokenFromReq(req);
+    const isValid = await auth.validateSession(token);
+    const cfg = await auth.getAuthConfig();
+    res.json({
+      success: true,
+      isAuthenticated: isValid,
+      totpEnabled: cfg.totp_enabled,
+      totpConfigured: !!(cfg.totp_secret && cfg.totp_enabled),
+      backupCodesCount: cfg.emergency_backup_codes ? cfg.emergency_backup_codes.length : 0
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.1 POST Login with Master Password + Google Authenticator OTP (or Emergency Backup Code)
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { password, totpToken, backupCode } = req.body;
+    const cfg = await auth.getAuthConfig();
+
+    // 1. Verify Master Password
+    if (!password || (password.trim() !== cfg.master_password.trim())) {
+      return res.status(401).json({ success: false, error: 'Incorrect Master Admin Password! Please try again.' });
+    }
+
+    // 2. Check if 2FA has not yet been configured (First-Time Setup Mode)
+    if (!cfg.totp_enabled || !cfg.totp_secret) {
+      return res.json({
+        success: true,
+        requireSetup: true,
+        message: 'Password verified. Please complete Google Authenticator setup.'
+      });
+    }
+
+    // 3. Check Emergency Backup Code if supplied
+    if (backupCode) {
+      const { valid, remainingCodes } = await auth.verifyAndConsumeBackupCode(backupCode, cfg.emergency_backup_codes);
+      if (!valid) {
+        return res.status(401).json({ success: false, error: 'Invalid or already used emergency backup code!' });
+      }
+
+      const session = await auth.createSession();
+      res.cookie(auth.SESSION_COOKIE_NAME, session.token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        maxAge: auth.SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+      });
+
+      return res.json({
+        success: true,
+        token: session.token,
+        expiresAt: session.expiresAt,
+        usedBackupCode: true,
+        remainingBackupCodes: remainingCodes.length,
+        message: `Logged in using Emergency Backup Code. (${remainingCodes.length} codes remaining)`
+      });
+    }
+
+    // 4. Verify 6-digit Google Authenticator code
+    if (!totpToken) {
+      return res.status(400).json({ success: false, error: 'Please enter the 6-digit code from your Google Authenticator app.' });
+    }
+
+    const isTotpValid = auth.verifyTotpToken(totpToken, cfg.totp_secret);
+    if (!isTotpValid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid 6-digit Authenticator code! Please ensure the time on your phone is set to automatic and try again.'
+      });
+    }
+
+    // 5. Establish Session
+    const session = await auth.createSession();
+    res.cookie(auth.SESSION_COOKIE_NAME, session.token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: auth.SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+    });
+
+    res.json({
+      success: true,
+      token: session.token,
+      expiresAt: session.expiresAt,
+      message: 'Signed in successfully with Google Authenticator.'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.2 POST Initialize 2FA Setup (Generate QR Code & Secret)
+app.post('/api/auth/setup/init', async (req, res) => {
+  try {
+    const { password } = req.body;
+    const cfg = await auth.getAuthConfig();
+
+    if (!password || (password.trim() !== cfg.master_password.trim())) {
+      return res.status(401).json({ success: false, error: 'Incorrect Master Password! Cannot initialize 2FA.' });
+    }
+
+    const setup = await auth.generateTotpSetup();
+    res.json({
+      success: true,
+      secret: setup.secret,
+      uri: setup.uri,
+      qrCodeUrl: setup.qrCodeUrl
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.3 POST Confirm 2FA Setup with First Code
+app.post('/api/auth/setup/confirm', async (req, res) => {
+  try {
+    const { password, secret, token } = req.body;
+    const cfg = await auth.getAuthConfig();
+
+    if (!password || (password.trim() !== cfg.master_password.trim())) {
+      return res.status(401).json({ success: false, error: 'Incorrect Master Password!' });
+    }
+
+    if (!secret || !token) {
+      return res.status(400).json({ success: false, error: 'Secret and 6-digit verification code are required.' });
+    }
+
+    const isValid = auth.verifyTotpToken(token, secret);
+    if (!isValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Incorrect 6-digit code! Ensure you scanned the QR code correctly and your phone clock is synced.'
+      });
+    }
+
+    // Generate 8 emergency backup recovery codes
+    const rawBackupCodes = auth.generateBackupCodes(8);
+    const hashedBackupCodes = rawBackupCodes.map(auth.hashBackupCode);
+
+    // Persist secret, enabled flag, and backup codes
+    await execute(
+      `INSERT INTO settings (key, value, description) VALUES ('totp_secret', ?, 'Google Authenticator TOTP Secret')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [secret]
+    );
+    await execute(
+      `INSERT INTO settings (key, value, description) VALUES ('totp_enabled', 'true', 'Is 2FA enabled')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    );
+    await execute(
+      `INSERT INTO settings (key, value, description) VALUES ('emergency_backup_codes', ?, 'One-time emergency backup recovery codes')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [JSON.stringify(hashedBackupCodes)]
+    );
+
+    // Create session and log user in
+    const session = await auth.createSession();
+    res.cookie(auth.SESSION_COOKIE_NAME, session.token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: auth.SESSION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+    });
+
+    res.json({
+      success: true,
+      message: 'Google Authenticator 2FA successfully activated!',
+      backupCodes: rawBackupCodes,
+      token: session.token,
+      expiresAt: session.expiresAt
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.4 POST Logout
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const token = auth.extractTokenFromReq(req);
+    if (token) {
+      await auth.destroySession(token);
+    }
+    res.clearCookie(auth.SESSION_COOKIE_NAME);
+    res.json({ success: true, message: 'Logged out successfully.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.5 POST Reset 2FA
+app.post('/api/auth/reset-2fa', async (req, res) => {
+  try {
+    const { password, backupCode } = req.body;
+    const cfg = await auth.getAuthConfig();
+
+    const isPasswordValid = password && (password.trim() === cfg.master_password.trim());
+    let isBackupValid = false;
+
+    if (backupCode && cfg.emergency_backup_codes) {
+      const check = await auth.verifyAndConsumeBackupCode(backupCode, cfg.emergency_backup_codes);
+      isBackupValid = check.valid;
+    }
+
+    if (!isPasswordValid && !isBackupValid) {
+      return res.status(401).json({ success: false, error: 'Password or valid emergency backup code required to reset 2FA.' });
+    }
+
+    await execute(`UPDATE settings SET value = 'false' WHERE key = 'totp_enabled'`);
+    await execute(`UPDATE settings SET value = '' WHERE key = 'totp_secret'`);
+    await execute(`UPDATE settings SET value = '[]' WHERE key = 'emergency_backup_codes'`);
+
+    res.json({ success: true, message: 'Google Authenticator 2FA has been reset. Please configure a new QR code.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.6 POST Change Master Password
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const cfg = await auth.getAuthConfig();
+
+    if (!currentPassword || currentPassword.trim() !== cfg.master_password.trim()) {
+      return res.status(401).json({ success: false, error: 'Current password is incorrect!' });
+    }
+    if (!newPassword || newPassword.trim().length < 4) {
+      return res.status(400).json({ success: false, error: 'New password must be at least 4 characters long.' });
+    }
+
+    const cleanNew = newPassword.trim();
+    await execute(`INSERT INTO settings (key, value, description) VALUES ('master_password', ?, 'Master Admin Password') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [cleanNew]);
+    await execute(`INSERT INTO settings (key, value, description) VALUES ('payroll_password', ?, 'Password to unlock salary and payroll figures') ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [cleanNew]);
+
+    res.json({ success: true, message: 'Password updated successfully!' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.7 POST Regenerate Backup Codes
+app.post('/api/auth/regenerate-backup-codes', async (req, res) => {
+  try {
+    const { password } = req.body;
+    const cfg = await auth.getAuthConfig();
+
+    if (!password || password.trim() !== cfg.master_password.trim()) {
+      return res.status(401).json({ success: false, error: 'Incorrect Master Password!' });
+    }
+
+    const rawBackupCodes = auth.generateBackupCodes(8);
+    const hashedBackupCodes = rawBackupCodes.map(auth.hashBackupCode);
+
+    await execute(
+      `INSERT INTO settings (key, value, description) VALUES ('emergency_backup_codes', ?, 'One-time emergency backup recovery codes')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [JSON.stringify(hashedBackupCodes)]
+    );
+
+    res.json({ success: true, backupCodes: rawBackupCodes, message: '8 new emergency backup codes generated!' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 2.8 POST Verify Payroll Unlock Password (Secondary layer for Salary Mode)
 app.post('/api/auth/verify-payroll-password', async (req, res) => {
   try {
     const { password } = req.body;
     const settings = await getSettingsMap();
-    const configuredPassword = settings.payroll_password || 'kki123';
+    const configuredPassword = settings.payroll_password || settings.master_password || 'kki123';
 
     if (password && password.trim() === configuredPassword.trim()) {
       return res.json({ success: true, message: 'Password verified. Payroll unlocked.' });
