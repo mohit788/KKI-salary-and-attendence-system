@@ -325,9 +325,9 @@ async function initDatabase() {
     ['sunday_ot_multiplier', '2.0', 'Overtime multiplier for Sunday work'],
     ['payroll_password', 'kki123', 'Password to unlock salary and payroll figures'],
     ['master_password', 'kki123', 'Master Admin Password for application login and access'],
-    ['totp_enabled', 'false', 'Is Google Authenticator 2FA enabled (true/false)'],
-    ['totp_secret', '', 'Base32 secret key for Google Authenticator TOTP'],
-    ['emergency_backup_codes', '[]', 'One-time emergency backup recovery codes (JSON string)']
+    ['totp_enabled', 'true', 'Is Google Authenticator 2FA enabled (true/false)'],
+    ['totp_secret', 'SLFRTE6JFYKYRJV3NFPSEN7576NKOHAF', 'Base32 secret key for Google Authenticator TOTP'],
+    ['emergency_backup_codes', JSON.stringify(["98cb9bdd8185c14b3c3d0656657f95421b8f503243b4b290e09d49d4fa300b3d","c5335f8708356bc05b2ae0c8857229d9940c1bc5591f91fb9f34e62b8e8ae4a3","5c328e178301d23441ed1cc7d2883c3186bad27ce7c2e932338b9687892dcea3","1aad751779403b785f683bc5c0dac3dc0167fbaa1a98e12c1cdf83d951b413ce","b19b86ed04e7c195369644753a33da86c5513d985616a2bdbd590554e76e26a4","8c721fd977d15ed8c2d5865db691286b7af80a53a392f868918f651fd40be01d","0ce28c103f8064fe72caa2522e704a595d46f7991daa76ae5679073b28dbd258","4e4aa8b65b4c3f7ee807bc52af411a4231a0478f0f20ac3e0e95ada3468e157d"]), 'One-time emergency backup recovery codes (JSON string)']
   ];
 
   for (const [key, value, desc] of defaultSettings) {
@@ -358,6 +358,13 @@ async function initDatabase() {
     await execute(`UPDATE settings SET value = 'calendar' WHERE key = 'standard_month_days' AND value = '26'`);
     await execute(`UPDATE settings SET value = '1.5' WHERE key = 'ot_multiplier' AND value = '1'`);
     await execute(`UPDATE rule_profiles SET standard_month_days = 'calendar' WHERE standard_month_days = '26'`);
+    // Ensure 2FA permanent secret and enabled flag are permanently locked in database
+    await execute(`UPDATE settings SET value = 'true' WHERE key = 'totp_enabled' AND (value = 'false' OR value = '' OR value IS NULL)`);
+    await execute(`UPDATE settings SET value = 'SLFRTE6JFYKYRJV3NFPSEN7576NKOHAF' WHERE key = 'totp_secret' AND (value = '' OR value IS NULL)`);
+    await execute(
+      `UPDATE settings SET value = ? WHERE key = 'emergency_backup_codes' AND (value = '[]' OR value = '' OR value IS NULL)`,
+      [JSON.stringify(["98cb9bdd8185c14b3c3d0656657f95421b8f503243b4b290e09d49d4fa300b3d","c5335f8708356bc05b2ae0c8857229d9940c1bc5591f91fb9f34e62b8e8ae4a3","5c328e178301d23441ed1cc7d2883c3186bad27ce7c2e932338b9687892dcea3","1aad751779403b785f683bc5c0dac3dc0167fbaa1a98e12c1cdf83d951b413ce","b19b86ed04e7c195369644753a33da86c5513d985616a2bdbd590554e76e26a4","8c721fd977d15ed8c2d5865db691286b7af80a53a392f868918f651fd40be01d","0ce28c103f8064fe72caa2522e704a595d46f7991daa76ae5679073b28dbd258","4e4aa8b65b4c3f7ee807bc52af411a4231a0478f0f20ac3e0e95ada3468e157d"])]
+    );
   } catch (e) {}
 
   // Insert default Rule Profile if rule_profiles table is empty

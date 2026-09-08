@@ -7,6 +7,19 @@ const ISSUER_NAME = 'KKI Attendance & Payroll';
 const ACCOUNT_LABEL = 'Admin';
 const SESSION_COOKIE_NAME = 'kki_session';
 
+// Permanent stable Base32 Secret & Emergency Backup Codes (Protects against Render ephemeral wipes)
+const DEFAULT_PERMANENT_TOTP_SECRET = 'SLFRTE6JFYKYRJV3NFPSEN7576NKOHAF';
+const DEFAULT_BACKUP_CODES = [
+  '1942-8371',
+  '5820-4916',
+  '7301-6542',
+  '8492-3105',
+  '6219-5840',
+  '3951-7284',
+  '4816-9203',
+  '9035-1678'
+];
+
 // Security Policy: Forced absolute logout after 30 minutes, idle logout after 5 minutes
 const FORCED_LOGOUT_MINUTES = 30; // 30 minutes absolute session lifetime
 const INACTIVITY_TIMEOUT_MINUTES = 5; // 5 minutes inactivity timeout
@@ -23,8 +36,8 @@ async function getAuthConfig() {
   );
   const cfg = {
     master_password: 'kki123',
-    totp_enabled: false,
-    totp_secret: '',
+    totp_enabled: true,
+    totp_secret: DEFAULT_PERMANENT_TOTP_SECRET,
     emergency_backup_codes: []
   };
 
@@ -32,25 +45,45 @@ async function getAuthConfig() {
     if (r.key === 'master_password') cfg.master_password = r.value || 'kki123';
     else if (r.key === 'payroll_password' && (!cfg.master_password || cfg.master_password === 'kki123')) {
       cfg.master_password = r.value || 'kki123';
-    } else if (r.key === 'totp_enabled') cfg.totp_enabled = r.value === 'true';
-    else if (r.key === 'totp_secret') cfg.totp_secret = r.value || '';
-    else if (r.key === 'emergency_backup_codes') {
+    } else if (r.key === 'totp_enabled') {
+      cfg.totp_enabled = r.value !== 'false';
+    } else if (r.key === 'totp_secret') {
+      if (r.value && r.value.trim()) cfg.totp_secret = r.value.trim();
+    } else if (r.key === 'emergency_backup_codes') {
       try {
-        cfg.emergency_backup_codes = JSON.parse(r.value || '[]');
+        const parsed = JSON.parse(r.value || '[]');
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cfg.emergency_backup_codes = parsed;
+        }
       } catch (e) {
         cfg.emergency_backup_codes = [];
       }
     }
   });
 
+  // Ensure emergency backup codes are populated
+  if (!cfg.emergency_backup_codes || cfg.emergency_backup_codes.length === 0) {
+    cfg.emergency_backup_codes = DEFAULT_BACKUP_CODES.map(hashBackupCode);
+  }
+
+  // Environment Variable Overrides (Guarantees persistence across Render ephemeral container redeployments)
+  if (process.env.TOTP_SECRET && process.env.TOTP_SECRET.trim()) {
+    cfg.totp_secret = process.env.TOTP_SECRET.trim();
+    cfg.totp_enabled = true;
+  }
+  if (process.env.MASTER_PASSWORD && process.env.MASTER_PASSWORD.trim()) {
+    cfg.master_password = process.env.MASTER_PASSWORD.trim();
+  }
+
   return cfg;
 }
 
 /**
- * Generate a new TOTP secret & QR Code Data URL
+ * Generate TOTP secret & QR Code Data URL (Defaults to permanent secret)
  */
-async function generateTotpSetup() {
-  const secret = generateSecret();
+async function generateTotpSetup(customSecret = null) {
+  const cfg = await getAuthConfig();
+  const secret = customSecret || cfg.totp_secret || DEFAULT_PERMANENT_TOTP_SECRET;
   const uri = generateURI({
     issuer: ISSUER_NAME,
     label: ACCOUNT_LABEL,
@@ -259,6 +292,8 @@ module.exports = {
   SESSION_MAX_AGE_MS,
   INACTIVITY_TIMEOUT_MS,
   SESSION_EXPIRY_DAYS,
+  DEFAULT_PERMANENT_TOTP_SECRET,
+  DEFAULT_BACKUP_CODES,
   getAuthConfig,
   generateTotpSetup,
   verifyTotpToken,

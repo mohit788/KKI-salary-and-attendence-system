@@ -490,14 +490,31 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                 </button>
 
                 {/* Footer Switcher */}
-                <div className="pt-3 border-t border-slate-800 text-center">
-                  <button
-                    type="button"
-                    onClick={() => { setMode('backup-login'); setError(''); }}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-semibold"
-                  >
-                    Lost access to your phone? Enter Emergency Backup Code →
-                  </button>
+                <div className="pt-3 border-t border-slate-800 space-y-2 text-center">
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError('');
+                        const pwd = password.trim() || 'kki123';
+                        initSetup(pwd);
+                      }}
+                      className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>Scan / View Permanent QR Code & Setup Key →</span>
+                    </button>
+                  </div>
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('backup-login'); setError(''); }}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium cursor-pointer"
+                    >
+                      Lost access to your phone? Enter Emergency Backup Code →
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -642,14 +659,23 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                     </div>
                   )}
 
-                  <button
-                    type="submit"
-                    disabled={loading || setupToken.length < 6}
-                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-600/30 border border-emerald-400/50 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 cursor-pointer"
-                  >
-                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                    <span>{loading ? 'Verifying...' : 'Activate Google Authenticator'}</span>
-                  </button>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => { setMode('login'); setError(''); }}
+                      className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                    >
+                      ← Back to Login
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading || setupToken.length < 6}
+                      className="flex-1 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-600/30 border border-emerald-400/50 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 cursor-pointer"
+                    >
+                      {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                      <span>{loading ? 'Verifying...' : 'Confirm & Save'}</span>
+                    </button>
+                  </div>
                 </form>
               </div>
             </div>
