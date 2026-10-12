@@ -41,7 +41,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   // Month Selection State
-  const [selectedMonth, setSelectedMonth] = useState('all');
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    return localStorage.getItem('kki_selected_month') || 'all';
+  });
   const [availableMonths, setAvailableMonths] = useState([]);
 
   // Factory Calendar & Holidays Modal State
@@ -114,6 +116,7 @@ export default function App() {
   const handleSelectMonth = (newMonth) => {
     const validMonth = newMonth || 'all';
     setSelectedMonth(validMonth);
+    localStorage.setItem('kki_selected_month', validMonth);
     if (isAuthenticated) {
       refreshData(validMonth);
     }
@@ -414,6 +417,7 @@ export default function App() {
           const uploadedMonth = res.detectedMonth?.monthKey || selectedMonth;
           if (uploadedMonth && uploadedMonth !== 'all') {
             setSelectedMonth(uploadedMonth);
+            localStorage.setItem('kki_selected_month', uploadedMonth);
           }
           await refreshData(uploadedMonth);
           setActiveTab('workers');

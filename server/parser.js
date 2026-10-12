@@ -189,16 +189,18 @@ function parseExcelFile(filePathOrBuffer) {
 }
 
 /**
- * Extract raw text safely from Word document (.docx or .doc)
+ * Extract raw text safely from Word document (.docx or .doc) including headers
  * @param {string} filePath 
  */
-async function extractWordText(filePath) {
+async function extractWordDoc(filePath) {
   const ext = path.extname(filePath).toLowerCase();
-  
+  let text = '';
+  let headerText = '';
+
   if (ext === '.docx') {
     try {
       const result = await mammoth.extractRawText({ path: filePath });
-      if (result.value && result.value.trim()) return result.value;
+      if (result.value && result.value.trim()) text = result.value;
     } catch (err) {
       console.warn('Mammoth failed for docx, attempting word-extractor fallback:', err.message);
     }
@@ -207,27 +209,42 @@ async function extractWordText(filePath) {
   // Fallback to WordExtractor (OLE2 format)
   try {
     const doc = await extractor.extract(filePath);
-    const body = doc.getBody();
-    if (body && body.trim()) return body;
+    headerText = doc.getHeaders() || '';
+    const body = doc.getBody() || '';
+    const footer = doc.getFooters() || '';
+    if (body.trim()) {
+      text = (headerText ? headerText + '\n' : '') + body + (footer ? '\n' + footer : '');
+    }
   } catch (err) {
     console.warn('WordExtractor failed, attempting mammoth fallback:', err.message);
-    try {
-      const result = await mammoth.extractRawText({ path: filePath });
-      if (result.value) return result.value;
-    } catch (e) {
-      // Ignore
+    if (!text) {
+      try {
+        const result = await mammoth.extractRawText({ path: filePath });
+        if (result.value) text = result.value;
+      } catch (e) {
+        // Ignore
+      }
     }
   }
 
-  return '';
+  return { text, headerText };
 }
 
 /**
- * Parse Word Document (.docx, .doc)
+ * Extract raw text safely from Word document (.docx or .doc)
+ * @param {string} filePath 
+ */
+async function extractWordText(filePath) {
+  const { text } = await extractWordDoc(filePath);
+  return text;
+}
+
+/**
+ * Parse Word Document (.docx, .doc) supporting both standard vertical log and horizontal matrix formats
  * @param {string} filePath 
  */
 async function parseWordFile(filePath) {
-  const text = await extractWordText(filePath);
+  const { text, headerText } = await extractWordDoc(filePath);
   if (!text) return [];
 
   const rawLines = text.split('\n');
@@ -238,6 +255,7 @@ async function parseWordFile(filePath) {
   let currentStaffNo = '';
   let currentStaffName = '';
 
+  // 1. Standard Vertical Format: Department, Staff No., Staff Name, Date, Swipe Record, Work Time
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
@@ -314,6 +332,104 @@ async function parseWordFile(filePath) {
           machine_work_time,
         });
       }
+    }
+  }
+
+  if (workersMap.size > 0) {
+    return Array.from(workersMap.values());
+  }
+
+  // 2. Matrix Format Fallback: EmpCode, Name, Day numbers (01..N), Arrived TIme, Dept.Time, Working Hrs.
+  const fullHeaderText = (headerText ? headerText + ' ' : '') + lines.slice(0, 30).join(' ');
+  const mRange = fullHeaderText.match(/(\d{2})[-/](\d{2})[-/](\d{4})/);
+  let year = new Date().getFullYear().toString();
+  let month = String(new Date().getMonth() + 1).padStart(2, '0');
+  if (mRange) {
+    month = mRange[2];
+    year = mRange[3];
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === 'EmpCode') {
+      let j = i + 1;
+      while (j < lines.length && ['Name', 'Present', 'HL', 'WO', 'Absent', 'Leave', 'PaidDays', 'LateHrs.', 'WorkHrs', 'OvTim'].includes(lines[j])) {
+        j++;
+      }
+      if (j >= lines.length) break;
+      const staff_no = lines[j];
+      const staff_name = lines[j + 1];
+      j += 2;
+
+      while (j < lines.length && !lines[j].match(/^01$/)) {
+        j++;
+      }
+      if (j >= lines.length) break;
+
+      const days = [];
+      while (j < lines.length && lines[j].match(/^\d{2}$/)) {
+        days.push(lines[j]);
+        j++;
+      }
+
+      if (lines[j] && lines[j].toLowerCase().includes('arrived')) {
+        j++;
+      }
+      const arrivedTimes = [];
+      for (let k = 0; k < days.length && j < lines.length; k++) {
+        arrivedTimes.push(lines[j]);
+        j++;
+      }
+
+      if (lines[j] && (lines[j].toLowerCase().includes('dept') || lines[j].toLowerCase().includes('departure'))) {
+        j++;
+      }
+      const deptTimes = [];
+      for (let k = 0; k < days.length && j < lines.length; k++) {
+        deptTimes.push(lines[j]);
+        j++;
+      }
+
+      if (lines[j] && lines[j].toLowerCase().includes('working')) {
+        j++;
+      }
+      const workHrs = [];
+      for (let k = 0; k < days.length && j < lines.length; k++) {
+        workHrs.push(lines[j]);
+        j++;
+      }
+
+      const records = [];
+      for (let k = 0; k < days.length; k++) {
+        const day = days[k];
+        const date = `${year}-${month}-${day}`;
+        const weekday = getWeekdayFromISO(date);
+        const arr = (arrivedTimes[k] && arrivedTimes[k] !== '00:00') ? arrivedTimes[k] : '';
+        const dep = (deptTimes[k] && deptTimes[k] !== '00:00') ? deptTimes[k] : '';
+        let swipe = '';
+        if (arr && dep) swipe = `${arr} ${dep}`;
+        else if (arr) swipe = arr;
+        else if (dep) swipe = dep;
+
+        const wTime = (workHrs[k] && workHrs[k] !== '00:00') ? workHrs[k] : '00:00';
+        records.push({
+          staff_no,
+          date,
+          weekday,
+          swipe_record: swipe,
+          machine_work_time: wTime,
+        });
+      }
+
+      if (staff_no && !workersMap.has(staff_no)) {
+        workersMap.set(staff_no, {
+          staff_no,
+          staff_name,
+          department: 'WORKER',
+          records,
+        });
+      }
+
+      i = j - 1;
     }
   }
 

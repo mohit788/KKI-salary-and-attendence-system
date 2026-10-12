@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const { execute, batch, initDatabase } = require('./db');
+const { execute, batch, initDatabase, backupDatabaseToSeed } = require('./db');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
 const {
@@ -839,6 +839,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       const chunk = dbStatements.slice(i, i + 150);
       await batch(chunk);
     }
+
+    // Auto-backup to seed_data.json so uploaded month persists across server restarts
+    backupDatabaseToSeed().catch(e => console.warn('Auto backup after upload failed:', e.message));
 
     const sortedDates = Array.from(datesSet).sort();
     const startDate = sortedDates[0] || '';

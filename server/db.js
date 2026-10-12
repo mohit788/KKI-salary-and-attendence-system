@@ -385,7 +385,7 @@ async function initDatabase() {
       if (fs.existsSync(seedPath)) {
         console.log('🌱 Database is empty. Restoring from seed_data.json backup...');
         const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-        const tables = ['settings', 'rule_profiles', 'workers', 'custom_rules', 'advances', 'audit_logs', 'raw_punches', 'daily_attendance'];
+        const tables = ['settings', 'rule_profiles', 'workers', 'custom_rules', 'advances', 'audit_logs', 'raw_punches', 'daily_attendance', 'factory_calendar', 'paid_holidays'];
         for (const tbl of tables) {
           const rows = seedData[tbl];
           if (Array.isArray(rows) && rows.length > 0) {
@@ -408,9 +408,47 @@ async function initDatabase() {
   console.log('✅ Attendance & Payroll Database Initialized.');
 }
 
+/**
+ * Auto-backup full SQLite database state to seed_data.json
+ */
+async function backupDatabaseToSeed() {
+  try {
+    const seedPath = path.join(__dirname, '../data/seed_data.json');
+    const tables = [
+      'settings',
+      'rule_profiles',
+      'workers',
+      'custom_rules',
+      'advances',
+      'audit_logs',
+      'raw_punches',
+      'daily_attendance',
+      'factory_calendar',
+      'paid_holidays'
+    ];
+    const dump = {};
+    for (const t of tables) {
+      try {
+        const res = await execute(`SELECT * FROM ${t}`);
+        dump[t] = res.rows || [];
+      } catch (e) {
+        // table might not exist
+      }
+    }
+    fs.writeFileSync(seedPath, JSON.stringify(dump, null, 2));
+    console.log('💾 Successfully backed up full database to seed_data.json');
+    return true;
+  } catch (err) {
+    console.warn('⚠️ Auto-backup to seed_data.json error:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   db,
   execute,
   batch,
   initDatabase,
+  backupDatabaseToSeed,
 };
+
