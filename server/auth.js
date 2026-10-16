@@ -61,6 +61,12 @@ async function getAuthConfig() {
     }
   });
 
+  // Ensure permanent TOTP secret and 2FA are always enabled
+  if (!cfg.totp_secret || !cfg.totp_secret.trim()) {
+    cfg.totp_secret = DEFAULT_PERMANENT_TOTP_SECRET;
+  }
+  cfg.totp_enabled = true;
+
   // Ensure emergency backup codes are populated
   if (!cfg.emergency_backup_codes || cfg.emergency_backup_codes.length === 0) {
     cfg.emergency_backup_codes = DEFAULT_BACKUP_CODES.map(hashBackupCode);
@@ -104,13 +110,13 @@ async function generateTotpSetup(customSecret = null) {
 
 /**
  * Verify a 6-digit TOTP token against a secret
- * window: 1 allows +/- 30s clock drift
+ * window: 2 allows +/- 60s clock drift (2.5m window)
  */
 function verifyTotpToken(token, secret) {
   if (!token || !secret) return false;
   try {
     const cleanToken = String(token).replace(/\s+/g, '').trim();
-    const result = verifySync({ token: cleanToken, secret, window: 1 });
+    const result = verifySync({ token: cleanToken, secret, window: 2 });
     return !!(result && result.valid);
   } catch (err) {
     console.error('TOTP Verify Error:', err.message);

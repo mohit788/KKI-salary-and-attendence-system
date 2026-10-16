@@ -268,6 +268,18 @@ app.post('/api/settings', async (req, res) => {
 });
 
 // ==========================================
+// --- Health Check & Keep-Alive Endpoint ---
+// ==========================================
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    uptimeSeconds: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    service: 'KKI-salary-and-attendence-system'
+  });
+});
+
+// ==========================================
 // --- Authentication & 2FA Endpoints ---
 // ==========================================
 
@@ -3603,6 +3615,50 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Render 24/7 Keep-Alive Self-Pinger
+function startRenderKeepAlive() {
+  const externalUrl = process.env.RENDER_EXTERNAL_URL
+    || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : null)
+    || (process.env.RENDER === 'true' && process.env.RENDER_SERVICE_NAME ? `https://${process.env.RENDER_SERVICE_NAME}.onrender.com` : null)
+    || (process.env.NODE_ENV === 'production' && process.env.RENDER === 'true' ? 'https://kki-salary-and-attendance-system.onrender.com' : null)
+    || process.env.APP_URL;
+
+  if (!externalUrl) {
+    console.log('ℹ️ Render external URL not detected (running locally or without public domain). Self-ping idle.');
+    return;
+  }
+
+  const cleanUrl = externalUrl.replace(/\/$/, '');
+  const pingUrl = `${cleanUrl}/api/health`;
+  const PING_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes (Render free tier idle cutoff is 15 minutes)
+
+  console.log(`⏰ Render 24/7 Keep-Alive activated. Target: ${pingUrl} (every 10m)`);
+
+  const doPing = () => {
+    try {
+      const isHttps = pingUrl.startsWith('https');
+      const client = isHttps ? require('https') : require('http');
+      const req = client.get(pingUrl, (res) => {
+        res.resume(); // Consume stream to free memory
+        console.log(`📡 [Keep-Alive Ping] ${new Date().toISOString()} -> HTTP ${res.statusCode}`);
+      });
+      req.on('error', (err) => {
+        console.warn('⚠️ [Keep-Alive Ping Warning]:', err.message);
+      });
+      req.setTimeout(15000, () => {
+        req.destroy();
+      });
+    } catch (e) {
+      console.warn('⚠️ [Keep-Alive Ping Exception]:', e.message);
+    }
+  };
+
+  // First ping after 30 seconds once server is fully ready
+  setTimeout(doPing, 30 * 1000);
+  // Recurring ping every 10 minutes
+  setInterval(doPing, PING_INTERVAL_MS);
+}
+
 // Start Unified Server
 const PORT = process.env.PORT || 5000;
 initDatabase().then(async () => {
@@ -3614,6 +3670,7 @@ initDatabase().then(async () => {
   }
   app.listen(PORT, () => {
     console.log(`🚀 Unified Factory HR (Frontend + Backend) running on Port ${PORT}: http://localhost:${PORT}`);
+    startRenderKeepAlive();
   });
 }).catch(err => {
   console.error('Failed to start server:', err);

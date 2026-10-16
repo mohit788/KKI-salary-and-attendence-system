@@ -25,7 +25,7 @@ import {
 export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutReason }) {
   // Mode: 'login' | 'setup-password' | 'setup-qr' | 'setup-backup' | 'backup-login'
   const [mode, setMode] = useState('login');
-  const [totpConfigured, setTotpConfigured] = useState(false);
+  const [totpConfigured, setTotpConfigured] = useState(true);
   const [initialChecking, setInitialChecking] = useState(true);
   const [activeLogoutReason, setActiveLogoutReason] = useState(
     () => logoutReason || sessionStorage.getItem('kki_logout_reason') || null
@@ -62,6 +62,25 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  // Keep-alive heartbeat: ping /api/health every 4 minutes and on window focus/visibility
+  useEffect(() => {
+    const pingHealth = () => {
+      fetch('/api/health').catch(() => {});
+    };
+    pingHealth();
+    const interval = setInterval(pingHealth, 4 * 60 * 1000);
+    const handleVis = () => {
+      if (document.visibilityState === 'visible') pingHealth();
+    };
+    window.addEventListener('focus', pingHealth);
+    document.addEventListener('visibilitychange', handleVis);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', pingHealth);
+      document.removeEventListener('visibilitychange', handleVis);
+    };
+  }, []);
+
   // Check initial server auth status
   useEffect(() => {
     checkStatus();
@@ -78,14 +97,12 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
           return;
         }
         setTotpConfigured(!!res.totpConfigured);
-        if (!res.totpConfigured) {
-          setMode('setup-password');
-        } else {
-          setMode('login');
-        }
+        setMode('login');
       }
     } catch (err) {
       console.error('Failed to check auth status:', err);
+      setTotpConfigured(true);
+      setMode('login');
     } finally {
       setInitialChecking(false);
     }
@@ -501,15 +518,11 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                       <span>Lost access to phone? Enter Emergency Backup Code →</span>
                     </button>
                   </div>
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => { setMode('setup-password'); setError(''); }}
-                      className="text-xs text-amber-400 hover:text-amber-300 transition-colors font-semibold cursor-pointer inline-flex items-center gap-1.5"
-                    >
-                      <Smartphone className="w-3.5 h-3.5" />
-                      <span>Set Up Google Authenticator on Phone (One-Time Setup) →</span>
-                    </button>
+                  <div className="pt-1">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium bg-emerald-950/60 text-emerald-400 border border-emerald-800/40">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>2FA Authenticator Linked to Authorized Device</span>
+                    </span>
                   </div>
                 </div>
               </form>
@@ -827,14 +840,25 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                   <span>{loading ? 'Verifying Code...' : 'Log In with Recovery Code'}</span>
                 </button>
 
-                <div className="pt-3 border-t border-slate-800 text-center">
-                  <button
-                    type="button"
-                    onClick={() => { setMode('login'); setError(''); }}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-semibold"
-                  >
-                    ← Back to Google Authenticator Login
-                  </button>
+                <div className="pt-3 border-t border-slate-800 text-center space-y-2">
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('login'); setError(''); }}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-semibold"
+                    >
+                      ← Back to Google Authenticator Login
+                    </button>
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('setup-password'); setError(''); }}
+                      className="text-[11px] text-slate-500 hover:text-amber-400 transition-colors cursor-pointer"
+                    >
+                      Need to re-pair a new phone? (Master Password required) →
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
