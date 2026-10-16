@@ -398,11 +398,13 @@ export default function App() {
     setActiveTab('worker-detail');
   };
 
-  // Upload file & get preview
+  // Upload file & get preview (with clean month overwrite enabled)
   const handleUploadFile = async (file) => {
     setLoading(true);
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('overwrite', 'true');
+    formData.append('overwriteMonth', 'true');
 
     try {
       const response = await fetch('/api/upload', {

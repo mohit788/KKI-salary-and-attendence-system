@@ -19,22 +19,79 @@ function cleanVal(val) {
 }
 
 /**
- * Normalize Date String "2026-07-01 Wed" -> { date: "2026-07-01", weekday: "Wed" }
+ * Check if a cell contains a valid date candidate
+ */
+function isDateCandidate(cell) {
+  if (cell === null || cell === undefined || cell === '') return false;
+  if (cell instanceof Date && !isNaN(cell.getTime())) return true;
+  if (typeof cell === 'number' && cell > 25000 && cell < 75000) return true;
+  const str = String(cell).trim();
+  return !!(
+    str.match(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/) ||
+    str.match(/\d{1,2}[-/.]\d{1,2}[-/.]\d{4}/)
+  );
+}
+
+/**
+ * Normalize Date String to standard ISO YYYY-MM-DD
+ * Supports:
+ * - "2026-07-01 Wed", "2026/09/30", "2026.09.30" (ISO)
+ * - "01-09-2026", "30-09-2026 Wed", "30/09/2026", "30.09.2026" (Indian/UK)
+ * - Excel date serial numbers (e.g. 46294)
+ * - JavaScript Date objects
  */
 function parseDateCell(rawDate) {
   if (!rawDate) return { date: '', weekday: '' };
+
+  // 1. JavaScript Date object
+  if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+    const yyyy = rawDate.getFullYear();
+    const mm = String(rawDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(rawDate.getDate()).padStart(2, '0');
+    const iso = `${yyyy}-${mm}-${dd}`;
+    return { date: iso, weekday: getWeekdayFromISO(iso) };
+  }
+
+  // 2. Excel numeric serial date (e.g. 46294 for 2026-09-30)
+  if (typeof rawDate === 'number' && rawDate > 25000 && rawDate < 75000) {
+    try {
+      const d = XLSX.SSF.parse_date_code(rawDate);
+      if (d && d.y && d.m && d.d) {
+        const iso = `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+        return { date: iso, weekday: getWeekdayFromISO(iso) };
+      }
+    } catch (e) {}
+  }
+
   const str = String(rawDate).trim();
 
-  // Match ISO date YYYY-MM-DD
-  const isoMatch = str.match(/(\d{4}-\d{2}-\d{2})\s*([A-Za-z]+)?/);
+  // 3. Match ISO format: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  const isoMatch = str.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+([A-Za-z]+))?/);
   if (isoMatch) {
+    const yyyy = isoMatch[1];
+    const mm = isoMatch[2].padStart(2, '0');
+    const dd = isoMatch[3].padStart(2, '0');
+    const iso = `${yyyy}-${mm}-${dd}`;
     return {
-      date: isoMatch[1],
-      weekday: isoMatch[2] || getWeekdayFromISO(isoMatch[1]),
+      date: iso,
+      weekday: isoMatch[4] ? isoMatch[4].slice(0, 3) : getWeekdayFromISO(iso),
     };
   }
 
-  return { date: str, weekday: '' };
+  // 4. Match Indian/UK format: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+  const dmyMatch = str.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:\s+([A-Za-z]+))?/);
+  if (dmyMatch) {
+    const dd = dmyMatch[1].padStart(2, '0');
+    const mm = dmyMatch[2].padStart(2, '0');
+    const yyyy = dmyMatch[3];
+    const iso = `${yyyy}-${mm}-${dd}`;
+    return {
+      date: iso,
+      weekday: dmyMatch[4] ? dmyMatch[4].slice(0, 3) : getWeekdayFromISO(iso),
+    };
+  }
+
+  return { date: '', weekday: '' };
 }
 
 function getWeekdayFromISO(isoStr) {
@@ -154,32 +211,33 @@ function parseExcelFile(filePathOrBuffer) {
         continue;
       }
 
-      // Check if this row is a daily record row (has Date like 2026-07-01)
-      const dateCell = row.find(c => String(c).match(/\d{4}-\d{2}-\d{2}/));
+      // Check if this row is a daily record row (has Date like 2026-07-01, 30-09-2026, or serial)
+      const dateCell = row.find(isDateCandidate);
       if (dateCell && currentStaffNo) {
         const { date, weekday } = parseDateCell(dateCell);
+        if (date) {
+          // Find Swipe Record cell (contains HH:MM or blank/ditto)
+          let swipeCell = '';
+          let machineTimeCell = '';
 
-        // Find Swipe Record cell (contains HH:MM or blank/ditto)
-        let swipeCell = '';
-        let machineTimeCell = '';
-
-        row.forEach(cell => {
-          const cStr = String(cell).trim();
-          if (cStr.match(/\d{1,2}:\d{2}/)) {
-            if (!swipeCell) swipeCell = cStr;
-            else machineTimeCell = cStr;
-          }
-        });
-
-        const workerObj = workersMap.get(currentStaffNo);
-        if (workerObj) {
-          workerObj.records.push({
-            staff_no: currentStaffNo,
-            date,
-            weekday,
-            swipe_record: swipeCell,
-            machine_work_time: machineTimeCell,
+          row.forEach(cell => {
+            const cStr = String(cell).trim();
+            if (cStr.match(/\d{1,2}:\d{2}/)) {
+              if (!swipeCell) swipeCell = cStr;
+              else machineTimeCell = cStr;
+            }
           });
+
+          const workerObj = workersMap.get(currentStaffNo);
+          if (workerObj) {
+            workerObj.records.push({
+              staff_no: currentStaffNo,
+              date,
+              weekday,
+              swipe_record: swipeCell,
+              machine_work_time: machineTimeCell,
+            });
+          }
         }
       }
     }
@@ -305,11 +363,10 @@ async function parseWordFile(filePath) {
       }
     }
 
-    // Match daily date line "2026-07-01 Wed" or similar ISO date
-    const dateMatch = line.match(/(\d{4}-\d{2}-\d{2})\s*([A-Za-z]+)?/);
-    if (dateMatch) {
-      const date = dateMatch[1];
-      const weekday = dateMatch[2] || getWeekdayFromISO(date);
+    // Match daily date line "2026-07-01 Wed", "30-09-2026 Wed", "30/09/2026", etc.
+    const parsedDate = parseDateCell(line);
+    if (parsedDate && parsedDate.date) {
+      const { date, weekday } = parsedDate;
       const nextLine = lines[i + 1] || '';
       const nextNextLine = lines[i + 2] || '';
 
@@ -341,12 +398,17 @@ async function parseWordFile(filePath) {
 
   // 2. Matrix Format Fallback: EmpCode, Name, Day numbers (01..N), Arrived TIme, Dept.Time, Working Hrs.
   const fullHeaderText = (headerText ? headerText + ' ' : '') + lines.slice(0, 30).join(' ');
-  const mRange = fullHeaderText.match(/(\d{2})[-/](\d{2})[-/](\d{4})/);
+  const mRange = fullHeaderText.match(/(\d{2})[-/](\d{2})[-/](\d{4})/) || fullHeaderText.match(/(\d{4})[-/](\d{2})[-/](\d{2})/);
   let year = new Date().getFullYear().toString();
   let month = String(new Date().getMonth() + 1).padStart(2, '0');
   if (mRange) {
-    month = mRange[2];
-    year = mRange[3];
+    if (mRange[3] && mRange[3].length === 4) {
+      month = mRange[2];
+      year = mRange[3];
+    } else if (mRange[1] && mRange[1].length === 4) {
+      year = mRange[1];
+      month = mRange[2];
+    }
   }
 
   for (let i = 0; i < lines.length; i++) {
@@ -360,14 +422,14 @@ async function parseWordFile(filePath) {
       const staff_name = lines[j + 1];
       j += 2;
 
-      while (j < lines.length && !lines[j].match(/^01$/)) {
+      while (j < lines.length && !lines[j].match(/^(?:0?1)$/)) {
         j++;
       }
       if (j >= lines.length) break;
 
       const days = [];
-      while (j < lines.length && lines[j].match(/^\d{2}$/)) {
-        days.push(lines[j]);
+      while (j < lines.length && lines[j].match(/^(?:0?[1-9]|[12]\d|3[01])$/)) {
+        days.push(lines[j].padStart(2, '0'));
         j++;
       }
 
@@ -441,5 +503,6 @@ module.exports = {
   parseWordFile,
   parseSwipeRecord,
   parseDateCell,
+  isDateCandidate,
 };
 

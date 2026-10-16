@@ -409,6 +409,18 @@ app.post('/api/auth/setup/init', async (req, res) => {
     const { password } = req.body;
     const cfg = await auth.getAuthConfig();
 
+    // STRICT LOCKDOWN: If 2FA is already configured, unauthenticated visitors CANNOT view or generate QR codes
+    if (cfg.totp_enabled && cfg.totp_secret) {
+      const token = auth.extractTokenFromReq(req);
+      const session = token ? await auth.validateSession(token) : null;
+      if (!session) {
+        return res.status(403).json({
+          success: false,
+          error: 'Google Authenticator 2FA is permanently bound to the single authorized administrator. Viewing or adding new authenticators from the login screen is strictly disabled.'
+        });
+      }
+    }
+
     if (!password || (password.trim() !== cfg.master_password.trim())) {
       return res.status(401).json({ success: false, error: 'Incorrect Master Password! Cannot initialize 2FA.' });
     }
@@ -430,6 +442,18 @@ app.post('/api/auth/setup/confirm', async (req, res) => {
   try {
     const { password, secret, token } = req.body;
     const cfg = await auth.getAuthConfig();
+
+    // STRICT LOCKDOWN: If 2FA is already configured, reject any unauthorized attempt to re-register
+    if (cfg.totp_enabled && cfg.totp_secret) {
+      const sessionToken = auth.extractTokenFromReq(req);
+      const session = sessionToken ? await auth.validateSession(sessionToken) : null;
+      if (!session) {
+        return res.status(403).json({
+          success: false,
+          error: 'Google Authenticator 2FA is already locked to the single authorized administrator. Unauthorized re-registration is forbidden.'
+        });
+      }
+    }
 
     if (!password || (password.trim() !== cfg.master_password.trim())) {
       return res.status(401).json({ success: false, error: 'Incorrect Master Password!' });
@@ -802,8 +826,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         });
 
         dbStatements.push({
-          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift, is_manual_override)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
                   effective_in = excluded.effective_in,
@@ -814,7 +838,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                   total_hours = excluded.total_hours,
                   late_minutes = excluded.late_minutes,
                   shift = excluded.shift,
-                  status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
+                  status = excluded.status,
+                  is_manual_override = 0`,
           args: [
             d.staff_no || '',
             d.date || '',
@@ -834,6 +859,26 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       }
     }
 
+    // Purge existing records for the uploaded dates to guarantee clean overwrite
+    if (datesSet.size > 0) {
+      const datesArray = Array.from(datesSet);
+      const monthsInFile = Array.from(new Set(datesArray.map(d => d.slice(0, 7)))).filter(Boolean);
+      const shouldOverwriteMonth = (req.body?.overwrite === 'true' || req.body?.overwrite === true || req.query?.overwrite === 'true' || req.body?.overwriteMonth === 'true');
+
+      if (shouldOverwriteMonth && monthsInFile.length === 1) {
+        const targetMonth = monthsInFile[0];
+        await execute(`DELETE FROM daily_attendance WHERE date LIKE ?`, [`${targetMonth}-%`]);
+        await execute(`DELETE FROM raw_punches WHERE date LIKE ?`, [`${targetMonth}-%`]);
+      } else {
+        for (let i = 0; i < datesArray.length; i += 50) {
+          const chunk = datesArray.slice(i, i + 50);
+          const placeholders = chunk.map(() => '?').join(',');
+          await execute(`DELETE FROM daily_attendance WHERE date IN (${placeholders})`, chunk);
+          await execute(`DELETE FROM raw_punches WHERE date IN (${placeholders})`, chunk);
+        }
+      }
+    }
+
     // High-speed chunked batch execution (chunks of 150 statements)
     for (let i = 0; i < dbStatements.length; i += 150) {
       const chunk = dbStatements.slice(i, i + 150);
@@ -841,7 +886,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     }
 
     // Auto-backup to seed_data.json so uploaded month persists across server restarts
-    backupDatabaseToSeed().catch(e => console.warn('Auto backup after upload failed:', e.message));
+    await backupDatabaseToSeed();
 
     const sortedDates = Array.from(datesSet).sort();
     const startDate = sortedDates[0] || '';
@@ -924,8 +969,8 @@ app.post('/api/upload/commit', async (req, res) => {
         });
 
         dbStatements.push({
-          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift, is_manual_override)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
                   effective_in = excluded.effective_in,
@@ -936,7 +981,8 @@ app.post('/api/upload/commit', async (req, res) => {
                   total_hours = excluded.total_hours,
                   late_minutes = excluded.late_minutes,
                   shift = excluded.shift,
-                  status = CASE WHEN is_manual_override = 1 THEN status ELSE excluded.status END`,
+                  status = excluded.status,
+                  is_manual_override = 0`,
           args: [
             d.staff_no || '',
             d.date || '',
@@ -961,6 +1007,8 @@ app.post('/api/upload/commit', async (req, res) => {
       await batch(chunk);
     }
 
+    await backupDatabaseToSeed();
+
     res.json({ success: true, message: `Successfully committed ${parsedData.length} workers to database.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -982,6 +1030,8 @@ app.post('/api/attendance/clear-range', async (req, res) => {
       await execute(`DELETE FROM workers`);
       await execute(`DELETE FROM advances`);
       await execute(`DELETE FROM audit_logs`);
+
+      await backupDatabaseToSeed();
 
       return res.json({
         success: true,
@@ -1012,6 +1062,8 @@ app.post('/api/attendance/clear-range', async (req, res) => {
 
     // Clean up orphaned worker profiles that have no attendance logs left
     await execute(`DELETE FROM workers WHERE staff_no NOT IN (SELECT DISTINCT staff_no FROM daily_attendance)`);
+
+    await backupDatabaseToSeed();
 
     res.json({
       success: true,

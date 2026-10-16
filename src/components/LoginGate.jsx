@@ -195,6 +195,10 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
 
   // 3. Initiate First-Time Setup
   const initSetup = async (pwd) => {
+    if (totpConfigured) {
+      setError('Google Authenticator 2FA is already locked to the single authorized administrator. Public setup is disabled.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -490,40 +494,24 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                 </button>
 
                 {/* Footer Switcher */}
-                <div className="pt-3 border-t border-slate-800 space-y-2 text-center">
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setError('');
-                        const pwd = password.trim() || 'kki123';
-                        initSetup(pwd);
-                      }}
-                      className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <QrCode className="w-3.5 h-3.5" />
-                      <span>Scan / View Permanent QR Code & Setup Key →</span>
-                    </button>
-                  </div>
-
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => { setMode('backup-login'); setError(''); }}
-                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium cursor-pointer"
-                    >
-                      Lost access to your phone? Enter Emergency Backup Code →
-                    </button>
-                  </div>
+                <div className="pt-3 border-t border-slate-800 text-center">
+                  <button
+                    type="button"
+                    onClick={() => { setMode('backup-login'); setError(''); }}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Lost access to your phone? Enter Emergency Backup Code →</span>
+                  </button>
                 </div>
               </form>
             </div>
           )}
 
           {/* ========================================================= */}
-          {/* MODE 2A: First-Time Setup - Password Prompt */}
+          {/* MODE 2A: First-Time Setup - Password Prompt (Only if unconfigured) */}
           {/* ========================================================= */}
-          {mode === 'setup-password' && (
+          {mode === 'setup-password' && !totpConfigured && (
             <div>
               <div className="text-center pb-4 mb-4 border-b border-slate-800">
                 <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto mb-2">
@@ -585,7 +573,7 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
           {/* ========================================================= */}
           {/* MODE 2B: First-Time Setup - Scan QR Code & Enter Code */}
           {/* ========================================================= */}
-          {mode === 'setup-qr' && (
+          {mode === 'setup-qr' && !totpConfigured && (
             <div>
               <div className="text-center pb-3 mb-3 border-b border-slate-800">
                 <span className="text-[11px] font-bold text-cyan-400 uppercase tracking-widest">Step 1 of 2</span>
@@ -684,7 +672,7 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
           {/* ========================================================= */}
           {/* MODE 2C: First-Time Setup - Display Emergency Backup Codes */}
           {/* ========================================================= */}
-          {mode === 'setup-backup' && (
+          {mode === 'setup-backup' && !totpConfigured && (
             <div>
               <div className="text-center pb-3 mb-3 border-b border-slate-800">
                 <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest">Step 2 of 2</span>

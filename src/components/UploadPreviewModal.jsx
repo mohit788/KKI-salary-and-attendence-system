@@ -70,6 +70,13 @@ export default function UploadPreviewModal({ previewData, onConfirm, onCancel, l
             </div>
           )}
 
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3.5 text-xs text-blue-300 flex items-center space-x-2.5">
+            <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+            <span>
+              <strong>Overwrite Active:</strong> All existing records for this period have been cleanly replaced with fresh biometric machine data up to {previewData.endDate}.
+            </span>
+          </div>
+
           <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-3.5 text-xs text-emerald-300 flex items-center space-x-2.5">
             <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>
