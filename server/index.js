@@ -409,18 +409,6 @@ app.post('/api/auth/setup/init', async (req, res) => {
     const { password } = req.body;
     const cfg = await auth.getAuthConfig();
 
-    // STRICT LOCKDOWN: If 2FA is already configured, unauthenticated visitors CANNOT view or generate QR codes
-    if (cfg.totp_enabled && cfg.totp_secret) {
-      const token = auth.extractTokenFromReq(req);
-      const session = token ? await auth.validateSession(token) : null;
-      if (!session) {
-        return res.status(403).json({
-          success: false,
-          error: 'Google Authenticator 2FA is permanently bound to the single authorized administrator. Viewing or adding new authenticators from the login screen is strictly disabled.'
-        });
-      }
-    }
-
     if (!password || (password.trim() !== cfg.master_password.trim())) {
       return res.status(401).json({ success: false, error: 'Incorrect Master Password! Cannot initialize 2FA.' });
     }
@@ -442,18 +430,6 @@ app.post('/api/auth/setup/confirm', async (req, res) => {
   try {
     const { password, secret, token } = req.body;
     const cfg = await auth.getAuthConfig();
-
-    // STRICT LOCKDOWN: If 2FA is already configured, reject any unauthorized attempt to re-register
-    if (cfg.totp_enabled && cfg.totp_secret) {
-      const sessionToken = auth.extractTokenFromReq(req);
-      const session = sessionToken ? await auth.validateSession(sessionToken) : null;
-      if (!session) {
-        return res.status(403).json({
-          success: false,
-          error: 'Google Authenticator 2FA is already locked to the single authorized administrator. Unauthorized re-registration is forbidden.'
-        });
-      }
-    }
 
     if (!password || (password.trim() !== cfg.master_password.trim())) {
       return res.status(401).json({ success: false, error: 'Incorrect Master Password!' });

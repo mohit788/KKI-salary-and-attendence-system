@@ -193,12 +193,8 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
     }
   };
 
-  // 3. Initiate First-Time Setup
+  // 3. Initiate First-Time / Device Setup
   const initSetup = async (pwd) => {
-    if (totpConfigured) {
-      setError('Google Authenticator 2FA is already locked to the single authorized administrator. Public setup is disabled.');
-      return;
-    }
     setLoading(true);
     setError('');
     try {
@@ -494,32 +490,44 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                 </button>
 
                 {/* Footer Switcher */}
-                <div className="pt-3 border-t border-slate-800 text-center">
-                  <button
-                    type="button"
-                    onClick={() => { setMode('backup-login'); setError(''); }}
-                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium cursor-pointer inline-flex items-center gap-1.5"
-                  >
-                    <KeyRound className="w-3.5 h-3.5" />
-                    <span>Lost access to your phone? Enter Emergency Backup Code →</span>
-                  </button>
+                <div className="pt-3 border-t border-slate-800 text-center space-y-2">
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('backup-login'); setError(''); }}
+                      className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Lost access to phone? Enter Emergency Backup Code →</span>
+                    </button>
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => { setMode('setup-password'); setError(''); }}
+                      className="text-xs text-amber-400 hover:text-amber-300 transition-colors font-semibold cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Smartphone className="w-3.5 h-3.5" />
+                      <span>Set Up Google Authenticator on Phone (One-Time Setup) →</span>
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
           )}
 
           {/* ========================================================= */}
-          {/* MODE 2A: First-Time Setup - Password Prompt (Only if unconfigured) */}
+          {/* MODE 2A: One-Time Device Setup - Password Prompt */}
           {/* ========================================================= */}
-          {mode === 'setup-password' && !totpConfigured && (
+          {mode === 'setup-password' && (
             <div>
               <div className="text-center pb-4 mb-4 border-b border-slate-800">
                 <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto mb-2">
-                  <QrCode className="w-6 h-6" />
+                  <Smartphone className="w-6 h-6" />
                 </div>
-                <h2 className="text-base font-bold text-white">Set Up Google Authenticator</h2>
+                <h2 className="text-base font-bold text-white">One-Time Device Setup</h2>
                 <p className="text-xs text-slate-300 mt-1">
-                  2FA is not yet active. Enter the Master Admin Password to configure your device.
+                  Configure Google Authenticator on the authorized phone. Enter the Master Admin Password to reveal the QR code.
                 </p>
               </div>
 
@@ -558,22 +566,31 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
                   </div>
                 )}
 
-                <button
-                  type="submit"
-                  disabled={loading || !password}
-                  className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-amber-600/30 border border-amber-400/50 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 cursor-pointer"
-                >
-                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
-                  <span>{loading ? 'Verifying...' : 'Begin 2FA Setup'}</span>
-                </button>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setMode('login'); setError(''); }}
+                    className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+                  >
+                    ← Back to Login
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading || !password}
+                    className="flex-1 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-amber-600/30 border border-amber-400/50 transition-all disabled:opacity-50 flex items-center justify-center space-x-2 cursor-pointer"
+                  >
+                    {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ArrowRight className="w-4 h-4" />}
+                    <span>{loading ? 'Verifying...' : 'Show Setup QR Code'}</span>
+                  </button>
+                </div>
               </form>
             </div>
           )}
 
           {/* ========================================================= */}
-          {/* MODE 2B: First-Time Setup - Scan QR Code & Enter Code */}
+          {/* MODE 2B: Device Setup - Scan QR Code & Enter Code */}
           {/* ========================================================= */}
-          {mode === 'setup-qr' && !totpConfigured && (
+          {mode === 'setup-qr' && (
             <div>
               <div className="text-center pb-3 mb-3 border-b border-slate-800">
                 <span className="text-[11px] font-bold text-cyan-400 uppercase tracking-widest">Step 1 of 2</span>
@@ -670,9 +687,9 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
           )}
 
           {/* ========================================================= */}
-          {/* MODE 2C: First-Time Setup - Display Emergency Backup Codes */}
+          {/* MODE 2C: Device Setup - Display Emergency Backup Codes */}
           {/* ========================================================= */}
-          {mode === 'setup-backup' && !totpConfigured && (
+          {mode === 'setup-backup' && (
             <div>
               <div className="text-center pb-3 mb-3 border-b border-slate-800">
                 <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest">Step 2 of 2</span>
