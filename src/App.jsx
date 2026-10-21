@@ -165,24 +165,6 @@ export default function App() {
     checkAuth();
   }, []);
 
-  // Keep-alive heartbeat: ping /api/health every 4 minutes to prevent Render idle spin-down
-  useEffect(() => {
-    const pingHealth = () => {
-      fetch('/api/health').catch(() => {});
-    };
-    const interval = setInterval(pingHealth, 4 * 60 * 1000);
-    const handleVis = () => {
-      if (document.visibilityState === 'visible') pingHealth();
-    };
-    window.addEventListener('focus', pingHealth);
-    document.addEventListener('visibilitychange', handleVis);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', pingHealth);
-      document.removeEventListener('visibilitychange', handleVis);
-    };
-  }, []);
-
   const handleLoginSuccess = () => {
     const now = Date.now();
     sessionStorage.removeItem('kki_logout_reason');

@@ -62,25 +62,6 @@ export default function LoginGate({ onLoginSuccess, logoutReason, onClearLogoutR
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Keep-alive heartbeat: ping /api/health every 4 minutes and on window focus/visibility
-  useEffect(() => {
-    const pingHealth = () => {
-      fetch('/api/health').catch(() => {});
-    };
-    pingHealth();
-    const interval = setInterval(pingHealth, 4 * 60 * 1000);
-    const handleVis = () => {
-      if (document.visibilityState === 'visible') pingHealth();
-    };
-    window.addEventListener('focus', pingHealth);
-    document.addEventListener('visibilitychange', handleVis);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('focus', pingHealth);
-      document.removeEventListener('visibilitychange', handleVis);
-    };
-  }, []);
-
   // Check initial server auth status
   useEffect(() => {
     checkStatus();
