@@ -5,6 +5,12 @@ const path = require('path');
 const fs = require('fs');
 
 const { execute, batch, initDatabase, backupDatabaseToSeed } = require('./db');
+const {
+  syncAttendanceToCloud,
+  syncRawPunchesToCloud,
+  syncSingleAttendanceToCloud,
+  syncAuditLogToCloud
+} = require('./cloudSync');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
 const {
@@ -818,16 +824,15 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
-                  effective_in = excluded.effective_in,
-                  effective_out = excluded.effective_out,
-                  regular_hours = excluded.regular_hours,
-                  ot_hours = excluded.ot_hours,
-                  sunday_ot_hours = excluded.sunday_ot_hours,
-                  total_hours = excluded.total_hours,
-                  late_minutes = excluded.late_minutes,
-                  shift = excluded.shift,
-                  status = excluded.status,
-                  is_manual_override = 0`,
+                  effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE excluded.effective_in END,
+                  effective_out = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_out ELSE excluded.effective_out END,
+                  regular_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.regular_hours ELSE excluded.regular_hours END,
+                  ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.ot_hours ELSE excluded.ot_hours END,
+                  sunday_ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.sunday_ot_hours ELSE excluded.sunday_ot_hours END,
+                  total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE excluded.total_hours END,
+                  late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE excluded.late_minutes END,
+                  shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE excluded.shift END,
+                  status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END`,
           args: [
             d.staff_no || '',
             d.date || '',
@@ -847,23 +852,15 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       }
     }
 
-    // Purge existing records for the uploaded dates to guarantee clean overwrite
+    // Shield 1: Clean overwrite ONLY for non-overridden records of the exact dates present in the uploaded file
+    // CRITICAL: NEVER delete future dates of the month that are not in the uploaded file!
     if (datesSet.size > 0) {
       const datesArray = Array.from(datesSet);
-      const monthsInFile = Array.from(new Set(datesArray.map(d => d.slice(0, 7)))).filter(Boolean);
-      const shouldOverwriteMonth = (req.body?.overwrite === 'true' || req.body?.overwrite === true || req.query?.overwrite === 'true' || req.body?.overwriteMonth === 'true');
-
-      if (shouldOverwriteMonth && monthsInFile.length === 1) {
-        const targetMonth = monthsInFile[0];
-        await execute(`DELETE FROM daily_attendance WHERE date LIKE ?`, [`${targetMonth}-%`]);
-        await execute(`DELETE FROM raw_punches WHERE date LIKE ?`, [`${targetMonth}-%`]);
-      } else {
-        for (let i = 0; i < datesArray.length; i += 50) {
-          const chunk = datesArray.slice(i, i + 50);
-          const placeholders = chunk.map(() => '?').join(',');
-          await execute(`DELETE FROM daily_attendance WHERE date IN (${placeholders})`, chunk);
-          await execute(`DELETE FROM raw_punches WHERE date IN (${placeholders})`, chunk);
-        }
+      for (let i = 0; i < datesArray.length; i += 50) {
+        const chunk = datesArray.slice(i, i + 50);
+        const placeholders = chunk.map(() => '?').join(',');
+        await execute(`DELETE FROM daily_attendance WHERE date IN (${placeholders}) AND (is_manual_override = 0 OR is_manual_override IS NULL)`, chunk);
+        await execute(`DELETE FROM raw_punches WHERE date IN (${placeholders})`, chunk);
       }
     }
 
@@ -873,12 +870,25 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       await batch(chunk);
     }
 
-    // Auto-backup to seed_data.json so uploaded month persists across server restarts
+    // Auto-backup to seed_data.json and rolling snapshots
     await backupDatabaseToSeed();
 
     const sortedDates = Array.from(datesSet).sort();
     const startDate = sortedDates[0] || '';
     const endDate = sortedDates[sortedDates.length - 1] || '';
+
+    // Async background sync to cloud database (non-blocking)
+    try {
+      if (startDate && endDate) {
+        execute(`SELECT * FROM daily_attendance WHERE date >= ? AND date <= ?`, [startDate, endDate]).then(res => {
+          if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
+        }).catch(() => {});
+        execute(`SELECT * FROM raw_punches WHERE date >= ? AND date <= ?`, [startDate, endDate]).then(res => {
+          if (res.rows && res.rows.length > 0) syncRawPunchesToCloud(res.rows).catch(() => {});
+        }).catch(() => {});
+      }
+    } catch (syncErr) {}
+
     const detectedMonth = detectActiveMonthDetails(startDate, endDate);
 
     res.json({
@@ -961,16 +971,15 @@ app.post('/api/upload/commit', async (req, res) => {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
-                  effective_in = excluded.effective_in,
-                  effective_out = excluded.effective_out,
-                  regular_hours = excluded.regular_hours,
-                  ot_hours = excluded.ot_hours,
-                  sunday_ot_hours = excluded.sunday_ot_hours,
-                  total_hours = excluded.total_hours,
-                  late_minutes = excluded.late_minutes,
-                  shift = excluded.shift,
-                  status = excluded.status,
-                  is_manual_override = 0`,
+                  effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE excluded.effective_in END,
+                  effective_out = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_out ELSE excluded.effective_out END,
+                  regular_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.regular_hours ELSE excluded.regular_hours END,
+                  ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.ot_hours ELSE excluded.ot_hours END,
+                  sunday_ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.sunday_ot_hours ELSE excluded.sunday_ot_hours END,
+                  total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE excluded.total_hours END,
+                  late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE excluded.late_minutes END,
+                  shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE excluded.shift END,
+                  status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END`,
           args: [
             d.staff_no || '',
             d.date || '',
@@ -996,6 +1005,13 @@ app.post('/api/upload/commit', async (req, res) => {
     }
 
     await backupDatabaseToSeed();
+
+    // Background cloud sync
+    try {
+      execute(`SELECT * FROM daily_attendance ORDER BY date DESC LIMIT 1000`).then(res => {
+        if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
+      }).catch(() => {});
+    } catch (e) {}
 
     res.json({ success: true, message: `Successfully committed ${parsedData.length} workers to database.` });
   } catch (err) {
@@ -1869,19 +1885,29 @@ app.post('/api/attendance/edit', async (req, res) => {
     }
 
     // Log to Audit Table
+    const auditEntry = {
+      staff_no,
+      date,
+      field_changed: 'Attendance Record',
+      old_value: `Swipes: ${oldRec.raw_swipes || ''}, Status: ${oldRec.status || ''}`,
+      new_value: `Swipes: ${effectiveSwipes}, Status: ${finalStatus}`,
+      edited_by: edited_by || 'Admin',
+      reason: reason || 'Manual correction',
+    };
     await execute(
       `INSERT INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        staff_no,
-        date,
-        'Attendance Record',
-        `Swipes: ${oldRec.raw_swipes || ''}, Status: ${oldRec.status || ''}`,
-        `Swipes: ${effectiveSwipes}, Status: ${finalStatus}`,
-        edited_by || 'Admin',
-        reason || 'Manual correction',
+        auditEntry.staff_no,
+        auditEntry.date,
+        auditEntry.field_changed,
+        auditEntry.old_value,
+        auditEntry.new_value,
+        auditEntry.edited_by,
+        auditEntry.reason,
       ]
     );
+    syncAuditLogToCloud(auditEntry).catch(() => {});
 
     // Also update raw_punches so any future recomputations preserve new punches
     await execute(
@@ -1938,6 +1964,15 @@ app.post('/api/attendance/edit', async (req, res) => {
         );
       }
     }
+
+    // Auto-backup to seed and cloud
+    await backupDatabaseToSeed();
+    try {
+      const updatedRow = await execute(`SELECT * FROM daily_attendance WHERE staff_no = ? AND date = ?`, [staff_no, date]);
+      if (updatedRow.rows[0]) {
+        syncSingleAttendanceToCloud(updatedRow.rows[0]).catch(() => {});
+      }
+    } catch (e) {}
 
     res.json({ success: true, message: 'Record updated, hours and overtime recalculated, and audit log saved.' });
   } catch (err) {
@@ -2192,6 +2227,19 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
         }
       }
     }
+
+    // Auto-backup to seed and cloud
+    await backupDatabaseToSeed();
+    try {
+      if (modifiedStaffSet.size > 0) {
+        const staffArr = Array.from(modifiedStaffSet);
+        const placeholders = staffArr.map(() => '?').join(',');
+        execute(`SELECT * FROM daily_attendance WHERE staff_no IN (${placeholders}) AND is_manual_override = 1`, staffArr)
+          .then(res => {
+            if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
+          }).catch(() => {});
+      }
+    } catch (e) {}
 
     res.json({ success: true, message: 'Bulk edit successfully processed.', updatedCount: updates.length });
   } catch (err) {

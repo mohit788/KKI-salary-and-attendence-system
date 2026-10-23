@@ -405,11 +405,19 @@ async function initDatabase() {
     console.warn('Auto-seed warning:', seedErr.message);
   }
 
+  // Self-Healing Cloud Recovery: If cloud has more records than local container, restore them
+  try {
+    const { selfHealFromCloud } = require('./cloudSync');
+    await selfHealFromCloud(execute, batch, backupDatabaseToSeed);
+  } catch (cloudErr) {
+    // Non-blocking, continue normal local operation
+  }
+
   console.log('✅ Attendance & Payroll Database Initialized.');
 }
 
 /**
- * Auto-backup full SQLite database state to seed_data.json
+ * Auto-backup full SQLite database state to seed_data.json and rolling snapshots
  */
 async function backupDatabaseToSeed() {
   try {
@@ -437,6 +445,23 @@ async function backupDatabaseToSeed() {
     }
     fs.writeFileSync(seedPath, JSON.stringify(dump, null, 2));
     console.log('💾 Successfully backed up full database to seed_data.json');
+
+    // Keep rolling snapshot in data/backups
+    try {
+      const backupDir = path.join(__dirname, '../data/backups');
+      if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+      const snapPath = path.join(backupDir, `snapshot_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`);
+      fs.writeFileSync(snapPath, JSON.stringify(dump));
+      
+      const files = fs.readdirSync(backupDir).filter(f => f.startsWith('snapshot_')).sort();
+      while (files.length > 5) {
+        const toDelete = files.shift();
+        try { fs.unlinkSync(path.join(backupDir, toDelete)); } catch (e) {}
+      }
+    } catch (snapErr) {
+      // Non-fatal snapshot error
+    }
+
     return true;
   } catch (err) {
     console.warn('⚠️ Auto-backup to seed_data.json error:', err.message);

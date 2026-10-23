@@ -9,6 +9,7 @@ build/
 data/*_backup*.db
 data/*.sqlite
 data/*.db-journal
+data/backups/
 *.db
 !data/attendance.db
 
