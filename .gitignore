@@ -35,6 +35,7 @@ yarn-error.log*
 *.swp
 *.swo
 .DS_Store
-Thumbs.db
 .claude/
 scratch/
+*.sql
+supabase_chunks/
