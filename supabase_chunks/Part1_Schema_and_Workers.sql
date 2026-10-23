@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   new_value TEXT,
   edited_by TEXT DEFAULT 'Admin',
   reason TEXT,
+  action TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -128,6 +129,7 @@ CREATE TABLE IF NOT EXISTS custom_salary_rules (
   source TEXT DEFAULT 'manual',
   ai_original_prompt TEXT,
   is_active INTEGER DEFAULT 1,
+  target_staff_no TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -155,6 +157,10 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   expires_at TIMESTAMPTZ NOT NULL,
   last_activity_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure schema columns match even if tables already existed:
+ALTER TABLE IF EXISTS audit_logs ADD COLUMN IF NOT EXISTS "action" TEXT DEFAULT '';
+ALTER TABLE IF EXISTS custom_salary_rules ADD COLUMN IF NOT EXISTS "target_staff_no" TEXT DEFAULT '';
 
 INSERT INTO "settings" ("key", "value", "description") VALUES
 ('test_batch_1', 'val1', 'desc1'),

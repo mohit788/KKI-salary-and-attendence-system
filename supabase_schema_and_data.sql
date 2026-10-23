@@ -1,6 +1,6 @@
 -- =============================================================
 -- SUPABASE / POSTGRESQL ATTENDANCE DATABASE DUMP
--- Generated: 2026-10-23T08:02:43.602Z
+-- Generated: 2026-10-23T08:26:44.465Z
 -- Compatible with Supabase SQL Editor
 -- =============================================================
 
