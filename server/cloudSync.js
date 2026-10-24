@@ -131,17 +131,17 @@ async function syncAttendanceToCloud(records) {
         raw_swipes = EXCLUDED.raw_swipes,
         original_raw_swipes = COALESCE(EXCLUDED.original_raw_swipes, daily_attendance.original_raw_swipes),
         manual_punches = EXCLUDED.manual_punches,
-        effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE EXCLUDED.effective_in END,
-        effective_out = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_out ELSE EXCLUDED.effective_out END,
-        regular_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.regular_hours ELSE EXCLUDED.regular_hours END,
-        ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.ot_hours ELSE EXCLUDED.ot_hours END,
-        sunday_ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.sunday_ot_hours ELSE EXCLUDED.sunday_ot_hours END,
-        total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE EXCLUDED.total_hours END,
-        late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE EXCLUDED.late_minutes END,
-        shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE EXCLUDED.shift END,
-        status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE EXCLUDED.status END,
-        is_manual_override = daily_attendance.is_manual_override,
-        override_reason = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.override_reason ELSE EXCLUDED.override_reason END;
+        effective_in = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.effective_in WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE EXCLUDED.effective_in END,
+        effective_out = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.effective_out WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_out ELSE EXCLUDED.effective_out END,
+        regular_hours = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.regular_hours WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.regular_hours ELSE EXCLUDED.regular_hours END,
+        ot_hours = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.ot_hours WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.ot_hours ELSE EXCLUDED.ot_hours END,
+        sunday_ot_hours = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.sunday_ot_hours WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.sunday_ot_hours ELSE EXCLUDED.sunday_ot_hours END,
+        total_hours = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.total_hours WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE EXCLUDED.total_hours END,
+        late_minutes = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.late_minutes WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE EXCLUDED.late_minutes END,
+        shift = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.shift WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE EXCLUDED.shift END,
+        status = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.status WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE EXCLUDED.status END,
+        is_manual_override = GREATEST(COALESCE(daily_attendance.is_manual_override, 0), COALESCE(EXCLUDED.is_manual_override, 0)),
+        override_reason = CASE WHEN EXCLUDED.is_manual_override = 1 THEN EXCLUDED.override_reason WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.override_reason ELSE EXCLUDED.override_reason END;
     `;
 
     try {
