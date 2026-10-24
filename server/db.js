@@ -37,6 +37,10 @@ async function execute(sql, args = []) {
       }
     }
 
+    if (err.message && err.message.includes('duplicate column name')) {
+      throw err;
+    }
+
     console.error('DB Execute Error:', err.message, 'SQL:', sql);
     throw err;
   }
@@ -406,12 +410,14 @@ async function initDatabase() {
     console.warn('Auto-seed warning:', seedErr.message);
   }
 
-  // Self-Healing Cloud Recovery: If cloud has more records than local container, restore them
-  try {
-    const { selfHealFromCloud } = require('./cloudSync');
-    await selfHealFromCloud(execute, batch, backupDatabaseToSeed);
-  } catch (cloudErr) {
-    // Non-blocking, continue normal local operation
+  // Self-Healing Cloud Recovery: Only needed if running on local SQLite and Supabase fallback exists
+  if (!process.env.TURSO_DATABASE_URL) {
+    try {
+      const { selfHealFromCloud } = require('./cloudSync');
+      await selfHealFromCloud(execute, batch, backupDatabaseToSeed);
+    } catch (cloudErr) {
+      // Non-blocking, continue normal local operation
+    }
   }
 
   console.log('✅ Attendance & Payroll Database Initialized.');

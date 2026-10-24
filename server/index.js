@@ -3665,16 +3665,12 @@ app.use((err, req, res, next) => {
 
 // Start Unified Server
 const PORT = process.env.PORT || 5000;
-initDatabase().then(async () => {
-  try {
-    await recomputeAllAttendance();
-    console.log('✅ Startup Attendance & Factory Calendar Initialized.');
-  } catch (err) {
-    console.warn('⚠️ Startup recompute warning:', err.message);
-  }
-  app.listen(PORT, () => {
-    console.log(`🚀 Unified Factory HR (Frontend + Backend) running on Port ${PORT}: http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Unified Factory HR (Frontend + Backend) running on Port ${PORT}: http://0.0.0.0:${PORT}`);
+  
+  initDatabase().then(() => {
+    console.log('✅ Attendance & Payroll Database Initialized & Connected.');
+  }).catch(err => {
+    console.error('Failed to initialize database:', err);
   });
-}).catch(err => {
-  console.error('Failed to start server:', err);
 });
