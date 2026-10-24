@@ -1239,8 +1239,14 @@ async function recomputeAllAttendance() {
     for (const d of finalProcessed) {
       await execute(
         `UPDATE daily_attendance SET
-           effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?, late_minutes = ?,
-           shift = ?,
+           effective_in = CASE WHEN is_manual_override = 1 THEN effective_in ELSE ? END,
+           effective_out = CASE WHEN is_manual_override = 1 THEN effective_out ELSE ? END,
+           regular_hours = CASE WHEN is_manual_override = 1 THEN regular_hours ELSE ? END,
+           ot_hours = CASE WHEN is_manual_override = 1 THEN ot_hours ELSE ? END,
+           sunday_ot_hours = CASE WHEN is_manual_override = 1 THEN sunday_ot_hours ELSE ? END,
+           total_hours = CASE WHEN is_manual_override = 1 THEN total_hours ELSE ? END,
+           late_minutes = CASE WHEN is_manual_override = 1 THEN late_minutes ELSE ? END,
+           shift = CASE WHEN is_manual_override = 1 THEN shift ELSE ? END,
            status = CASE WHEN is_manual_override = 1 THEN status ELSE ? END
          WHERE staff_no = ? AND date = ?`,
         [
@@ -1978,12 +1984,17 @@ app.post('/api/attendance/edit', async (req, res) => {
     let lateMinutes = computed.lateMinutes;
     let finalStatus = status || computed.status;
 
-    // If admin explicitly marked "Present (Full)" but no timestamps were entered or gave 0h
-    if (finalStatus === 'Present (Full)' && regularHours === 0 && timestamps.length === 0) {
+    // If admin explicitly marked "Present (Full)" or "Present (Short)" but no timestamps were entered or gave 0h
+    if (finalStatus === 'Present (Full)' && regularHours === 0) {
       regularHours = 8.0;
       totalHours = 8.0;
-      effectiveIn = computed.shift || settings.shift_start || '08:00';
-      effectiveOut = settings.shift_end || '16:30';
+      if (!effectiveIn || effectiveIn === '00:00') effectiveIn = computed.shift || settings.shift_start || '08:00';
+      if (!effectiveOut || effectiveOut === '00:00') effectiveOut = settings.shift_end || '16:30';
+    } else if (finalStatus === 'Present (Short)' && regularHours === 0) {
+      regularHours = 4.0;
+      totalHours = 4.0;
+      if (!effectiveIn || effectiveIn === '00:00') effectiveIn = computed.shift || settings.shift_start || '08:00';
+      if (!effectiveOut || effectiveOut === '00:00') effectiveOut = '12:00';
     }
 
     // Log to Audit Table
@@ -2073,9 +2084,11 @@ app.post('/api/attendance/edit', async (req, res) => {
     try {
       const updatedRow = await execute(`SELECT * FROM daily_attendance WHERE staff_no = ? AND date = ?`, [staff_no, date]);
       if (updatedRow.rows[0]) {
-        syncSingleAttendanceToCloud(updatedRow.rows[0]).catch(() => {});
+        await syncSingleAttendanceToCloud(updatedRow.rows[0]);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Single attendance cloud sync error:', e.message);
+    }
 
     res.json({ success: true, message: 'Record updated, hours and overtime recalculated, and audit log saved.' });
   } catch (err) {
@@ -2251,11 +2264,16 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       let lateMinutes = computed.lateMinutes;
       let finalStatus = status || computed.status;
 
-      if (finalStatus === 'Present (Full)' && regularHours === 0 && timestamps.length === 0) {
+      if (finalStatus === 'Present (Full)' && regularHours === 0) {
         regularHours = 8.0;
         totalHours = 8.0;
-        effectiveIn = computed.shift || settings.shift_start || '08:00';
-        effectiveOut = settings.shift_end || '16:30';
+        if (!effectiveIn || effectiveIn === '00:00') effectiveIn = computed.shift || settings.shift_start || '08:00';
+        if (!effectiveOut || effectiveOut === '00:00') effectiveOut = settings.shift_end || '16:30';
+      } else if (finalStatus === 'Present (Short)' && regularHours === 0) {
+        regularHours = 4.0;
+        totalHours = 4.0;
+        if (!effectiveIn || effectiveIn === '00:00') effectiveIn = computed.shift || settings.shift_start || '08:00';
+        if (!effectiveOut || effectiveOut === '00:00') effectiveOut = '12:00';
       }
 
       await execute(
@@ -2337,16 +2355,14 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       if (modifiedStaffSet.size > 0) {
         const staffArr = Array.from(modifiedStaffSet);
         const placeholders = staffArr.map(() => '?').join(',');
-        execute(`SELECT * FROM daily_attendance WHERE staff_no IN (${placeholders}) AND is_manual_override = 1`, staffArr)
-          .then(res => {
-            if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
-          }).catch(() => {});
-        execute(`SELECT * FROM raw_punches WHERE staff_no IN (${placeholders})`, staffArr)
-          .then(res => {
-            if (res.rows && res.rows.length > 0) syncRawPunchesToCloud(res.rows).catch(() => {});
-          }).catch(() => {});
+        const res = await execute(`SELECT * FROM daily_attendance WHERE staff_no IN (${placeholders}) AND is_manual_override = 1`, staffArr);
+        if (res.rows && res.rows.length > 0) await syncAttendanceToCloud(res.rows);
+        const pRes = await execute(`SELECT * FROM raw_punches WHERE staff_no IN (${placeholders})`, staffArr);
+        if (pRes.rows && pRes.rows.length > 0) await syncRawPunchesToCloud(pRes.rows);
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Bulk edit cloud sync warning:', e.message);
+    }
 
     res.json({ success: true, message: 'Bulk edit successfully processed.', updatedCount: updates.length });
   } catch (err) {

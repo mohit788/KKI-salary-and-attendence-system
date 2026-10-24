@@ -577,34 +577,12 @@ async function selfHealFromCloud(executeLocal, batchLocal, backupDbToSeed) {
       console.warn('Punches cloud hydration warning:', pErr.message);
     }
 
-    // 6. Hydrate Daily Attendance from Supabase
-    const cloudCountRes = await queryCloud('SELECT count(*) as cnt, max(date) as max_date FROM daily_attendance;', 5000);
-    if (!cloudCountRes.success || !cloudCountRes.data || !cloudCountRes.data[0]) {
-      return false;
-    }
-
-    const cloudCount = parseInt(cloudCountRes.data[0].cnt || 0, 10);
-    const cloudMaxDate = cloudCountRes.data[0].max_date || '';
-
-    const localCountRes = await executeLocal('SELECT count(*) as cnt, max(date) as max_date FROM daily_attendance');
-    const localCount = parseInt(localCountRes.rows[0]?.cnt || 0, 10);
-    const localMaxDate = localCountRes.rows[0]?.max_date || '';
-
-    console.log(`📡 Supabase Cloud Attendance: Local = ${localCount} (Max: ${localMaxDate}) | Cloud = ${cloudCount} (Max: ${cloudMaxDate})`);
-
-    // If cloud has more records than local, restore the delta into local SQLite!
-    if (cloudCount > localCount || localCount === 0) {
-      console.log(`🛡️ Self-Healing Recovery: Ingesting delta records from Supabase Cloud...`);
-      
-      const missingQuery = localCount === 0
-        ? `SELECT * FROM daily_attendance;`
-        : `SELECT * FROM daily_attendance WHERE date > ${escapeSqlVal(localMaxDate)} OR is_manual_override = 1;`;
-
-      const missingRes = await queryCloud(missingQuery, 20000);
-
-      if (missingRes.success && Array.isArray(missingRes.data) && missingRes.data.length > 0) {
-        console.log(`📥 Ingesting ${missingRes.data.length} cloud attendance records into local SQLite...`);
-        const stmts = missingRes.data.map(r => ({
+    // 6a. ALWAYS Unconditionally Hydrate All Manual Overrides from Supabase Cloud (Zero Data Loss Protection)
+    try {
+      const overridesRes = await queryCloud('SELECT * FROM daily_attendance WHERE is_manual_override = 1;', 15000);
+      if (overridesRes.success && Array.isArray(overridesRes.data) && overridesRes.data.length > 0) {
+        console.log(`📥 Hydrating ${overridesRes.data.length} manual overrides from Supabase Cloud...`);
+        const overrideStmts = overridesRes.data.map(r => ({
           sql: `INSERT INTO daily_attendance (
                   staff_no, date, weekday, raw_swipes, original_raw_swipes, manual_punches,
                   effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours,
@@ -623,7 +601,7 @@ async function selfHealFromCloud(executeLocal, batchLocal, backupDbToSeed) {
                   late_minutes = excluded.late_minutes,
                   status = excluded.status,
                   shift = excluded.shift,
-                  is_manual_override = excluded.is_manual_override,
+                  is_manual_override = 1,
                   override_reason = excluded.override_reason`,
           args: [
             r.staff_no || '', r.date || '', r.weekday || '', r.raw_swipes || '',
@@ -631,21 +609,97 @@ async function selfHealFromCloud(executeLocal, batchLocal, backupDbToSeed) {
             r.effective_in || '', r.effective_out || '', r.regular_hours || 0,
             r.ot_hours || 0, r.sunday_ot_hours || 0, r.total_hours || 0,
             r.late_minutes || 0, r.status || 'Absent', r.shift || '08:00',
-            r.is_manual_override ? 1 : 0, r.override_reason || ''
+            1, r.override_reason || ''
           ]
         }));
-
-        for (let i = 0; i < stmts.length; i += 150) {
-          await batchLocal(stmts.slice(i, i + 150));
+        for (let i = 0; i < overrideStmts.length; i += 150) {
+          await batchLocal(overrideStmts.slice(i, i + 150));
         }
+        console.log(`✅ Restored ${overridesRes.data.length} manual overrides into local SQLite.`);
+      }
+    } catch (oErr) {
+      console.warn('Manual overrides cloud hydration warning:', oErr.message);
+    }
 
-        if (backupDbToSeed) {
-          await backupDbToSeed();
+    // 6b. Hydrate New Date Ranges or Missing Full Attendance from Supabase
+    const cloudCountRes = await queryCloud('SELECT count(*) as cnt, max(date) as max_date FROM daily_attendance;', 5000);
+    if (cloudCountRes.success && cloudCountRes.data && cloudCountRes.data[0]) {
+      const cloudCount = parseInt(cloudCountRes.data[0].cnt || 0, 10);
+      const cloudMaxDate = cloudCountRes.data[0].max_date || '';
+
+      const localCountRes = await executeLocal('SELECT count(*) as cnt, max(date) as max_date FROM daily_attendance');
+      const localCount = parseInt(localCountRes.rows[0]?.cnt || 0, 10);
+      const localMaxDate = localCountRes.rows[0]?.max_date || '';
+
+      console.log(`📡 Supabase Cloud Attendance: Local = ${localCount} (Max: ${localMaxDate}) | Cloud = ${cloudCount} (Max: ${cloudMaxDate})`);
+
+      if (cloudCount > localCount || localCount === 0) {
+        console.log(`🛡️ Self-Healing Recovery: Ingesting delta records from Supabase Cloud...`);
+        const missingQuery = localCount === 0
+          ? `SELECT * FROM daily_attendance;`
+          : `SELECT * FROM daily_attendance WHERE date > ${escapeSqlVal(localMaxDate)};`;
+
+        const missingRes = await queryCloud(missingQuery, 20000);
+        if (missingRes.success && Array.isArray(missingRes.data) && missingRes.data.length > 0) {
+          console.log(`📥 Ingesting ${missingRes.data.length} cloud attendance records into local SQLite...`);
+          const stmts = missingRes.data.map(r => ({
+            sql: `INSERT INTO daily_attendance (
+                    staff_no, date, weekday, raw_swipes, original_raw_swipes, manual_punches,
+                    effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours,
+                    late_minutes, status, shift, is_manual_override, override_reason
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(staff_no, date) DO UPDATE SET
+                    raw_swipes = excluded.raw_swipes,
+                    original_raw_swipes = excluded.original_raw_swipes,
+                    manual_punches = excluded.manual_punches,
+                    effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE excluded.effective_in END,
+                    effective_out = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_out ELSE excluded.effective_out END,
+                    regular_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.regular_hours ELSE excluded.regular_hours END,
+                    ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.ot_hours ELSE excluded.ot_hours END,
+                    sunday_ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.sunday_ot_hours ELSE excluded.sunday_ot_hours END,
+                    total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE excluded.total_hours END,
+                    late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE excluded.late_minutes END,
+                    status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END,
+                    shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE excluded.shift END,
+                    is_manual_override = GREATEST(COALESCE(daily_attendance.is_manual_override, 0), COALESCE(excluded.is_manual_override, 0)),
+                    override_reason = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.override_reason ELSE excluded.override_reason END`,
+            args: [
+              r.staff_no || '', r.date || '', r.weekday || '', r.raw_swipes || '',
+              r.original_raw_swipes || '', r.manual_punches || '',
+              r.effective_in || '', r.effective_out || '', r.regular_hours || 0,
+              r.ot_hours || 0, r.sunday_ot_hours || 0, r.total_hours || 0,
+              r.late_minutes || 0, r.status || 'Absent', r.shift || '08:00',
+              r.is_manual_override ? 1 : 0, r.override_reason || ''
+            ]
+          }));
+
+          for (let i = 0; i < stmts.length; i += 150) {
+            await batchLocal(stmts.slice(i, i + 150));
+          }
         }
-        console.log('✅ Self-healing recovery from Supabase Cloud complete! Local SQLite & seed_data.json updated.');
-        return true;
       }
     }
+
+    // 7. Hydrate Audit Logs from Supabase
+    try {
+      const auditRes = await queryCloud('SELECT staff_no, date, field_changed, old_value, new_value, edited_by, reason, created_at FROM audit_logs;', 6000);
+      if (auditRes.success && Array.isArray(auditRes.data) && auditRes.data.length > 0) {
+        for (const log of auditRes.data) {
+          await executeLocal(
+            `INSERT OR IGNORE INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [log.staff_no, log.date, log.field_changed, log.old_value, log.new_value, log.edited_by, log.reason, log.created_at || '']
+          );
+        }
+      }
+    } catch (audErr) {
+      console.warn('Audit logs cloud hydration warning:', audErr.message);
+    }
+
+    if (backupDbToSeed) {
+      await backupDbToSeed();
+    }
+    console.log('✅ Self-healing recovery from Supabase Cloud complete! Local SQLite & seed_data.json updated.');
     return true;
   } catch (err) {
     console.warn('Cloud self-healing check warning:', err.message);
