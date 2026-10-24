@@ -2,7 +2,7 @@
  * Migration Script: Migrate local SQLite database to Turso Cloud DB
  * 
  * Usage:
- *   TURSO_DATABASE_URL=libsql://your-db-name.turso.io TURSO_AUTH_TOKEN=your-token node server/migrateToTurso.js
+ *   node server/migrateToTurso.js
  */
 
 require('dotenv').config();
@@ -16,8 +16,8 @@ async function migrate() {
 
   if (!tursoUrl || !tursoUrl.startsWith('libsql://')) {
     console.error('❌ Error: TURSO_DATABASE_URL must be set and start with libsql://');
-    console.error('Example: export TURSO_DATABASE_URL="libsql://your-db-name-org.turso.io"');
-    console.error('Example: export TURSO_AUTH_TOKEN="your-turso-jwt-token"');
+    console.error('Example: TURSO_DATABASE_URL="libsql://your-db-name-org.turso.io"');
+    console.error('Example: TURSO_AUTH_TOKEN="your-turso-jwt-token"');
     process.exit(1);
   }
 
@@ -38,6 +38,16 @@ async function migrate() {
     authToken: tursoToken
   });
 
+  // 1. Ensure all schemas exist
+  const tablesRes = await localClient.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+  for (const row of tablesRes.rows) {
+    try {
+      await remoteClient.execute(row.sql);
+    } catch (e) {
+      // Table may already exist
+    }
+  }
+
   const tables = [
     'settings',
     'workers',
@@ -47,7 +57,10 @@ async function migrate() {
     'audit_logs',
     'rule_profiles',
     'custom_rules',
-    'custom_salary_rules'
+    'custom_salary_rules',
+    'paid_holidays',
+    'factory_calendar',
+    'user_sessions'
   ];
 
   for (const table of tables) {
@@ -61,13 +74,18 @@ async function migrate() {
 
       const columns = localData.columns;
       const placeholders = columns.map(() => '?').join(', ');
-      const sql = `INSERT OR REPLACE INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
+      const sql = `INSERT OR REPLACE INTO "${table}" (${columns.map(c => `"${c}"`).join(', ')}) VALUES (${placeholders})`;
 
+      const BATCH_SIZE = 100;
       let migratedCount = 0;
-      for (const row of localData.rows) {
-        const values = columns.map(col => row[col]);
-        await remoteClient.execute({ sql, args: values });
-        migratedCount++;
+      for (let i = 0; i < localData.rows.length; i += BATCH_SIZE) {
+        const chunk = localData.rows.slice(i, i + BATCH_SIZE);
+        const stmts = chunk.map(row => ({
+          sql,
+          args: columns.map(col => row[col])
+        }));
+        await remoteClient.batch(stmts, 'write');
+        migratedCount += chunk.length;
       }
       console.log(`   ✅ Migrated ${migratedCount} rows to ${table}`);
     } catch (err) {
