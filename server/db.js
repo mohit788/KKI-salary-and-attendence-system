@@ -390,7 +390,7 @@ async function initDatabase() {
       if (fs.existsSync(seedPath)) {
         console.log('🌱 Database is empty. Restoring from seed_data.json backup...');
         const seedData = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
-        const tables = ['settings', 'rule_profiles', 'workers', 'custom_rules', 'advances', 'audit_logs', 'raw_punches', 'daily_attendance', 'factory_calendar', 'paid_holidays'];
+        const tables = ['settings', 'rule_profiles', 'workers', 'custom_rules', 'custom_salary_rules', 'advances', 'audit_logs', 'raw_punches', 'daily_attendance', 'factory_calendar', 'paid_holidays'];
         for (const tbl of tables) {
           const rows = seedData[tbl];
           if (Array.isArray(rows) && rows.length > 0) {
@@ -410,14 +410,12 @@ async function initDatabase() {
     console.warn('Auto-seed warning:', seedErr.message);
   }
 
-  // Self-Healing Cloud Recovery: Only needed if running on local SQLite and Supabase fallback exists
-  if (!process.env.TURSO_DATABASE_URL) {
-    try {
-      const { selfHealFromCloud } = require('./cloudSync');
-      await selfHealFromCloud(execute, batch, backupDatabaseToSeed);
-    } catch (cloudErr) {
-      // Non-blocking, continue normal local operation
-    }
+  // Self-Healing Cloud Recovery: Hydrate latest data from Supabase Cloud on boot
+  try {
+    const { selfHealFromCloud } = require('./cloudSync');
+    await selfHealFromCloud(execute, batch, backupDatabaseToSeed);
+  } catch (cloudErr) {
+    console.warn('Supabase self-healing warning:', cloudErr.message);
   }
 
   console.log('✅ Attendance & Payroll Database Initialized.');
@@ -434,6 +432,7 @@ async function backupDatabaseToSeed() {
       'rule_profiles',
       'workers',
       'custom_rules',
+      'custom_salary_rules',
       'advances',
       'audit_logs',
       'raw_punches',

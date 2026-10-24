@@ -6,10 +6,23 @@ const fs = require('fs');
 
 const { execute, batch, initDatabase, backupDatabaseToSeed } = require('./db');
 const {
+  queryCloud,
   syncAttendanceToCloud,
   syncRawPunchesToCloud,
   syncSingleAttendanceToCloud,
-  syncAuditLogToCloud
+  syncAuditLogToCloud,
+  syncWorkerToCloud,
+  deleteWorkerFromCloud,
+  syncAdvanceToCloud,
+  deleteAdvanceFromCloud,
+  syncSettingToCloud,
+  syncCustomRuleToCloud,
+  deleteCustomRuleFromCloud,
+  syncSalaryRuleToCloud,
+  deleteSalaryRuleFromCloud,
+  syncCalendarToCloud,
+  deleteCalendarFromCloud,
+  getCloudStatus
 } = require('./cloudSync');
 const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
@@ -211,6 +224,24 @@ app.post('/api/custom-rules', async (req, res) => {
       ]
     );
 
+    syncCustomRuleToCloud({
+      rule_name,
+      rule_type,
+      target_staff_no: target_staff_no || 'all',
+      exemption_type: exemption_type || '',
+      start_time: start_time || '',
+      end_time: end_time || '',
+      threshold_mins: parseInt(threshold_mins, 10) || 0,
+      deduction_mins: parseInt(deduction_mins, 10) || 0,
+      deduction_amount: parseFloat(deduction_amount) || 0,
+      valid_from: valid_from || '',
+      valid_to: valid_to || '',
+      max_allowed_days: parseInt(max_allowed_days, 10) || 0,
+      grace_allowed_mins: resolvedGraceMins,
+      is_active: 1
+    }).catch(() => {});
+
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
 
     res.json({ success: true, message: 'Custom rule created and payroll recomputed.' });
@@ -224,6 +255,10 @@ app.post('/api/custom-rules/:id/toggle', async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`UPDATE custom_rules SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?`, [id]);
+    execute('SELECT * FROM custom_rules WHERE id = ?', [id]).then(r => {
+      if (r.rows && r.rows[0]) syncCustomRuleToCloud(r.rows[0]).catch(() => {});
+    }).catch(() => {});
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
     res.json({ success: true, message: 'Rule status toggled & payroll recomputed.' });
   } catch (err) {
@@ -236,6 +271,8 @@ app.delete('/api/custom-rules/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`DELETE FROM custom_rules WHERE id = ?`, [id]);
+    deleteCustomRuleFromCloud(id).catch(() => {});
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
     res.json({ success: true, message: 'Custom rule deleted & payroll recomputed.' });
   } catch (err) {
@@ -262,7 +299,10 @@ app.post('/api/settings', async (req, res) => {
         `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
         [key, String(value)]
       );
+      syncSettingToCloud(key, String(value)).catch(() => {});
     }
+
+    await backupDatabaseToSeed();
 
     // Recompute all records with new settings
     await recomputeAllAttendance();
@@ -274,7 +314,7 @@ app.post('/api/settings', async (req, res) => {
 });
 
 // ==========================================
-// --- Health Check Endpoint ---
+// --- Health & Cloud Status Endpoints ---
 // ==========================================
 app.get('/api/health', (req, res) => {
   res.json({
@@ -283,6 +323,15 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     service: 'KKI-salary-and-attendence-system'
   });
+});
+
+app.get('/api/cloud-status', async (req, res) => {
+  try {
+    const status = await getCloudStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ connected: false, error: err.message });
+  }
 });
 
 // ==========================================
@@ -886,6 +935,11 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         execute(`SELECT * FROM raw_punches WHERE date >= ? AND date <= ?`, [startDate, endDate]).then(res => {
           if (res.rows && res.rows.length > 0) syncRawPunchesToCloud(res.rows).catch(() => {});
         }).catch(() => {});
+        execute(`SELECT * FROM workers`).then(res => {
+          if (res.rows && res.rows.length > 0) {
+            for (const w of res.rows) syncWorkerToCloud(w).catch(() => {});
+          }
+        }).catch(() => {});
       }
     } catch (syncErr) {}
 
@@ -1035,6 +1089,14 @@ app.post('/api/attendance/clear-range', async (req, res) => {
       await execute(`DELETE FROM advances`);
       await execute(`DELETE FROM audit_logs`);
 
+      queryCloud(`
+        DELETE FROM daily_attendance;
+        DELETE FROM raw_punches;
+        DELETE FROM workers;
+        DELETE FROM advances;
+        DELETE FROM audit_logs;
+      `).catch(() => {});
+
       await backupDatabaseToSeed();
 
       return res.json({
@@ -1066,6 +1128,16 @@ app.post('/api/attendance/clear-range', async (req, res) => {
 
     // Clean up orphaned worker profiles that have no attendance logs left
     await execute(`DELETE FROM workers WHERE staff_no NOT IN (SELECT DISTINCT staff_no FROM daily_attendance)`);
+
+    const cloudWhere = startDate && endDate
+      ? `date >= '${startDate}' AND date <= '${endDate}'`
+      : `date LIKE '${month}%'`;
+    queryCloud(`
+      DELETE FROM daily_attendance WHERE ${cloudWhere};
+      DELETE FROM raw_punches WHERE ${cloudWhere};
+      DELETE FROM advances WHERE ${cloudWhere};
+      DELETE FROM workers WHERE staff_no NOT IN (SELECT DISTINCT staff_no FROM daily_attendance);
+    `).catch(() => {});
 
     await backupDatabaseToSeed();
 
@@ -1315,6 +1387,8 @@ app.post('/api/calendar/declare', async (req, res) => {
       // Revert date back to default schedule
       await execute(`DELETE FROM factory_calendar WHERE date = ?`, [date]);
       await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [date]);
+      deleteCalendarFromCloud(date).catch(() => {});
+      await backupDatabaseToSeed();
       await recomputeAllAttendance();
       return res.json({ success: true, message: `Schedule for ${date} reset to standard factory default.` });
     }
@@ -1343,6 +1417,8 @@ app.post('/api/calendar/declare', async (req, res) => {
       await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [date]);
     }
 
+    syncCalendarToCloud({ date, day_type: cleanedType, title: cleanedTitle, notes: notes || '', is_recurring: is_recurring ? 1 : 0 }).catch(() => {});
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
     res.json({
       success: true,
@@ -1373,6 +1449,7 @@ app.post('/api/calendar/swap', async (req, res) => {
       [workDate, finalWorkTitle, finalReason]
     );
     await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [workDate]);
+    syncCalendarToCloud({ date: workDate, day_type: 'working_day', title: finalWorkTitle, notes: finalReason, is_recurring: 0 }).catch(() => {});
 
     // 2. Declare offDate as off_day
     await execute(
@@ -1382,7 +1459,9 @@ app.post('/api/calendar/swap', async (req, res) => {
       [offDate, finalOffTitle, finalReason]
     );
     await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [offDate]);
+    syncCalendarToCloud({ date: offDate, day_type: 'off_day', title: finalOffTitle, notes: finalReason, is_recurring: 0 }).catch(() => {});
 
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
     res.json({
       success: true,
@@ -1403,7 +1482,9 @@ app.delete('/api/calendar/:id', async (req, res) => {
     await execute(`DELETE FROM factory_calendar WHERE id = ?`, [id]);
     if (targetDate) {
       await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [targetDate]);
+      deleteCalendarFromCloud(targetDate).catch(() => {});
     }
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
     res.json({ success: true, message: 'Schedule override removed & attendance recomputed.' });
   } catch (err) {
@@ -1417,6 +1498,8 @@ app.delete('/api/calendar/date/:date', async (req, res) => {
     const { date } = req.params;
     await execute(`DELETE FROM factory_calendar WHERE date = ?`, [date]);
     await execute(`DELETE FROM paid_holidays WHERE holiday_date = ?`, [date]);
+    deleteCalendarFromCloud(date).catch(() => {});
+    await backupDatabaseToSeed();
     await recomputeAllAttendance();
     res.json({ success: true, message: `Schedule for ${date} reset to standard factory default.` });
   } catch (err) {
@@ -1712,6 +1795,11 @@ app.post('/api/workers/:staff_no/profile', async (req, res) => {
       ]
     );
 
+    execute('SELECT * FROM workers WHERE staff_no = ?', [staff_no]).then(w => {
+      if (w.rows && w.rows[0]) syncWorkerToCloud(w.rows[0]).catch(() => {});
+    }).catch(() => {});
+    await backupDatabaseToSeed();
+
     // Recompute attendance for this worker
     await recomputeAllAttendance();
 
@@ -1739,6 +1827,11 @@ app.post('/api/workers/:staff_no/toggle-exception', async (req, res) => {
       `UPDATE workers SET is_exception = ?, exception_reason = ? WHERE staff_no = ?`,
       [targetException, reason, staff_no]
     );
+
+    execute('SELECT * FROM workers WHERE staff_no = ?', [staff_no]).then(w => {
+      if (w.rows && w.rows[0]) syncWorkerToCloud(w.rows[0]).catch(() => {});
+    }).catch(() => {});
+    await backupDatabaseToSeed();
 
     await execute(
       `INSERT INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason)
@@ -1773,12 +1866,16 @@ app.post('/api/workers/batch-exception', async (req, res) => {
         `UPDATE workers SET is_exception = ?, exception_reason = ? WHERE staff_no = ?`,
         [flag, reason, String(sNo)]
       );
+      execute('SELECT * FROM workers WHERE staff_no = ?', [String(sNo)]).then(w => {
+        if (w.rows && w.rows[0]) syncWorkerToCloud(w.rows[0]).catch(() => {});
+      }).catch(() => {});
       await execute(
         `INSERT INTO audit_logs (staff_no, date, field_changed, old_value, new_value, edited_by, reason)
          VALUES (?, date('now'), 'Exception Status', ?, ?, 'Admin', ?)`,
         [String(sNo), flag === 1 ? 'Standard Worker' : 'Exception Worker', flag === 1 ? 'Exception Worker' : 'Standard Worker', reason]
       );
     }
+    await backupDatabaseToSeed();
 
     res.json({
       success: true,
@@ -1827,6 +1924,11 @@ app.post('/api/workers/:staff_no/compensation', async (req, res) => {
         staff_no
       ]
     );
+
+    execute('SELECT * FROM workers WHERE staff_no = ?', [staff_no]).then(w => {
+      if (w.rows && w.rows[0]) syncWorkerToCloud(w.rows[0]).catch(() => {});
+    }).catch(() => {});
+    await backupDatabaseToSeed();
 
     res.json({ success: true, message: 'Worker base salary & allowances updated.' });
   } catch (err) {
@@ -1916,6 +2018,7 @@ app.post('/api/attendance/edit', async (req, res) => {
        ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record`,
       [staff_no, date, oldRec.weekday || '', effectiveSwipes]
     );
+    syncRawPunchesToCloud([{ staff_no, date, weekday: oldRec.weekday || '', swipe_record: effectiveSwipes }]).catch(() => {});
 
     // Identify which tokens are manually added
     const originalSwipesStr = oldRec.original_raw_swipes || oldRec.raw_swipes || '';
@@ -2238,6 +2341,10 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
           .then(res => {
             if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
           }).catch(() => {});
+        execute(`SELECT * FROM raw_punches WHERE staff_no IN (${placeholders})`, staffArr)
+          .then(res => {
+            if (res.rows && res.rows.length > 0) syncRawPunchesToCloud(res.rows).catch(() => {});
+          }).catch(() => {});
       }
     } catch (e) {}
 
@@ -2255,10 +2362,16 @@ app.post('/api/advances', async (req, res) => {
       return res.status(400).json({ success: false, error: 'staff_no and amount are required.' });
     }
 
+    const effectiveDate = date || new Date().toISOString().slice(0, 10);
+    const parsedAmount = parseFloat(amount);
+
     await execute(
       `INSERT INTO advances (staff_no, date, amount, note) VALUES (?, ?, ?, ?)`,
-      [staff_no, date || new Date().toISOString().slice(0, 10), parseFloat(amount), note || '']
+      [staff_no, effectiveDate, parsedAmount, note || '']
     );
+
+    syncAdvanceToCloud({ staff_no, date: effectiveDate, amount: parsedAmount, note: note || '' }).catch(() => {});
+    await backupDatabaseToSeed();
 
     res.json({ success: true, message: 'Advance recorded.' });
   } catch (err) {
@@ -2271,6 +2384,8 @@ app.delete('/api/advances/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`DELETE FROM advances WHERE id = ?`, [id]);
+    deleteAdvanceFromCloud(id).catch(() => {});
+    await backupDatabaseToSeed();
     res.json({ success: true, message: 'Advance deleted.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -3321,6 +3436,11 @@ app.post('/api/salary-rules', async (req, res) => {
       ]
     );
 
+    execute('SELECT * FROM custom_salary_rules WHERE rule_name = ?', [rule_name]).then(r => {
+      if (r.rows && r.rows[0]) syncSalaryRuleToCloud(r.rows[0]).catch(() => {});
+    }).catch(() => {});
+    await backupDatabaseToSeed();
+
     res.json({ success: true, message: `Salary rule "${rule_name}" created successfully.` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -3332,6 +3452,10 @@ app.post('/api/salary-rules/:id/toggle', async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`UPDATE custom_salary_rules SET is_active = CASE WHEN is_active = 1 THEN 0 ELSE 1 END WHERE id = ?`, [id]);
+    execute('SELECT * FROM custom_salary_rules WHERE id = ?', [id]).then(r => {
+      if (r.rows && r.rows[0]) syncSalaryRuleToCloud(r.rows[0]).catch(() => {});
+    }).catch(() => {});
+    await backupDatabaseToSeed();
     res.json({ success: true, message: 'Salary rule toggled.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -3343,6 +3467,8 @@ app.delete('/api/salary-rules/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await execute(`DELETE FROM custom_salary_rules WHERE id = ?`, [id]);
+    deleteSalaryRuleFromCloud(id).catch(() => {});
+    await backupDatabaseToSeed();
     res.json({ success: true, message: 'Salary rule deleted.' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
