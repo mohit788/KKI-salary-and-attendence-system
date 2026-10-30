@@ -869,8 +869,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         });
 
         dbStatements.push({
-          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift, is_manual_override)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift, is_manual_override, forfeiture_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
                   effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE excluded.effective_in END,
@@ -881,7 +881,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
                   total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE excluded.total_hours END,
                   late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE excluded.late_minutes END,
                   shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE excluded.shift END,
-                  status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END`,
+                  status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END,
+                  forfeiture_reason = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.forfeiture_reason ELSE excluded.forfeiture_reason END`,
           args: [
             d.staff_no || '',
             d.date || '',
@@ -895,7 +896,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
             d.totalHours || 0,
             d.lateMinutes || 0,
             d.status || 'Absent',
-            d.shift || '08:00'
+            d.shift || '08:00',
+            d.forfeiture_reason || d.forfeitureReason || ''
           ]
         });
       }
@@ -1021,8 +1023,8 @@ app.post('/api/upload/commit', async (req, res) => {
         });
 
         dbStatements.push({
-          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift, is_manual_override)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+          sql: `INSERT INTO daily_attendance (staff_no, date, weekday, raw_swipes, effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift, is_manual_override, forfeiture_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 ON CONFLICT(staff_no, date) DO UPDATE SET
                   raw_swipes = excluded.raw_swipes,
                   effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE excluded.effective_in END,
@@ -1033,7 +1035,8 @@ app.post('/api/upload/commit', async (req, res) => {
                   total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE excluded.total_hours END,
                   late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE excluded.late_minutes END,
                   shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE excluded.shift END,
-                  status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END`,
+                  status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END,
+                  forfeiture_reason = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.forfeiture_reason ELSE excluded.forfeiture_reason END`,
           args: [
             d.staff_no || '',
             d.date || '',
@@ -1047,7 +1050,8 @@ app.post('/api/upload/commit', async (req, res) => {
             d.totalHours || 0,
             d.lateMinutes || 0,
             d.status || 'Absent',
-            d.shift || '08:00'
+            d.shift || '08:00',
+            d.forfeiture_reason || d.forfeitureReason || ''
           ]
         });
       }
@@ -1247,7 +1251,8 @@ async function recomputeAllAttendance() {
            total_hours = CASE WHEN is_manual_override = 1 THEN total_hours ELSE ? END,
            late_minutes = CASE WHEN is_manual_override = 1 THEN late_minutes ELSE ? END,
            shift = CASE WHEN is_manual_override = 1 THEN shift ELSE ? END,
-           status = CASE WHEN is_manual_override = 1 THEN status ELSE ? END
+           status = CASE WHEN is_manual_override = 1 THEN status ELSE ? END,
+           forfeiture_reason = CASE WHEN is_manual_override = 1 THEN forfeiture_reason ELSE ? END
          WHERE staff_no = ? AND date = ?`,
         [
           d.effectiveIn || d.effective_in || '',
@@ -1259,6 +1264,7 @@ async function recomputeAllAttendance() {
           d.lateMinutes || d.late_minutes || 0,
           d.shift || '08:00',
           d.status || 'Absent',
+          d.forfeiture_reason || d.forfeitureReason || '',
           d.staff_no,
           d.date
         ]

@@ -83,7 +83,7 @@ function calculateWorkerPayroll({
       paidHolidays += 1;
     } else if (st.includes('Holiday (Forfeited)')) {
       forfeitedHolidays += 1;
-      absentDays += 1;
+      // Do not increment absentDays here - totalUnpaidLeaves explicitly includes forfeitedHolidays to prevent double salary cut
     } else if (st.includes('Present (Full)')) {
       fullPresentDays += 1;
     } else if (st.includes('Present (Short)')) {

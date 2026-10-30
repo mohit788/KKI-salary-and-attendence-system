@@ -115,6 +115,7 @@ async function initDatabase() {
       shift TEXT DEFAULT '08:00',
       is_manual_override INTEGER DEFAULT 0,
       override_reason TEXT,
+      forfeiture_reason TEXT DEFAULT '',
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(staff_no, date)
     );`,
@@ -280,6 +281,7 @@ async function initDatabase() {
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN manual_punches TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN sunday_ot_hours REAL DEFAULT 0`); } catch (e) {}
   try { await execute(`ALTER TABLE daily_attendance ADD COLUMN shift TEXT DEFAULT '08:00'`); } catch (e) {}
+  try { await execute(`ALTER TABLE daily_attendance ADD COLUMN forfeiture_reason TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN target_staff_no TEXT DEFAULT 'all'`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN exemption_type TEXT DEFAULT ''`); } catch (e) {}
   try { await execute(`ALTER TABLE custom_rules ADD COLUMN valid_from TEXT DEFAULT ''`); } catch (e) {}
