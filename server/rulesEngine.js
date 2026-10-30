@@ -505,7 +505,15 @@ function computeDailyAttendance(
   let totalRawWorkedMins = 0;
   let totalBreakMins = 0;
   let maxMidDayExitMins = 0;
+  let totalLunchOverlapMins = 0;
+  let lunchTakenDuringGapMins = 0;
   const punchPairStrings = [];
+
+  const lunchStart = settings.lunch_start || '12:30';
+  const lunchEnd = settings.lunch_end || '13:00';
+  const lunchStartMins = timeToMins(lunchStart);
+  const lunchEndMins = timeToMins(lunchEnd);
+  const configuredLunchMins = lunchDeductionMins !== undefined ? lunchDeductionMins : Math.max(0, lunchEndMins - lunchStartMins);
 
   const hasMultipleSessions = cleanedPunches.length >= 4;
   const rawFirstOut = cleanedPunches[1];
@@ -534,12 +542,32 @@ function computeDailyAttendance(
     totalRawWorkedMins += sessionWorkedMins;
     punchPairStrings.push(`IN ${rawIn} ➔ OUT ${rawOut}`);
 
+    // Track active presence during the lunch window (12:30 - 13:00)
+    if (sessionOutMins > sessionInMins && lunchEndMins > lunchStartMins) {
+      const overlapStart = Math.max(sessionInMins, lunchStartMins);
+      const overlapEnd = Math.min(sessionOutMins, lunchEndMins);
+      if (overlapEnd > overlapStart) {
+        totalLunchOverlapMins += (overlapEnd - overlapStart);
+      }
+    }
+
     if (i + 2 < cleanedPunches.length) {
       const nextIn = cleanedPunches[i + 2];
-      const gapMins = Math.max(0, timeToMins(nextIn) - sessionOutMins);
+      const gapStart = sessionOutMins;
+      const gapEnd = timeToMins(nextIn);
+      const gapMins = Math.max(0, gapEnd - gapStart);
       totalBreakMins += gapMins;
       if (gapMins > maxMidDayExitMins) {
         maxMidDayExitMins = gapMins;
+      }
+
+      // Check if this biometric punch break already covers the lunch break
+      if (gapEnd > gapStart && lunchEndMins > lunchStartMins) {
+        const gapOverlapStart = Math.max(gapStart, lunchStartMins);
+        const gapOverlapEnd = Math.min(gapEnd, lunchEndMins);
+        if (gapOverlapEnd > gapOverlapStart) {
+          lunchTakenDuringGapMins += (gapOverlapEnd - gapOverlapStart);
+        }
       }
     }
   }
@@ -556,9 +584,20 @@ function computeDailyAttendance(
     });
   }
 
-  // Automatic lunch deduction
-  if (finalEffectiveMins > 300 && lunchDeductionMins > 0) {
-    finalEffectiveMins = Math.max(0, finalEffectiveMins - lunchDeductionMins);
+  // Automatic lunch deduction based on 12:30 - 13:00 lunch window:
+  // 1. If worker was clocked in during lunch window, deduct only that overlap.
+  // 2. If worker clocked out for lunch (gap >= 15m covering lunch), lunch was already unpaid -> 0 deduction.
+  // 3. Fallback: For non-standard shifts > 5 hours where lunch window doesn't apply and no break was taken.
+  let appliedLunchDeduction = 0;
+  if (configuredLunchMins > 0) {
+    if (totalLunchOverlapMins > 0) {
+      appliedLunchDeduction = Math.min(configuredLunchMins, totalLunchOverlapMins);
+    } else if (lunchTakenDuringGapMins >= 15) {
+      appliedLunchDeduction = 0;
+    } else if (finalEffectiveMins > 300) {
+      appliedLunchDeduction = configuredLunchMins;
+    }
+    finalEffectiveMins = Math.max(0, finalEffectiveMins - appliedLunchDeduction);
   }
 
   finalEffectiveMins = Math.max(0, finalEffectiveMins);
@@ -630,6 +669,8 @@ function computeDailyAttendance(
     otHours,
     sundayOtHours,
     totalHours,
+    netWorkedMinutes: finalEffectiveMins,
+    lunchDeductionMinutes: appliedLunchDeduction,
     lateMinutes: lateMins,
     status,
   };
@@ -953,6 +994,87 @@ function applyPaidHolidayForfeiture(dailyRecords, settings = {}) {
   return dailyRecords;
 }
 
+/**
+ * Calculates net working hours between in-time and out-time with automatic lunch deduction.
+ * Standard factory lunch window is 12:30 PM to 1:00 PM (30 minutes).
+ * Any overlap between the worker's presence and the lunch window is deducted.
+ * 
+ * Verified Scenarios:
+ *  - 12:30 to 18:00 (or "6") -> 5 Hours (Gross 5h 30m, Lunch 30m deducted)
+ *  - 12:59 to 18:00 (or "6") -> 5 Hours (Gross 5h 01m, Lunch 1m deducted)
+ *  - 13:01 to 18:00 (or "6") -> 4h 59m (Gross 4h 59m, Lunch 0m deducted)
+ *  - 09:00 to 18:00 (or "6") -> 8h 30m (Gross 9h 00m, Lunch 30m deducted)
+ */
+function calculateWorkingHours(inTimeStr, outTimeStr, lunchStart = '12:30', lunchEnd = '13:00') {
+  if (!inTimeStr || !outTimeStr) {
+    return {
+      grossMins: 0,
+      lunchDeductionMins: 0,
+      netMins: 0,
+      hours: 0,
+      remainingMins: 0,
+      formatted: '0 Hours',
+      decimalHours: 0
+    };
+  }
+
+  const parseToMins = (str) => {
+    let raw = String(str).trim();
+    const isPM = /pm/i.test(raw);
+    const isAM = /am/i.test(raw);
+    raw = raw.replace(/[a-z]/gi, '').trim();
+
+    const parts = raw.split(':');
+    let h = parseInt(parts[0], 10) || 0;
+    const m = parts.length > 1 ? (parseInt(parts[1], 10) || 0) : 0;
+
+    if (isPM && h < 12) h += 12;
+    if (isAM && h === 12) h = 0;
+    // Ambiguous hour-only input e.g. "6" or "5" representing evening shift end (18:00, 17:00)
+    if (!isPM && !isAM && h <= 7 && parts.length === 1) {
+      h += 12;
+    }
+
+    return h * 60 + m;
+  };
+
+  const inMins = parseToMins(inTimeStr);
+  let outMins = parseToMins(outTimeStr);
+  if (outMins < inMins) outMins += 24 * 60; // Handle overnight shift
+
+  const lStart = parseToMins(lunchStart); // 12:30 -> 750
+  const lEnd = parseToMins(lunchEnd);     // 13:00 -> 780
+
+  const grossMins = outMins - inMins;
+  const overlapStart = Math.max(inMins, lStart);
+  const overlapEnd = Math.min(outMins, lEnd);
+  const lunchDeductionMins = Math.max(0, overlapEnd - overlapStart);
+
+  const netMins = Math.max(0, grossMins - lunchDeductionMins);
+  const hours = Math.floor(netMins / 60);
+  const remainingMins = netMins % 60;
+  const decimalHours = Number((netMins / 60).toFixed(2));
+
+  let formatted = '';
+  if (remainingMins === 0) {
+    formatted = `${hours} Hours`;
+  } else if (hours === 0) {
+    formatted = `${remainingMins} Mins`;
+  } else {
+    formatted = `${hours}h ${remainingMins}m`;
+  }
+
+  return {
+    grossMins,
+    lunchDeductionMins,
+    netMins,
+    hours,
+    remainingMins,
+    formatted,
+    decimalHours
+  };
+}
+
 module.exports = {
   timeToMins,
   minsToTime,
@@ -963,6 +1085,7 @@ module.exports = {
   cleanAndDebouncePunches,
   getEffectiveFirstIn,
   computeDailyAttendance,
+  calculateWorkingHours,
   applyMonthlyLeisureGrace,
   isPureAbsentForForfeiture,
   applyWeeklyOffForfeiture,

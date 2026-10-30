@@ -136,3 +136,85 @@ export function normalizeTimeInput(inputStr) {
   return tokens.map(normalizeSingleTimeToken).filter(Boolean).join(' ');
 }
 
+/**
+ * Calculates net working hours between in-time and out-time with automatic lunch deduction.
+ * Standard factory lunch window is 12:30 PM to 1:00 PM (30 minutes).
+ * Any overlap between the worker's presence and the lunch window is deducted.
+ * 
+ * Verified Scenarios:
+ *  - 12:30 to 18:00 (or "6") -> 5 Hours (Gross 5h 30m, Lunch 30m deducted)
+ *  - 12:59 to 18:00 (or "6") -> 5 Hours (Gross 5h 01m, Lunch 1m deducted)
+ *  - 13:01 to 18:00 (or "6") -> 4h 59m (Gross 4h 59m, Lunch 0m deducted)
+ *  - 09:00 to 18:00 (or "6") -> 8h 30m (Gross 9h 00m, Lunch 30m deducted)
+ */
+export function calculateWorkingHours(inTimeStr, outTimeStr, lunchStart = '12:30', lunchEnd = '13:00') {
+  if (!inTimeStr || !outTimeStr) {
+    return {
+      grossMins: 0,
+      lunchDeductionMins: 0,
+      netMins: 0,
+      hours: 0,
+      remainingMins: 0,
+      formatted: '0 Hours',
+      decimalHours: 0
+    };
+  }
+
+  const parseToMins = (str) => {
+    let raw = String(str).trim();
+    const isPM = /pm/i.test(raw);
+    const isAM = /am/i.test(raw);
+    raw = raw.replace(/[a-z]/gi, '').trim();
+
+    const parts = raw.split(':');
+    let h = parseInt(parts[0], 10) || 0;
+    const m = parts.length > 1 ? (parseInt(parts[1], 10) || 0) : 0;
+
+    if (isPM && h < 12) h += 12;
+    if (isAM && h === 12) h = 0;
+    // Ambiguous hour-only input e.g. "6" or "5" representing evening shift end (18:00, 17:00)
+    if (!isPM && !isAM && h <= 7 && parts.length === 1) {
+      h += 12;
+    }
+
+    return h * 60 + m;
+  };
+
+  const inMins = parseToMins(inTimeStr);
+  let outMins = parseToMins(outTimeStr);
+  if (outMins < inMins) outMins += 24 * 60; // Handle overnight shift
+
+  const lStart = parseToMins(lunchStart); // 12:30 -> 750
+  const lEnd = parseToMins(lunchEnd);     // 13:00 -> 780
+
+  const grossMins = outMins - inMins;
+  const overlapStart = Math.max(inMins, lStart);
+  const overlapEnd = Math.min(outMins, lEnd);
+  const lunchDeductionMins = Math.max(0, overlapEnd - overlapStart);
+
+  const netMins = Math.max(0, grossMins - lunchDeductionMins);
+  const hours = Math.floor(netMins / 60);
+  const remainingMins = netMins % 60;
+  const decimalHours = Number((netMins / 60).toFixed(2));
+
+  let formatted = '';
+  if (remainingMins === 0) {
+    formatted = `${hours} Hours`;
+  } else if (hours === 0) {
+    formatted = `${remainingMins} Mins`;
+  } else {
+    formatted = `${hours}h ${remainingMins}m`;
+  }
+
+  return {
+    grossMins,
+    lunchDeductionMins,
+    netMins,
+    hours,
+    remainingMins,
+    formatted,
+    decimalHours
+  };
+}
+
+

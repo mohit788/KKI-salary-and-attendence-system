@@ -28,6 +28,7 @@ const XLSX = require('xlsx');
 const { parseExcelFile, parseWordFile, parseSwipeRecord } = require('./parser');
 const {
   computeDailyAttendance,
+  calculateWorkingHours,
   applyWeeklyOffForfeiture,
   applyMonthlyLeisureGrace,
   applyPaidHolidayForfeiture,
@@ -1272,6 +1273,31 @@ async function recomputeAllAttendance() {
     }
   }
 }
+
+
+// 4. Working Hours & Lunch Deduction (12:30 - 13:00) Calculator
+app.all('/api/attendance/calculate', (req, res) => {
+  const inTime = req.body?.in_time || req.body?.inTime || req.query?.in_time || req.query?.inTime || req.body?.in || req.query?.in;
+  const outTime = req.body?.out_time || req.body?.outTime || req.query?.out_time || req.query?.outTime || req.body?.out || req.query?.out;
+  const lunchStart = req.body?.lunch_start || req.query?.lunch_start || '12:30';
+  const lunchEnd = req.body?.lunch_end || req.query?.lunch_end || '13:00';
+
+  if (!inTime || !outTime) {
+    return res.status(400).json({
+      success: false,
+      error: 'Both in_time and out_time are required (e.g. in_time="12:30", out_time="6" or "18:00")'
+    });
+  }
+
+  const result = calculateWorkingHours(inTime, outTime, lunchStart, lunchEnd);
+  return res.json({
+    success: true,
+    in_time: inTime,
+    out_time: outTime,
+    lunch_window: `${lunchStart} - ${lunchEnd} (30 mins)`,
+    ...result
+  });
+});
 
 // 4a. POST Recalculate All Attendance (Explicit trigger)
 app.post('/api/attendance/recalculate', async (req, res) => {

@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 import ExceptionManagerModal from './ExceptionManagerModal';
+import HoursCalculatorWidget from './HoursCalculatorWidget';
 
 export default function Dashboard({
   metrics,
@@ -179,6 +180,11 @@ export default function Dashboard({
           </div>
         </div>
       ) : null}
+
+      {/* Live Working Hours & Lunch Deduction Calculator Widget */}
+      <div className="mb-6">
+        <HoursCalculatorWidget />
+      </div>
 
       {/* Top Banner / Upload Zone */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

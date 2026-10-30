@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "vite",
-    "build": "npm install && vite build"
+    "build": "npm install && vite build",
+    "test": "node tests/attendance_lunch_hours.test.js"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",
