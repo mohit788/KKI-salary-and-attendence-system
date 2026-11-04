@@ -7,8 +7,8 @@ const ISSUER_NAME = 'KKI Attendance & Payroll';
 const ACCOUNT_LABEL = 'Admin';
 const SESSION_COOKIE_NAME = 'kki_session';
 
-// Permanent stable Base32 Secret & Emergency Backup Codes (Protects against Render ephemeral wipes)
-const DEFAULT_PERMANENT_TOTP_SECRET = 'SLFRTE6JFYKYRJV3NFPSEN7576NKOHAF';
+// Permanent stable Base32 Secret & Emergency Backup Codes (Configured via Render Environment Variables)
+const DEFAULT_PERMANENT_TOTP_SECRET = process.env.TOTP_SECRET || 'SLFRTE6JFYKYRJV3NFPSEN7576NKOHAF';
 const DEFAULT_BACKUP_CODES = [
   '1942-8371',
   '5820-4916',
@@ -27,17 +27,33 @@ const SESSION_MAX_AGE_MS = FORCED_LOGOUT_MINUTES * 60 * 1000; // 1,800,000 ms
 const INACTIVITY_TIMEOUT_MS = INACTIVITY_TIMEOUT_MINUTES * 60 * 1000; // 300,000 ms
 const SESSION_EXPIRY_DAYS = FORCED_LOGOUT_MINUTES / (24 * 60); // backward-compatible alias
 
+// In-memory cache for validated sessions and auth config (eliminates high-latency roundtrips)
+const sessionCache = new Map(); // token -> { expiresTime, createdAtTime, lastActivityTime, cachedAt }
+const SESSION_CACHE_TTL_MS = 15000; // 15 seconds memory cache
+let cachedAuthConfig = null;
+let authConfigExpiresAt = 0;
+
+function invalidateAuthConfigCache() {
+  cachedAuthConfig = null;
+  authConfigExpiresAt = 0;
+}
+
 /**
  * Fetch authentication configuration from DB
  */
 async function getAuthConfig() {
+  const now = Date.now();
+  if (cachedAuthConfig && now < authConfigExpiresAt) {
+    return { ...cachedAuthConfig };
+  }
+
   const res = await execute(
     `SELECT key, value FROM settings WHERE key IN ('master_password', 'payroll_password', 'totp_enabled', 'totp_secret', 'emergency_backup_codes')`
   );
   const cfg = {
-    master_password: 'kki123',
+    master_password: process.env.MASTER_PASSWORD || 'kki123',
     totp_enabled: true,
-    totp_secret: DEFAULT_PERMANENT_TOTP_SECRET,
+    totp_secret: process.env.TOTP_SECRET || DEFAULT_PERMANENT_TOTP_SECRET,
     emergency_backup_codes: []
   };
 
@@ -81,6 +97,8 @@ async function getAuthConfig() {
     cfg.master_password = process.env.MASTER_PASSWORD.trim();
   }
 
+  cachedAuthConfig = { ...cfg };
+  authConfigExpiresAt = now + 60000; // 60s cache
   return cfg;
 }
 
@@ -182,6 +200,13 @@ async function createSession() {
     [token, createdAt, expiresAt, lastActivityAt]
   );
 
+  sessionCache.set(token, {
+    expiresTime: now.getTime() + SESSION_MAX_AGE_MS,
+    createdAtTime: now.getTime(),
+    lastActivityTime: now.getTime(),
+    cachedAt: Date.now()
+  });
+
   return { token, createdAt, expiresAt, lastActivityAt };
 }
 
@@ -192,16 +217,39 @@ async function createSession() {
 async function validateSession(token) {
   if (!token) return { valid: false, reason: 'invalid' };
   try {
+    const now = Date.now();
+    const cached = sessionCache.get(token);
+
+    // Fast-path: return immediately from in-memory cache if checked within TTL
+    if (cached && (now - cached.cachedAt < SESSION_CACHE_TTL_MS)) {
+      if (now >= cached.expiresTime) {
+        sessionCache.delete(token);
+        destroySession(token).catch(() => {});
+        return { valid: false, reason: 'session_timeout' };
+      }
+      const idleElapsedMs = now - cached.lastActivityTime;
+      if (idleElapsedMs >= INACTIVITY_TIMEOUT_MS) {
+        sessionCache.delete(token);
+        destroySession(token).catch(() => {});
+        return { valid: false, reason: 'inactivity' };
+      }
+      return {
+        valid: true,
+        remainingSessionMs: Math.max(0, cached.expiresTime - now),
+        remainingIdleMs: Math.max(0, INACTIVITY_TIMEOUT_MS - idleElapsedMs)
+      };
+    }
+
     const res = await execute(
       `SELECT token, created_at, expires_at, last_activity_at FROM user_sessions WHERE token = ?`,
       [token]
     );
     if (!res.rows || res.rows.length === 0) {
+      sessionCache.delete(token);
       return { valid: false, reason: 'invalid' };
     }
 
     const session = res.rows[0];
-    const now = Date.now();
 
     const parseDbDate = (val) => {
       if (!val) return null;
@@ -219,6 +267,7 @@ async function validateSession(token) {
 
     // Check 1: 30-minute absolute forced session ceiling
     if (now >= expiresTime) {
+      sessionCache.delete(token);
       await destroySession(token);
       return { valid: false, reason: 'session_timeout' };
     }
@@ -226,22 +275,27 @@ async function validateSession(token) {
     // Check 2: 5-minute idle inactivity timeout
     const idleElapsedMs = now - lastActivityTime;
     if (idleElapsedMs >= INACTIVITY_TIMEOUT_MS) {
+      sessionCache.delete(token);
       await destroySession(token);
       return { valid: false, reason: 'inactivity' };
     }
 
-    // Touch last_activity_at if > 5 seconds have elapsed since last write
-    if (idleElapsedMs > 5000) {
-      try {
-        const currentIso = new Date().toISOString();
-        await execute(
-          `UPDATE user_sessions SET last_activity_at = ? WHERE token = ?`,
-          [currentIso, token]
-        );
-      } catch (err) {
-        console.error('Failed to update session activity:', err.message);
-      }
+    // Touch last_activity_at asynchronously if > 15 seconds have elapsed since last write
+    if (idleElapsedMs > 15000) {
+      const currentIso = new Date().toISOString();
+      execute(
+        `UPDATE user_sessions SET last_activity_at = ? WHERE token = ?`,
+        [currentIso, token]
+      ).catch(err => console.error('Failed to update session activity:', err.message));
     }
+
+    // Store in hot session cache
+    sessionCache.set(token, {
+      expiresTime,
+      createdAtTime,
+      lastActivityTime: Math.max(lastActivityTime, now),
+      cachedAt: now
+    });
 
     const remainingSessionMs = Math.max(0, expiresTime - now);
     const remainingIdleMs = Math.max(0, INACTIVITY_TIMEOUT_MS - idleElapsedMs);
@@ -262,6 +316,7 @@ async function validateSession(token) {
  */
 async function destroySession(token) {
   if (!token) return;
+  sessionCache.delete(token);
   try {
     await execute(`DELETE FROM user_sessions WHERE token = ?`, [token]);
   } catch (err) {
@@ -309,5 +364,6 @@ module.exports = {
   createSession,
   validateSession,
   destroySession,
-  extractTokenFromReq
+  extractTokenFromReq,
+  invalidateAuthConfigCache
 };

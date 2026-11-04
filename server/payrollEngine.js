@@ -66,9 +66,9 @@ function calculateWorkerPayroll({
   let totalWorkedHours = 0;
 
   dailyRecords.forEach(rec => {
-    totalOtHours += (rec.ot_hours || rec.otHours || 0);
-    totalSundayOtHours += (rec.sunday_ot_hours || rec.sundayOtHours || 0);
-    totalWorkedHours += (rec.total_hours || rec.totalHours || 0);
+    totalOtHours += parseFloat(rec.ot_hours || rec.otHours || 0) || 0;
+    totalSundayOtHours += parseFloat(rec.sunday_ot_hours || rec.sundayOtHours || 0) || 0;
+    totalWorkedHours += parseFloat(rec.total_hours || rec.totalHours || 0) || 0;
 
     const st = rec.status || '';
     if (st.includes('Weekly Off (Worked OT)')) {

@@ -10,7 +10,7 @@
     "test": "node tests/attendance_lunch_hours.test.js"
   },
   "dependencies": {
-    "@libsql/client": "^0.14.0",
+    "@supabase/supabase-js": "^2.118.0",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "body-parser": "^1.20.3",
@@ -25,6 +25,7 @@
     "mammoth": "^1.9.0",
     "multer": "^1.4.5-lts.1",
     "otplib": "^13.5.0",
+    "pg": "^8.23.1",
     "postcss": "^8.4.49",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",

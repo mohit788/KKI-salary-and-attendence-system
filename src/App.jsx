@@ -42,7 +42,7 @@ export default function App() {
 
   // Month Selection State
   const [selectedMonth, setSelectedMonth] = useState(() => {
-    return localStorage.getItem('kki_selected_month') || 'all';
+    return localStorage.getItem('kki_selected_month') || '2026-10';
   });
   const [availableMonths, setAvailableMonths] = useState([]);
 
@@ -103,7 +103,16 @@ export default function App() {
       if (setRes && setRes.success) setSettingsList(setRes.settings || []);
       if (auditRes && auditRes.success) setAuditLogs(auditRes.auditLogs || []);
       if (attAllRes && attAllRes.success) setAllAttendance(attAllRes.records || []);
-      if (monthsRes && monthsRes.success) setAvailableMonths(monthsRes.months || []);
+      if (monthsRes && monthsRes.success) {
+        const monthsList = monthsRes.months || [];
+        setAvailableMonths(monthsList);
+        const validKeys = monthsList.map(m => m.monthKey || m.month_key);
+        if (activeM !== 'all' && validKeys.length > 0 && !validKeys.includes(activeM)) {
+          const fallbackMonth = validKeys[0];
+          setSelectedMonth(fallbackMonth);
+          localStorage.setItem('kki_selected_month', fallbackMonth);
+        }
+      }
 
       if (selectedStaffNo) {
         fetchWorkerDetail(selectedStaffNo, activeM);
@@ -634,6 +643,7 @@ export default function App() {
             availableMonths={availableMonths}
             onSelectMonth={handleSelectMonth}
             onRefreshData={refreshData}
+            loading={loading}
           />
         )}
 

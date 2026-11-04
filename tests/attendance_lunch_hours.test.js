@@ -92,3 +92,4 @@ if (failed > 0) {
 } else {
   console.log('🎉 ALL ATTENDANCE LUNCH TESTS PASSED!\n');
 }
+

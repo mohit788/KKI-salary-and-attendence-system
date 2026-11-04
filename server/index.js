@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const { execute, batch, initDatabase, backupDatabaseToSeed } = require('./db');
+const { execute, batch, initDatabase, backupDatabaseToSeed, setCacheInvalidator } = require('./db');
 const {
   queryCloud,
   syncAttendanceToCloud,
@@ -105,30 +105,94 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
 });
 
-// Helper: Fetch all settings as key-value map
+// ==========================================
+// --- Ultra-Fast In-Memory Caching Layer ---
+// ==========================================
+const memoryCache = {
+  settings: null,
+  settingsExpiresAt: 0,
+  salaryRules: null,
+  salaryRulesExpiresAt: 0,
+  customRules: null,
+  customRulesExpiresAt: 0,
+  calendarMap: null,
+  calendarMapExpiresAt: 0,
+  months: null,
+  monthsExpiresAt: 0,
+  dashboard: new Map(),
+  workers: new Map(),
+};
+
+function invalidateAppCache() {
+  memoryCache.settings = null;
+  memoryCache.settingsExpiresAt = 0;
+  memoryCache.salaryRules = null;
+  memoryCache.salaryRulesExpiresAt = 0;
+  memoryCache.customRules = null;
+  memoryCache.customRulesExpiresAt = 0;
+  memoryCache.calendarMap = null;
+  memoryCache.calendarMapExpiresAt = 0;
+  memoryCache.months = null;
+  memoryCache.monthsExpiresAt = 0;
+  memoryCache.dashboard.clear();
+  memoryCache.workers.clear();
+  if (auth && typeof auth.invalidateAuthConfigCache === 'function') {
+    auth.invalidateAuthConfigCache();
+  }
+}
+
+if (typeof setCacheInvalidator === 'function') {
+  setCacheInvalidator(invalidateAppCache);
+}
+
+// Helper: Fetch all settings as key-value map (Cached with 60s TTL)
 async function getSettingsMap() {
+  const now = Date.now();
+  if (memoryCache.settings && now < memoryCache.settingsExpiresAt) {
+    return { ...memoryCache.settings };
+  }
   const rows = await execute(`SELECT key, value FROM settings`);
   const settings = {};
   rows.rows.forEach(r => {
     settings[r.key] = r.value;
   });
-  return settings;
+  memoryCache.settings = settings;
+  memoryCache.settingsExpiresAt = now + 60000;
+  return { ...settings };
 }
 
-// Helper: Fetch active custom rules (timing-based)
+// Helper: Fetch active custom rules (timing-based, cached)
 async function getCustomRules() {
+  const now = Date.now();
+  if (memoryCache.customRules && now < memoryCache.customRulesExpiresAt) {
+    return [...memoryCache.customRules];
+  }
   const res = await execute(`SELECT * FROM custom_rules WHERE is_active = 1`);
-  return res.rows || [];
+  const rules = res.rows || [];
+  memoryCache.customRules = rules;
+  memoryCache.customRulesExpiresAt = now + 60000;
+  return [...rules];
 }
 
-// Helper: Fetch active custom salary rules (bonus/deduction)
+// Helper: Fetch active custom salary rules (bonus/deduction, cached)
 async function getSalaryRules() {
+  const now = Date.now();
+  if (memoryCache.salaryRules && now < memoryCache.salaryRulesExpiresAt) {
+    return [...memoryCache.salaryRules];
+  }
   const res = await execute(`SELECT * FROM custom_salary_rules WHERE is_active = 1`);
-  return res.rows || [];
+  const rules = res.rows || [];
+  memoryCache.salaryRules = rules;
+  memoryCache.salaryRulesExpiresAt = now + 60000;
+  return [...rules];
 }
 
-// Helper: Fetch all configured Factory Calendar Overrides (YYYY-MM-DD -> { id, date, day_type, title, notes, is_recurring })
+// Helper: Fetch all configured Factory Calendar Overrides (cached)
 async function getFactoryCalendarMap() {
+  const now = Date.now();
+  if (memoryCache.calendarMap && now < memoryCache.calendarMapExpiresAt) {
+    return { ...memoryCache.calendarMap };
+  }
   try {
     const res = await execute(`SELECT * FROM factory_calendar ORDER BY date ASC`);
     const map = {};
@@ -142,7 +206,9 @@ async function getFactoryCalendarMap() {
         is_recurring: r.is_recurring ? 1 : 0
       };
     });
-    return map;
+    memoryCache.calendarMap = map;
+    memoryCache.calendarMapExpiresAt = now + 60000;
+    return { ...map };
   } catch (e) {
     return {};
   }
@@ -904,21 +970,31 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       }
     }
 
-    // Shield 1: Clean overwrite ONLY for non-overridden records of the exact dates present in the uploaded file
-    // CRITICAL: NEVER delete future dates of the month that are not in the uploaded file!
-    if (datesSet.size > 0) {
+    // Shield 1: Clean overwrite ONLY for non-overridden records of the exact workers & dates in the uploaded file
+    // CRITICAL: Protect other workers who are not in this file from being wiped out!
+    if (datesSet.size > 0 && parsedWorkers.length > 0) {
       const datesArray = Array.from(datesSet);
-      for (let i = 0; i < datesArray.length; i += 50) {
-        const chunk = datesArray.slice(i, i + 50);
-        const placeholders = chunk.map(() => '?').join(',');
-        await execute(`DELETE FROM daily_attendance WHERE date IN (${placeholders}) AND (is_manual_override = 0 OR is_manual_override IS NULL)`, chunk);
-        await execute(`DELETE FROM raw_punches WHERE date IN (${placeholders})`, chunk);
+      const staffArray = parsedWorkers.map(w => w.staff_no).filter(Boolean);
+      if (staffArray.length > 0) {
+        const staffPlaceholders = staffArray.map(() => '?').join(',');
+        for (let i = 0; i < datesArray.length; i += 50) {
+          const chunk = datesArray.slice(i, i + 50);
+          const datePlaceholders = chunk.map(() => '?').join(',');
+          await execute(
+            `DELETE FROM daily_attendance WHERE staff_no IN (${staffPlaceholders}) AND date IN (${datePlaceholders}) AND (is_manual_override = 0 OR is_manual_override IS NULL)`,
+            [...staffArray, ...chunk]
+          );
+          await execute(
+            `DELETE FROM raw_punches WHERE staff_no IN (${staffPlaceholders}) AND date IN (${datePlaceholders})`,
+            [...staffArray, ...chunk]
+          );
+        }
       }
     }
 
-    // High-speed chunked batch execution (chunks of 150 statements)
-    for (let i = 0; i < dbStatements.length; i += 150) {
-      const chunk = dbStatements.slice(i, i + 150);
+    // High-speed chunked batch execution (chunks of 500 statements)
+    for (let i = 0; i < dbStatements.length; i += 500) {
+      const chunk = dbStatements.slice(i, i + 500);
       await batch(chunk);
     }
 
@@ -928,23 +1004,6 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const sortedDates = Array.from(datesSet).sort();
     const startDate = sortedDates[0] || '';
     const endDate = sortedDates[sortedDates.length - 1] || '';
-
-    // Async background sync to cloud database (non-blocking)
-    try {
-      if (startDate && endDate) {
-        execute(`SELECT * FROM daily_attendance WHERE date >= ? AND date <= ?`, [startDate, endDate]).then(res => {
-          if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
-        }).catch(() => {});
-        execute(`SELECT * FROM raw_punches WHERE date >= ? AND date <= ?`, [startDate, endDate]).then(res => {
-          if (res.rows && res.rows.length > 0) syncRawPunchesToCloud(res.rows).catch(() => {});
-        }).catch(() => {});
-        execute(`SELECT * FROM workers`).then(res => {
-          if (res.rows && res.rows.length > 0) {
-            for (const w of res.rows) syncWorkerToCloud(w).catch(() => {});
-          }
-        }).catch(() => {});
-      }
-    } catch (syncErr) {}
 
     const detectedMonth = detectActiveMonthDetails(startDate, endDate);
 
@@ -1058,19 +1117,12 @@ app.post('/api/upload/commit', async (req, res) => {
       }
     }
 
-    for (let i = 0; i < dbStatements.length; i += 150) {
-      const chunk = dbStatements.slice(i, i + 150);
+    for (let i = 0; i < dbStatements.length; i += 500) {
+      const chunk = dbStatements.slice(i, i + 500);
       await batch(chunk);
     }
 
     await backupDatabaseToSeed();
-
-    // Background cloud sync
-    try {
-      execute(`SELECT * FROM daily_attendance ORDER BY date DESC LIMIT 1000`).then(res => {
-        if (res.rows && res.rows.length > 0) syncAttendanceToCloud(res.rows).catch(() => {});
-      }).catch(() => {});
-    } catch (e) {}
 
     res.json({ success: true, message: `Successfully committed ${parsedData.length} workers to database.` });
   } catch (err) {
@@ -1160,6 +1212,7 @@ app.post('/api/attendance/clear-range', async (req, res) => {
 
 // Helper: Recompute all daily attendance with current settings
 async function recomputeAllAttendance() {
+  invalidateAppCache();
   const settings = await getSettingsMap();
   const customRules = await getCustomRules();
   const factoryCalendarMap = await getFactoryCalendarMap();
@@ -1243,19 +1296,28 @@ async function recomputeAllAttendance() {
 
     for (const d of finalProcessed) {
       await execute(
-        `UPDATE daily_attendance SET
-           effective_in = CASE WHEN is_manual_override = 1 THEN effective_in ELSE ? END,
-           effective_out = CASE WHEN is_manual_override = 1 THEN effective_out ELSE ? END,
-           regular_hours = CASE WHEN is_manual_override = 1 THEN regular_hours ELSE ? END,
-           ot_hours = CASE WHEN is_manual_override = 1 THEN ot_hours ELSE ? END,
-           sunday_ot_hours = CASE WHEN is_manual_override = 1 THEN sunday_ot_hours ELSE ? END,
-           total_hours = CASE WHEN is_manual_override = 1 THEN total_hours ELSE ? END,
-           late_minutes = CASE WHEN is_manual_override = 1 THEN late_minutes ELSE ? END,
-           shift = CASE WHEN is_manual_override = 1 THEN shift ELSE ? END,
-           status = CASE WHEN is_manual_override = 1 THEN status ELSE ? END,
-           forfeiture_reason = CASE WHEN is_manual_override = 1 THEN forfeiture_reason ELSE ? END
-         WHERE staff_no = ? AND date = ?`,
+        `INSERT INTO daily_attendance (
+           staff_no, date, weekday, raw_swipes, original_raw_swipes, manual_punches,
+           effective_in, effective_out, regular_hours, ot_hours, sunday_ot_hours, total_hours,
+           late_minutes, status, shift, is_manual_override, override_reason, forfeiture_reason
+         ) VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', ?)
+         ON CONFLICT(staff_no, date) DO UPDATE SET
+           effective_in = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_in ELSE excluded.effective_in END,
+           effective_out = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.effective_out ELSE excluded.effective_out END,
+           regular_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.regular_hours ELSE excluded.regular_hours END,
+           ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.ot_hours ELSE excluded.ot_hours END,
+           sunday_ot_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.sunday_ot_hours ELSE excluded.sunday_ot_hours END,
+           total_hours = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.total_hours ELSE excluded.total_hours END,
+           late_minutes = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.late_minutes ELSE excluded.late_minutes END,
+           shift = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.shift ELSE excluded.shift END,
+           status = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.status ELSE excluded.status END,
+           forfeiture_reason = CASE WHEN daily_attendance.is_manual_override = 1 THEN daily_attendance.forfeiture_reason ELSE excluded.forfeiture_reason END`,
         [
+          d.staff_no,
+          d.date,
+          d.weekday || '',
+          d.raw_swipes || '',
+          d.original_raw_swipes || d.raw_swipes || '',
           d.effectiveIn || d.effective_in || '',
           d.effectiveOut || d.effective_out || '',
           d.regularHours || d.regular_hours || 0,
@@ -1263,11 +1325,9 @@ async function recomputeAllAttendance() {
           d.sundayOtHours || d.sunday_ot_hours || 0,
           d.totalHours || d.total_hours || 0,
           d.lateMinutes || d.late_minutes || 0,
-          d.shift || '08:00',
           d.status || 'Absent',
-          d.forfeiture_reason || d.forfeitureReason || '',
-          d.staff_no,
-          d.date
+          d.shift || '08:00',
+          d.forfeiture_reason || d.forfeitureReason || ''
         ]
       );
     }
@@ -1309,9 +1369,13 @@ app.post('/api/attendance/recalculate', async (req, res) => {
   }
 });
 
-// 4b. GET All Available Uploaded Months
+// 4b. GET All Available Uploaded Months (Cached with 60s TTL)
 app.get('/api/months', async (req, res) => {
   try {
+    const now = Date.now();
+    if (memoryCache.months && now < memoryCache.monthsExpiresAt) {
+      return res.json({ success: true, months: memoryCache.months });
+    }
     const rowsRes = await execute(`
       SELECT DISTINCT SUBSTR(date, 1, 7) as month_key 
       FROM daily_attendance 
@@ -1333,6 +1397,8 @@ app.get('/api/months', async (req, res) => {
         monthName: name,
       };
     });
+    memoryCache.months = months;
+    memoryCache.monthsExpiresAt = now + 60000;
     res.json({ success: true, months });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1632,6 +1698,13 @@ app.get('/api/attendance/all', async (req, res) => {
 app.get('/api/workers', async (req, res) => {
   try {
     const { month } = req.query;
+    const cacheKey = month || 'all';
+    const now = Date.now();
+    const cached = memoryCache.workers.get(cacheKey);
+    if (cached && now < cached.expiresAt) {
+      return res.json(cached.data);
+    }
+
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
 
@@ -1740,7 +1813,9 @@ app.get('/api/workers', async (req, res) => {
       };
     });
 
-    res.json({ success: true, workers: resultList });
+    const workersPayload = { success: true, workers: resultList };
+    memoryCache.workers.set(cacheKey, { data: workersPayload, expiresAt: now + 30000 });
+    res.json(workersPayload);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -2061,7 +2136,7 @@ app.post('/api/attendance/edit', async (req, res) => {
        ON CONFLICT(staff_no, date) DO UPDATE SET swipe_record = excluded.swipe_record`,
       [staff_no, date, oldRec.weekday || '', effectiveSwipes]
     );
-    syncRawPunchesToCloud([{ staff_no, date, weekday: oldRec.weekday || '', swipe_record: effectiveSwipes }]).catch(() => {});
+    await syncRawPunchesToCloud([{ staff_no, date, weekday: oldRec.weekday || '', swipe_record: effectiveSwipes }]);
 
     // Identify which tokens are manually added
     const originalSwipesStr = oldRec.original_raw_swipes || oldRec.raw_swipes || '';
@@ -2071,13 +2146,32 @@ app.post('/api/attendance/edit', async (req, res) => {
     const manualPunchesStr = addedTokens.join(' ');
     const finalOrigSwipes = oldRec.original_raw_swipes || oldRec.raw_swipes || effectiveSwipes;
 
-    // Update Daily Attendance
+    // Upsert Daily Attendance (guarantees record exists even if not previously in daily_attendance)
     await execute(
-      `UPDATE daily_attendance SET
-         raw_swipes = ?, original_raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
-         late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?, manual_punches = ?
-       WHERE staff_no = ? AND date = ?`,
+      `INSERT INTO daily_attendance (
+         staff_no, date, weekday, raw_swipes, original_raw_swipes, effective_in, effective_out,
+         regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift,
+         is_manual_override, override_reason, manual_punches
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+       ON CONFLICT(staff_no, date) DO UPDATE SET
+         raw_swipes = excluded.raw_swipes,
+         original_raw_swipes = excluded.original_raw_swipes,
+         effective_in = excluded.effective_in,
+         effective_out = excluded.effective_out,
+         regular_hours = excluded.regular_hours,
+         ot_hours = excluded.ot_hours,
+         sunday_ot_hours = excluded.sunday_ot_hours,
+         total_hours = excluded.total_hours,
+         late_minutes = excluded.late_minutes,
+         status = excluded.status,
+         shift = excluded.shift,
+         is_manual_override = 1,
+         override_reason = excluded.override_reason,
+         manual_punches = excluded.manual_punches`,
       [
+        staff_no,
+        date,
+        oldRec.weekday || computed.weekday || '',
         effectiveSwipes,
         finalOrigSwipes,
         effectiveIn,
@@ -2091,8 +2185,6 @@ app.post('/api/attendance/edit', async (req, res) => {
         computed.shift || '08:00',
         reason || 'Manual correction',
         manualPunchesStr,
-        staff_no,
-        date,
       ]
     );
 
@@ -2338,11 +2430,30 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
       const finalOrigSwipes = oldRec.original_raw_swipes || oldRec.raw_swipes || effectiveSwipes;
 
       await execute(
-        `UPDATE daily_attendance SET
-           raw_swipes = ?, original_raw_swipes = ?, effective_in = ?, effective_out = ?, regular_hours = ?, ot_hours = ?, sunday_ot_hours = ?, total_hours = ?,
-           late_minutes = ?, status = ?, shift = ?, is_manual_override = 1, override_reason = ?, manual_punches = ?
-         WHERE staff_no = ? AND date = ?`,
+        `INSERT INTO daily_attendance (
+           staff_no, date, weekday, raw_swipes, original_raw_swipes, effective_in, effective_out,
+           regular_hours, ot_hours, sunday_ot_hours, total_hours, late_minutes, status, shift,
+           is_manual_override, override_reason, manual_punches
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT(staff_no, date) DO UPDATE SET
+           raw_swipes = excluded.raw_swipes,
+           original_raw_swipes = excluded.original_raw_swipes,
+           effective_in = excluded.effective_in,
+           effective_out = excluded.effective_out,
+           regular_hours = excluded.regular_hours,
+           ot_hours = excluded.ot_hours,
+           sunday_ot_hours = excluded.sunday_ot_hours,
+           total_hours = excluded.total_hours,
+           late_minutes = excluded.late_minutes,
+           status = excluded.status,
+           shift = excluded.shift,
+           is_manual_override = 1,
+           override_reason = excluded.override_reason,
+           manual_punches = excluded.manual_punches`,
         [
+          staff_no,
+          date,
+          oldRec.weekday || computed.weekday || '',
           effectiveSwipes,
           finalOrigSwipes,
           effectiveIn,
@@ -2356,8 +2467,6 @@ app.post('/api/attendance/bulk-edit', async (req, res) => {
           computed.shift || '08:00',
           item.reason || reason || 'Fast-Fix Resolution',
           manualPunchesStr,
-          staff_no,
-          date,
         ]
       );
 
@@ -2553,9 +2662,16 @@ function detectActiveMonthDetails(minDate, maxDate) {
 // 10. GET Dashboard Metrics (OPTIMIZED - Parallel Batch Fetch with Active Month Detection, optional ?month=YYYY-MM)
 app.get('/api/dashboard', async (req, res) => {
   try {
+    const { month } = req.query;
+    const cacheKey = month || 'all';
+    const now = Date.now();
+    const cached = memoryCache.dashboard.get(cacheKey);
+    if (cached && now < cached.expiresAt) {
+      return res.json(cached.data);
+    }
+
     const settings = await getSettingsMap();
     const salaryRules = await getSalaryRules();
-    const { month } = req.query;
 
     const isMonthFiltered = month && month !== 'all';
     const dateCond = isMonthFiltered ? ` WHERE date LIKE ? ` : '';
@@ -2612,15 +2728,16 @@ app.get('/api/dashboard', async (req, res) => {
         )
       `;
 
-    // Execute all count queries in parallel
-    const [workersCountRes, recordsCountRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes] = await Promise.all([
+    // Execute all count queries and incomplete calculation in parallel
+    const [workersCountRes, recordsCountRes, statusCountsRes, workersRes, allAttendanceRes, allAdvancesRes, dateBoundsRes, incompleteCount] = await Promise.all([
       execute(workersCountSql, isMonthFiltered ? [`${month}%`] : []),
       execute(`SELECT COUNT(*) as cnt FROM daily_attendance ${whereDaily}`, dateParams),
       execute(`SELECT status, COUNT(*) as cnt FROM daily_attendance ${whereDaily} GROUP BY status`, dateParams),
       execute(workersSql, isMonthFiltered ? [`${month}%`] : []),
       execute(`SELECT * FROM daily_attendance ${whereDaily} ORDER BY staff_no`, dateParams),
       execute(`SELECT * FROM advances ${whereAdvances} ORDER BY staff_no`, dateParams),
-      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance ${whereBounds}`, isMonthFiltered ? [`${month}%`] : [])
+      execute(`SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_attendance ${whereBounds}`, isMonthFiltered ? [`${month}%`] : []),
+      getTrueIncompleteCount(month)
     ]);
 
     const totalWorkers = workersCountRes.rows[0]?.cnt || 0;
@@ -2647,9 +2764,6 @@ app.get('/api/dashboard', async (req, res) => {
     } else {
       activeMonth = detectActiveMonthDetails(minDate, maxDate);
     }
-
-    // Calculate verified true incomplete count
-    const incompleteCount = await getTrueIncompleteCount(month);
 
     const statusBreakdown = {};
     statusCountsRes.rows.forEach(r => { statusBreakdown[r.status] = r.cnt; });
@@ -2694,7 +2808,7 @@ app.get('/api/dashboard', async (req, res) => {
       grandNet += p.netPayable;
     });
 
-    res.json({
+    const dashPayload = {
       success: true,
       metrics: {
         totalWorkers,
@@ -2706,7 +2820,9 @@ app.get('/api/dashboard', async (req, res) => {
         statusBreakdown,
         activeMonth,
       },
-    });
+    };
+    memoryCache.dashboard.set(cacheKey, { data: dashPayload, expiresAt: now + 30000 });
+    res.json(dashPayload);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

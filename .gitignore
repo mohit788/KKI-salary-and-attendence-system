@@ -11,7 +11,7 @@ data/*.sqlite
 data/*.db-journal
 data/backups/
 *.db
-!data/attendance.db
+data/attendance.db
 
 # Temporary uploaded files
 uploads/*

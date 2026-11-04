@@ -24,7 +24,8 @@ import {
   Lock,
   Unlock,
   Star,
-  ShieldCheck
+  ShieldCheck,
+  RefreshCw
 } from 'lucide-react';
 import { formatHours } from '../utils/formatters';
 import ExceptionManagerModal from './ExceptionManagerModal';
@@ -43,7 +44,8 @@ export default function Dashboard({
   selectedMonth,
   availableMonths = [],
   onSelectMonth,
-  onRefreshData
+  onRefreshData,
+  loading = false
 }) {
   const [dragActive, setDragActive] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -77,7 +79,9 @@ export default function Dashboard({
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      onUploadFile(e.target.files[0]);
+      const file = e.target.files[0];
+      e.target.value = ''; // Reset so selecting the same file triggers change again
+      onUploadFile(file);
     }
   };
 
@@ -213,11 +217,13 @@ export default function Dashboard({
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${dragActive
-                ? 'border-blue-400 bg-blue-950/40 scale-[0.99]'
-                : 'border-slate-600 hover:border-blue-400 bg-slate-950/60 hover:bg-slate-950'
-              }`}
-            onClick={() => document.getElementById('biometric-file-input').click()}
+            className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+              loading ? 'border-blue-400 bg-blue-950/60 cursor-wait' :
+              dragActive
+                ? 'border-blue-400 bg-blue-950/40 scale-[0.99] cursor-pointer'
+                : 'border-slate-600 hover:border-blue-400 bg-slate-950/60 hover:bg-slate-950 cursor-pointer'
+            }`}
+            onClick={() => { if (!loading) document.getElementById('biometric-file-input').click(); }}
           >
             <input
               id="biometric-file-input"
@@ -225,16 +231,33 @@ export default function Dashboard({
               accept=".xlsx,.xls,.docx,.doc"
               className="hidden"
               onChange={handleFileChange}
+              disabled={loading}
             />
-            <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-blue-900/60 text-blue-300 border border-blue-600 flex items-center justify-center shadow-md">
-              <UploadCloud className="w-8 h-8" />
-            </div>
-            <p className="text-base font-bold text-white mb-1">
-              Click to select or Drag & Drop punch report file here
-            </p>
-            <p className="text-sm text-slate-300">
-              Auto-detects shifts, monthly calendar days, 30m grace slabs & overtime.
-            </p>
+            {loading ? (
+              <div className="py-2 animate-in fade-in duration-200">
+                <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-blue-600/30 text-blue-300 border border-blue-400 flex items-center justify-center shadow-lg animate-spin">
+                  <RefreshCw className="w-8 h-8" />
+                </div>
+                <p className="text-base font-bold text-blue-300 mb-1 animate-pulse">
+                  Uploading & Processing Attendance File...
+                </p>
+                <p className="text-xs text-slate-300">
+                  Parsing punch records, applying grace slabs & OT rules directly to cloud database. Please wait...
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="w-14 h-14 mx-auto mb-3 rounded-2xl bg-blue-900/60 text-blue-300 border border-blue-600 flex items-center justify-center shadow-md">
+                  <UploadCloud className="w-8 h-8" />
+                </div>
+                <p className="text-base font-bold text-white mb-1">
+                  Click to select or Drag & Drop punch report file here
+                </p>
+                <p className="text-sm text-slate-300">
+                  Auto-detects shifts, monthly calendar days, 30m grace slabs & overtime.
+                </p>
+              </>
+            )}
           </div>
         </div>
 
